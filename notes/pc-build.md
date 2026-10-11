@@ -393,10 +393,13 @@ and still counts their rectangle in `Hud_Bounds`) and `Menu_Draw`. A mod's
 full-screen panel (a drop list on Triangle, say) used to cover the pad, so
 the player could not see where to tap; the pad's touches always reached it
 (`TouchPad_Finger` runs in the event pump, and mods take no touch). So,
-with the pad, the order from the bottom is: picture, mods, pad, the HUD
-(frame rate, fusion helper, rank meter, Free Duel progress, title text),
-the save/deck slot menus, the menu bar. Without the pad (`TouchPad_Shown`
-0: every desktop without a touch) the mods keep their place in `Hud_Draw`,
+with the pad, the order from the bottom is: picture, mods, pad, then the
+HUD (frame rate, fusion helper, rank meter, Free Duel progress, title
+text) with the save/deck slot menus over it, and the menu bar (over the
+HUD while a menu is open or the full statistics show, under it otherwise,
+as before). Without the pad (`TouchPad_Shown` 0: a desktop unless View >
+Touch controls is Show, or Automatic after a touch on a touch screen) the
+mods keep their place in `Hud_Draw`,
 over the HUD and under the slot menus: window shots of the 32-bit build
 with a full-screen test overlay at the title (`MEMORIES_WINDOW_SHOT`,
 deterministic, stepped by `yfm_control.py`) are byte-identical to
@@ -411,9 +414,11 @@ so its panel either spans the pad (now under it, the buttons see-through
 over it) or guesses. A host entry at the end of `MemoriesModHost` (a new
 API number), `overlay_free_span(host, &left, &right)`, valid inside the
 overlay callback and giving the whole width when the pad is hidden, would
-let a mod lay out between the pad's columns; the pad showing or hiding
-would then have to change `Mods_OverlaySignature` (or the mod's signature
-would read the span), so the overlay is drawn again when it moves.
+let a mod lay out between the pad's columns. The pad showing, hiding or
+moving already recomposes the overlay (`menu_dirty`), which runs every
+overlay callback again, so the span read there is always current; only a
+mod that keeps a layout worked out outside the callback would need to
+watch it.
 
 Esc quits (it closes an open menu first): it is the default key of Game >
 Controls' **Exit game**. With **File > Confirm before quitting** on (the

@@ -1313,7 +1313,7 @@ with real time instead of synthetic steps.
 
 The watching thread (`Win32_StartWatch`) has no 1 ms timer: it waits on its
 stop event for 100 ms at a time, checks the heartbeat and goes back to
-sleep, at `THREAD_PRIORITY_HIGHEST`, which is above every game thread and
+sleep, at `THREAD_PRIORITY_HIGHEST`, which is above the main thread's and
 so still runs while the main thread spins. Until 2026-10-11 it kept the
 interrupt clock's 1 ms high-resolution timer at `TIME_CRITICAL` and only
 skipped the tick, waking about 700 times a second for nothing. Measured in a
@@ -1328,14 +1328,16 @@ two runs each on 32-bit and four on 64-bit; thread figures from
 
 A stall is still reported about 5 s after the last VSync
 (`MEMORIES_CRASH_TEST=hang` and `spin`, both builds, `hang-<pid>.txt` and
-`.dmp`): 5.06-5.11 s against 4.99-5.01 s before, at most 100 ms later.
+`.dmp`): 5.06-5.11 s against 4.99-5.01 s before, at most about two
+periods (0.2 s) later.
 Frame pacing does not depend on that timer: `Platform_WaitVBlank`'s 0.5 ms
 `nanosleep` returns at once with winpthreads (it sleeps whole milliseconds,
 rounded down), so the main thread polls the time, and SDL holds the
 process's timer resolution at 1 ms (`timeBeginPeriod`). VBlanks stayed at
 59.94 a second and the sequencer's mean lateness at 52-91 us either way.
-`MEMORIES_CLOCK=interrupt` keeps the 1 ms timer at `TIME_CRITICAL` (about
-2600 suspends a second, as before).
+`MEMORIES_CLOCK=interrupt` keeps the 1 ms timer at `TIME_CRITICAL` (its
+thread at about 2600 context switches a second, as before, suspending the
+main thread on each wakeup).
 
 Why it holds: every loop in which the game waits for something its interrupt
 code sets goes through one of those calls (`Main_AdvanceFrame`, the VBlank

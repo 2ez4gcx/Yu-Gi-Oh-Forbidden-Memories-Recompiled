@@ -142,8 +142,9 @@ int Memories_SigProcMask(int how, const sigset_t *set, sigset_t *previous)
 static volatile LONG clock_stop;
 static int watch_only; /* the cooperative clock: the thread reports stalls and never touches the main thread */
 static HANDLE clock_thread;
-/* The watch alone wakes this often (the stall is seconds long, so a report
- * comes at most this much late), and Win32_StopInterrupt wakes it at once. */
+/* The watch alone wakes this often (the stall is seconds long; a report
+ * comes at most about two periods late), and Win32_StopInterrupt wakes it
+ * at once. */
 #define WATCH_PERIOD_MS 100
 static HANDLE watch_stop;
 
@@ -184,9 +185,13 @@ static DWORD WINAPI run_clock(void *unused)
     LARGE_INTEGER due;
     (void)unused;
     if (watch_only) {
-        /* Nothing to deliver: no 1 kHz timer, which woke this thread at
-         * the highest priority a thousand times a second for the watch. */
-        while (WaitForSingleObject(watch_stop, WATCH_PERIOD_MS) == WAIT_TIMEOUT && !clock_stop) watch_for_stall();
+        /* Nothing to deliver: no 1 ms timer, which woke this thread at the
+         * highest priority every millisecond for the watch. */
+        DWORD woke;
+        while ((woke = WaitForSingleObject(watch_stop, WATCH_PERIOD_MS)) == WAIT_TIMEOUT && !clock_stop) {
+            watch_for_stall();
+        }
+        if (woke == WAIT_FAILED) fprintf(stderr, "memories-pc: stall watch failed (error %lu)\n", GetLastError());
         return 0;
     }
     timer = CreateWaitableTimerExW(NULL, NULL, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS);
@@ -330,7 +335,7 @@ int Win32_StartInterrupt(void (*tick)(uintptr_t eip, void *context))
     if (!thread) return -1;
     /* The interrupt clock must preempt the game every millisecond. The
      * watch needs only to run while the main thread spins, which a priority
-     * above the game's threads ensures. */
+     * above the main thread's ensures. */
     SetThreadPriority(thread, watch_only ? THREAD_PRIORITY_HIGHEST : THREAD_PRIORITY_TIME_CRITICAL);
     clock_thread = thread;
     atexit(Win32_StopInterrupt);

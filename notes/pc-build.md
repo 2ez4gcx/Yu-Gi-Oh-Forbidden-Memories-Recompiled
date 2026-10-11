@@ -4461,11 +4461,73 @@ are where it would show (a fault at a truncated address).
 
 **The guest's own ranges have the same limit:** guest RAM at 0x80000000
 (and its mirror at 0xA0000000), the scratchpad view at 0x9F800000 and the
-game stack at 0xB0000000 must be free, and with Android 10-13's concurrent
-copying collector a `dalvik.vm.heapsize` of about 870m or more reaches
-0x80000000. The game then stops with "cannot map guest memory at ...", the
-reason, and the mappings that hold the range ("occupied by", in logcat);
-it does not run elsewhere.
+game stack at 0xB0000000 must be free. The game then stops; it does not run
+elsewhere.
+
+**Where ART's concurrent copying collector runs, its large object space
+holds guest RAM (v0.3.0, a Redmi Note 8 Pro with Android 10, 2026-10-11).**
+The heap is laid out once, in the zygote, and every app process inherits
+it. On arm64 ART places its low-4-GB mappings itself (`MemMap`'s low 4 GB
+allocator, a first-fit scan from a random start below 1 GB that goes on
+up to 4 GB) and its large object space is one free-list reservation of
+`dalvik.vm.heapsize` bytes, made after the heap proper (AOSP
+`runtime/gc/heap.cc`, `heap.h`'s `kDefaultLargeObjectSpaceType`, the same
+from Android 7 to 14). With the concurrent copying collector (the default
+from Android 8; Android 7's CMS has the same two-capacity layout) the
+region space is reserved at twice the heap size from 0x12C00000, so with
+the usual `heapsize` of 512m (`phone-xhdpi-*-dalvik-heap.mk`) it ends
+near 0x52C00000, the 484 MiB or less left before the boot image
+(0x70000000 with up to 16 MiB of random shift either way) cannot take
+512 MiB, and the large object space goes right after the boot image and
+the non-moving space: 0x77B8B000-0x97B8B000 in AOSP's own arm64 sample of
+an app's maps (`system/libprocinfo/testdata/maps`), with the JIT caches
+after it to 0x9BB8B000. That holds 0x80000000 and 0x90000000 on every
+start of such a phone, not one boot in some. The Xiaomi 11T Pro above runs
+the userfaultfd collector (`ro.dalvik.vm.enable_uffd_gc`), whose moving
+space is the heap size once (0x02000000-0x22000000), so the large object
+space fits below the boot image (0x42000000) and the game runs. So the
+phones in question are the ones whose ART runs the concurrent copying or
+CMS collector with a heap size of about 490m or more: Android 7 to 11
+(ART is not an updatable module there), and 12 and later where the ART
+module does not use userfaultfd. The x86_64 emulator does not show it
+(x86_64 ART maps with `MAP_32BIT` and a map-per-object large object
+space), so the layout is known from ART's source and that sample, and is
+to be confirmed by a player's report (below). Nothing in the app comes
+before the zygote's heap, and the game's addresses are linked in: the
+ways out are a game process that is not the zygote's child (a native
+process for the game, with the picture and input carried to the app) or
+a guest that is not at fixed addresses.
+
+**Kernels before 4.17 do not know `MAP_FIXED_NOREPLACE`** (Android 7-10
+phones: 3.18, 4.4, 4.9, 4.14) and take the address as a hint: a free range
+is given as asked, a taken one goes wherever the kernel puts it (in a
+64-bit app top-down from below the stack, far above 4 GB, so never onto
+another fixed range). Every fixed mapping of the port goes through
+`Memories_MapFixed` (`compat/mman.h`), which undoes such a mapping and
+answers EEXIST as a newer kernel does; it never checks the range and then
+maps with `MAP_FIXED`, since ART's own threads map below 4 GB in between.
+On such a kernel the message read "the system placed them elsewhere";
+the occupant was the same. `Memories_KernelRefusesTakenRange` (`image.c`)
+probes which kernel this is, for the report.
+
+**What the player sees.** When guest memory cannot be mapped, the app
+shows "The game cannot start" in the system's message box: who holds the
+range (Android's Java runtime when the holder is a `dalvik-` mapping),
+the range, the phone's model, Android and kernel versions, the heap size
+and the first holder, short enough to fit with its buttons in landscape
+(the box does not scroll). Share and Save to Downloads hand out a
+start-up report (`Android_OfferStartupReport`, `android_report.c`; the
+same ReportProvider and MediaStore paths as the crash report, the box
+coming back after each so the process that serves the file stays):
+the app's version, the device, the failed step, the kernel and whether
+it knows `MAP_FIXED_NOREPLACE`, `dalvik.vm.heapsize`, `heapgrowthlimit`
+and `ro.dalvik.vm.enable_uffd_gc`, the holders, and every mapping of the
+process below 4 GB. The loader's own refusal (0xC0000000 taken) puts the
+device and the first two holders in its message the same way. In a test
+build, `MEMORIES_TEST_HOLD_GUEST=1` (or an address) holds 2 MiB at
+0x80000000 named as ART's large object space, and
+`MEMORIES_TEST_OLD_KERNEL=1` drops the flag as a kernel before 4.17 does
+(both through `environment.txt` in the app).
 
 **The retail scratchpad is never used in the app.** 0x1F800000 lies inside
 ART's heap there (the port says "0x1f800000 is taken here; the scratchpad

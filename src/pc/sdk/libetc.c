@@ -23,6 +23,7 @@
 #include "pc/render/soft_gpu.h"
 #include "pc/sdk/disc.h"
 #include "pc/sdk/display.h"
+#include <math.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -276,6 +277,10 @@ int Memories_VSync(int mode)
         static struct timespec since;
         static unsigned frames, game_us, present_us, late, game_max, present_max;
         static unsigned ticks_then, vblanks_then, shown_then;
+        /* MEMORIES_TRACE=frames: the time from one VSync(0) return to the
+         * next, the frame time the player sees paced. */
+        static unsigned intervals, interval_min = ~0u, interval_max;
+        static double interval_sum, interval_squares;
         AiTrace_Frame(Memories_PresentedFrames());
         clock_gettime(CLOCK_MONOTONIC, &t0);
         Memories_PresentDisplay();
@@ -318,6 +323,12 @@ int Memories_VSync(int mode)
                         (Platform_VBlankCount() - vblanks_then) / seconds,
                         (counter_calls - ticks_then) / seconds, (unsigned long long)counter_period_us);
                 }
+                if (intervals) {
+                    double mean = interval_sum / intervals;
+                    double spread = interval_squares / intervals - mean * mean;
+                    LOG(LOG_FRAMES, "frame interval over %u frames: mean %.0f us, deviation %.0f us, min %u us, max %u us",
+                        intervals, mean, spread > 0 ? sqrt(spread) : 0.0, interval_min, interval_max);
+                }
 #ifdef _WIN32
                 {
                     unsigned lost, undone, skipped;
@@ -332,10 +343,25 @@ int Memories_VSync(int mode)
             vblanks_then = Platform_VBlankCount();
             shown_then = Memories_ShownFrames();
             frames = game_us = present_us = late = game_max = present_max = 0;
+            intervals = interval_max = 0;
+            interval_min = ~0u;
+            interval_sum = interval_squares = 0;
         }
         Platform_WaitVBlank(now);
         Platform_LimitVBlanks(-1);
-        clock_gettime(CLOCK_MONOTONIC, &left);
+        {
+            struct timespec previous = left;
+            clock_gettime(CLOCK_MONOTONIC, &left);
+            if (previous.tv_sec) {
+                unsigned interval = (unsigned)((left.tv_sec - previous.tv_sec) * 1000000 +
+                                               (left.tv_nsec - previous.tv_nsec) / 1000);
+                intervals++;
+                interval_sum += interval;
+                interval_squares += (double)interval * interval;
+                interval_min = interval < interval_min ? interval : interval_min;
+                interval_max = interval > interval_max ? interval : interval_max;
+            }
+        }
         Memories_StatePoint(Memories_PresentedFrames());
         Recorder_Point(Memories_PresentedFrames()); /* MEMORIES_RECORD, MEMORIES_PLAY */
         Control_Point(); /* MEMORIES_CONTROL: the client's turn, at the same point */

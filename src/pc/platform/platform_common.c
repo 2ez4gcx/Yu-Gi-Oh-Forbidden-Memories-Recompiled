@@ -144,6 +144,22 @@ static void advance(uint64_t real_now, uintptr_t eip)
     if (tick_handler) tick_handler(virtual_now, real_now);
     if (!next_vblank) next_vblank = virtual_now;
     while (virtual_now >= next_vblank && vblank_budget != 0) {
+        /* MEMORIES_TRACE=frames: how late each VBlank comes against when it
+         * was due, in the clock's microseconds (real ones at 100%): the
+         * wait's wakeups, and frames that ran past a VBlank. */
+        static uint64_t late_total;
+        static unsigned late_max, late_over_1ms, late_count;
+        unsigned late = (unsigned)(virtual_now - next_vblank);
+        late_total += late;
+        late_max = late > late_max ? late : late_max;
+        late_over_1ms += late > 1000;
+        if (++late_count == 600) {
+            /* Also run from the timer's handler: Log_Signal (log.c). */
+            Log_Signal(LOG_FRAMES, "VBlank lateness over 600 VBlanks: mean %ld us, max %ld us, %ld over 1 ms",
+                       (long)(late_total / 600), (long)late_max, (long)late_over_1ms, 0, 0, 0);
+            late_total = 0;
+            late_max = late_over_1ms = late_count = 0;
+        }
         vblank_due_at = next_vblank;
         next_vblank += vblank_period;
         if (virtual_now > next_vblank + 4 * vblank_period) next_vblank = virtual_now;

@@ -139,15 +139,21 @@ void DuelScene_UpdateBattle(void)
 #ifdef MEMORIES_PC
     /* An attack trap's card_effects can remove a participant during the
      * battle: a replacement as the scene starts, an added effect after the
-     * trap's presentation. Its field object was released with it, so use
-     * the explicit marker rather than dereferencing it here. */
+     * trap's presentation. Battle objects are separate from the lifted
+     * field records; release the removed participant's battle object too. */
     if (gDuel_wSceneStateFlags & 0x8000) {
         int abort_mask = MonsterEffects_BattleAbortMask();
         if (abort_mask) {
             /* Clear only the stale battle slots; state 11 recreates the
              * surviving field cards before releasing their battle objects. */
-            if (abort_mask & 1) D_800E9EF0[0] = 0;
-            if (abort_mask & 2) D_800E9EF0[1] = 0;
+            if (abort_mask & 1) {
+                DisplayObject_ReleaseIfPresent(D_800E9EF0[0]);
+                D_800E9EF0[0] = 0;
+            }
+            if (abort_mask & 2) {
+                DisplayObject_ReleaseIfPresent(D_800E9EF0[1]);
+                D_800E9EF0[1] = 0;
+            }
             /* Before the presentation (state 1) there are no stat panels
              * in slots 2 and 3 for the retail cleanup to key on: bit 0x10
              * says so. After it, the retail cleanup fades them out. */

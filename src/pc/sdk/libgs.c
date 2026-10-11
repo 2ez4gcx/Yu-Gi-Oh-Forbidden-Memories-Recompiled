@@ -237,10 +237,13 @@ static u32 *make_packet(u32 *packet, u32 *ot, unsigned pri, unsigned words)
 {
     int index = (int)(pri & 0xffff) - (int)ot[2];
     u32 *entry;
-    if (index < 0) {
-        fprintf(stderr, "memories-pc: LIBGS packet priority %u is below the table offset %u\n",
-                pri & 0xffff, (unsigned)ot[2]);
-    }
+    /* Some interpreted model effects (including Exodia's rays) project
+     * beyond the table's depth range. Retail's unchecked link then writes
+     * into neighboring tables/descriptors. Keep those polygons at the
+     * nearest endpoint instead, without changing valid priorities. */
+    if (index < 0) index = 0;
+    if (ot[0] <= MEMORIES_GSOT_MAX_LENGTH && (unsigned)index >= (1u << ot[0]))
+        index = (int)(1u << ot[0]) - 1;
     entry = (u32 *)(uintptr_t)(ot[1] + (u32)index * 4);
     packet[0] = (*entry & 0x00ffffffu) | ((u32)words << 24);
     *entry = (u32)(uintptr_t)packet & 0x00ffffffu;

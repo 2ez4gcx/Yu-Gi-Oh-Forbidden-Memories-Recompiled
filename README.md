@@ -4,6 +4,9 @@
 native PC game for Windows and Linux, with a macOS ARM64 source build. Bring your own disc image; no game data is
 included but the text of the European translations (below).
 
+Despite the name, this is not a static recompilation: the game code was decompiled
+by hand into C that matches the original byte for byte, then ported to PC.
+
 ![Your field at 4x resolution with 3D Monsters](docs/screenshots/field.jpg)
 
 ## Features

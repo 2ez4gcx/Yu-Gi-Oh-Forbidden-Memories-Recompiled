@@ -1777,7 +1777,13 @@ same with no mod hooking anything (the smoke screenshots are unchanged).
   is the line's middle), `host->text_width` measures it and `host->fill`
   blends a rectangle in. It is drawn at the window's resolution over the
   game picture, under the port's save menu, and only while the mod is
-  applied.
+  applied. While the on-screen touch controls show (a phone, or View >
+  Touch controls), it is drawn under them too, so a full-screen panel
+  never hides where to tap; then the port's HUD (frame rate, fusion
+  helper, rank meter) and the menu bar are over it as well. With no touch
+  controls nothing else changes. The pad's buttons stay see-through, and
+  a mod has no way yet to ask where they are (see "Touch pad's free span"
+  in [PC build](pc-build.md)).
 * **Save slots.** The events `MEMORIES_EVENT_SLOT_SAVE` and
   `MEMORIES_EVENT_SLOT_LOAD` (after only) say that the running game was
   saved to, or loaded from, slot `a` (from 0); `b` is the slot's token and

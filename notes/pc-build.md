@@ -386,6 +386,35 @@ layout, a slot's details go on lines under its name and the hints wrap
 the box is narrower than them (`centred_words`, `deck_menu.c`); the text
 gets smaller only when even that does not fit.
 
+The mods' overlays (`MemoriesMod.overlay`) are drawn under the pad while it
+shows: `draw_overlay` (`sdl.c`) calls `Hud_DrawMods` first, then
+`TouchPadArt_Draw`, then `Hud_Draw` (which leaves the mods out that frame
+and still counts their rectangle in `Hud_Bounds`) and `Menu_Draw`. A mod's
+full-screen panel (a drop list on Triangle, say) used to cover the pad, so
+the player could not see where to tap; the pad's touches always reached it
+(`TouchPad_Finger` runs in the event pump, and mods take no touch). So,
+with the pad, the order from the bottom is: picture, mods, pad, the HUD
+(frame rate, fusion helper, rank meter, Free Duel progress, title text),
+the save/deck slot menus, the menu bar. Without the pad (`TouchPad_Shown`
+0: every desktop without a touch) the mods keep their place in `Hud_Draw`,
+over the HUD and under the slot menus: window shots of the 32-bit build
+with a full-screen test overlay at the title (`MEMORIES_WINDOW_SHOT`,
+deterministic, stepped by `yfm_control.py`) are byte-identical to
+origin/master's with the HUD off, and differ only in the frame-rate digits
+with `MEMORIES_SHOW_HUD=1` (the mod over the box, as before). The x11
+backend has no touch pad and is unchanged.
+
+**Touch pad's free span (proposed, not done).** `TouchPad_FreeSpan(&left,
+&right)` gives the columns between the pad's two sides, which the save and
+deck slot menus keep to (`Menu_SetOverlayArea`). A mod has no such call,
+so its panel either spans the pad (now under it, the buttons see-through
+over it) or guesses. A host entry at the end of `MemoriesModHost` (a new
+API number), `overlay_free_span(host, &left, &right)`, valid inside the
+overlay callback and giving the whole width when the pad is hidden, would
+let a mod lay out between the pad's columns; the pad showing or hiding
+would then have to change `Mods_OverlaySignature` (or the mod's signature
+would read the span), so the overlay is drawn again when it moves.
+
 Esc quits (it closes an open menu first): it is the default key of Game >
 Controls' **Exit game**. With **File > Confirm before quitting** on (the
 default) it asks "Quit the game?" first: Quit or Keep playing, Keep playing

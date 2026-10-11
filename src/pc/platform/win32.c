@@ -298,7 +298,7 @@ void Win32_ServiceInterrupt(void)
  * timer (Windows 10 1803 and later) wakes 0.3-0.6 ms after the time asked,
  * about 1 ms at worst (Windows 11, measured at normal priority); without
  * one, the process asks for the 1 ms timer period and Sleeps whole
- * milliseconds, 1-2 ms late. Each thread gets its own timer. */
+ * milliseconds: Sleep(1) took 1.0-2.7 ms. Each thread gets its own timer. */
 static _Thread_local HANDLE sleep_timer;
 static _Thread_local int sleep_ready;
 
@@ -328,7 +328,7 @@ void Win32_Sleep(unsigned microseconds)
 unsigned Win32_SleepMargin(void)
 {
     ready_sleep();
-    return sleep_timer ? 1000 : 2500;
+    return sleep_timer ? 1000 : 3000;
 }
 
 int Win32_StartInterrupt(void (*tick)(uintptr_t eip, void *context))

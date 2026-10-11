@@ -1359,8 +1359,8 @@ since the disc's plain reads (2 sectors a service), its completions and
 the MDEC move a piece at each service; Windows' 0.5 ms timer tick makes
 that about 1 ms. A high-resolution timer wakes 0.3-0.6 ms after the time
 asked, about 1 ms at worst, so the wait does not sleep in the last
-`Win32_SleepMargin` (1 ms; 2.5 ms on the fallback) before the next VBlank
-or the sequencer's next tick (`Platform_SetTickDue`, from libetc's
+`Win32_SleepMargin` (1 ms; 3 ms on the fallback, where `Sleep(1)` took
+1.0-2.7 ms) before the next VBlank or the sequencer's next tick (`Platform_SetTickDue`, from libetc's
 `run_tick`), and polls through it as before. The virtual clock's pacing in
 a window uses the same sleeps. The interrupt clock still polls.
 

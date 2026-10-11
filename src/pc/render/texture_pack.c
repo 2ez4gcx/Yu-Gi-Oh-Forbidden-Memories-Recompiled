@@ -335,37 +335,59 @@ static int sample(int page_x, int page_y, int depth, int u, int v, uint32_t *rgb
  * word within the row. -1 if none. */
 static int locate(uint32_t offset, int *row, int *word)
 {
-    int low = 0, high = entry_count, i;
+    int low = 0, high = entry_count, i, best = -1, best_row = 0, best_word = 0;
+    uint32_t best_delta = 0;
     while (low < high) {
         int middle = (low + high) / 2;
         if (entries[middle].offset <= offset) low = middle + 1;
         else high = middle;
     }
-    /* Entries overlap (the same texture drawn as sub-rectangles), so look
-     * back through those starting at or before the offset. */
+    /* Entries overlap (the same texture drawn as sub-rectangles, or two
+     * packs describing the same bytes with different geometry), so look
+     * back through those starting at or before the offset. More than one
+     * may cover it: the one starting closest to it is the more specific
+     * reading and wins regardless of pack, as it always has; only between
+     * two whose own offset is equally close (typically the same offset, two
+     * packs' different takes on one picture) does the later pack's rank,
+     * then its place in that pack's own manifest, decide -- the same order
+     * compare() sorts equal-shape entries by, so a later pack still wins a
+     * reading its own wider shape would otherwise have sorted ahead of. */
     for (i = low - 1; i >= 0 && i >= low - 64; i--) {
         const Entry *entry = &entries[i];
         uint32_t delta = offset - entry->offset;
+        int found_row = -1, found_word = 0;
         if (entry->row_offsets) {
             int r;
             for (r = 0; r < entry->rows; r++) {
                 int32_t start = entry->row_offsets[r];
                 if ((int32_t)delta >= start && (int32_t)delta < start + entry->words * 2) {
-                    *row = r;
-                    *word = (int)(((int32_t)delta - start) / 2);
-                    return i;
+                    found_row = r;
+                    found_word = (int)(((int32_t)delta - start) / 2);
+                    break;
                 }
             }
         } else if (entry->stride) {
             uint32_t r = delta / (entry->stride * 2), c = (delta % (entry->stride * 2)) / 2;
             if (r < (uint32_t)entry->rows && c < (uint32_t)entry->words) {
-                *row = (int)r;
-                *word = (int)c;
-                return i;
+                found_row = (int)r;
+                found_word = (int)c;
             }
         }
+        if (found_row < 0) continue;
+        if (best < 0 || delta < best_delta ||
+            (delta == best_delta && (entry->rank > entries[best].rank ||
+                                      (entry->rank == entries[best].rank && entry->position > entries[best].position)))) {
+            best = i;
+            best_row = found_row;
+            best_word = found_word;
+            best_delta = delta;
+        }
     }
-    return -1;
+    if (best >= 0) {
+        *row = best_row;
+        *word = best_word;
+    }
+    return best;
 }
 
 /* The entry whose replacement covers texel `texel` of the word at disc byte
@@ -375,12 +397,16 @@ static int locate(uint32_t offset, int *row, int *word)
  * -1 when no entry's crop covers it. */
 static int locate_texel(uint32_t offset, int texel, int *row, int *word)
 {
-    int low = 0, high = entry_count, i;
+    int low = 0, high = entry_count, i, best = -1, best_row = 0, best_word = 0;
+    uint32_t best_delta = 0;
     while (low < high) {
         int middle = (low + high) / 2;
         if (entries[middle].offset <= offset) low = middle + 1;
         else high = middle;
     }
+    /* As locate(): more than one entry's crop can cover this texel. The one
+     * starting closest to it wins, as always; only a tie at equal distance
+     * falls to compare()'s rank, then manifest position. */
     for (i = low - 1; i >= 0 && i >= low - 64; i--) {
         const Entry *entry = &entries[i];
         uint32_t delta = offset - entry->offset;
@@ -405,11 +431,20 @@ static int locate_texel(uint32_t offset, int texel, int *row, int *word)
         if (r < 0) continue;
         x = c * per_word(entry->bpp) + texel;
         if (x < entry->crop_left || x >= entry->crop_left + entry->crop_width) continue;
-        *row = r;
-        *word = c;
-        return i;
+        if (best < 0 || delta < best_delta ||
+            (delta == best_delta && (entry->rank > entries[best].rank ||
+                                      (entry->rank == entries[best].rank && entry->position > entries[best].position)))) {
+            best = i;
+            best_delta = delta;
+            best_row = r;
+            best_word = c;
+        }
     }
-    return -1;
+    if (best >= 0) {
+        *row = best_row;
+        *word = best_word;
+    }
+    return best;
 }
 
 /* Recall: the first bytes on the disc of every image and palette the pack

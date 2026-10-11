@@ -71,6 +71,7 @@ static struct {
     long long sec;             /* its modification time */
     char file_name[96];        /* what the copy is called: yfm-redecomp-crash-<when>.txt */
     char saved_name[128];      /* what Downloads called it ("" when unknown) */
+    const char *kind;          /* "crash report" or "start-up report": the share's subject and title */
     char *text;                /* the copy: built when offered */
     size_t size;
     int api;                   /* the device's API level */
@@ -285,7 +286,7 @@ static int failed(Java *java, const char *what, int empty)
         snprintf(java->why, sizeof(java->why), "%s failed: %s", what, chars ? chars : "unknown error");
         if (chars) (*env)->ReleaseStringUTFChars(env, message, chars);
     }
-    fprintf(stderr, "memories-pc: crash report: %s\n", java->why);
+    fprintf(stderr, "memories-pc: %s: %s\n", offer.kind ? offer.kind : "crash report", java->why);
     java->bad = 1;
     return 1;
 }
@@ -541,9 +542,11 @@ static int share(Java *java, jobject activity)
     mime = string(java, "text/plain");
     stream_key = string(java, "android.intent.extra.STREAM");
     subject_key = string(java, "android.intent.extra.SUBJECT");
-    subject = string(java, "YFM Re-Decomp crash report");
+    snprintf(address, sizeof(address), "YFM Re-Decomp %s", offer.kind ? offer.kind : "crash report");
+    subject = string(java, address);
     label = string(java, offer.file_name);
-    title = string(java, "Share the crash report");
+    snprintf(address, sizeof(address), "Share the %s", offer.kind ? offer.kind : "crash report");
+    title = string(java, address);
     if (java->bad) return 0;
     uri = (*env)->CallStaticObjectMethod(env, uri_type, parse, text_address);
     if (failed(java, "Naming the report", !uri)) return 0;
@@ -576,7 +579,7 @@ static void java_call(void *argument)
     Java *java = argument;
     jobject activity;
 #if defined(__aarch64__)
-    Memories_JniGuard("the crash report's Java calls"); /* jni_guard.h: logs if this ran on the game stack */
+    Memories_JniGuard("the report's Java calls"); /* jni_guard.h: logs if this ran on the game stack */
 #endif
     java->env = (JNIEnv *)SDL_GetAndroidJNIEnv();
     java->bad = 0;
@@ -686,6 +689,7 @@ void Android_OfferCrashReport(void)
         return;
     }
     free(offer.text);
+    offer.kind = "crash report";
     if (!(offer.text = build_report(&offer.size))) {
         fprintf(stderr, "memories-pc: crash report %s could not be read\n", offer.path);
         return;
@@ -726,7 +730,11 @@ int Android_OfferStartupReport(const char *title, const char *message, const cha
     time_t seconds = time(NULL);
     int save, button;
     fprintf(stderr, "memories-pc: %s\n%s\n", title, details);
-    if (headless && *headless && strcmp(headless, "0")) return 0;
+    /* Scripted and agent-driven runs: nobody to press a button (the
+     * caller's error box is told instead). */
+    if ((headless && *headless && strcmp(headless, "0")) || getenv("MEMORIES_INPUT") ||
+        getenv("MEMORIES_SDL_SCRIPT") || getenv("MEMORIES_CONTROL"))
+        return 0;
     if (!(text = malloc(room))) return 0;
     text[0] = '\0';
 #define ADD(...)                                                                                   \
@@ -760,6 +768,7 @@ int Android_OfferStartupReport(const char *title, const char *message, const cha
     if (!text) return 0;
     free(offer.text);
     offer.text = text;
+    offer.kind = "start-up report";
     offer.size = used;
     property("ro.build.version.sdk", value);
     offer.api = atoi(value);

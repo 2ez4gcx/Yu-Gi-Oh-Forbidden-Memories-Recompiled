@@ -802,8 +802,9 @@ int Memories_KernelRefusesTakenRange(void)
     held = (void *)((uintptr_t)map_error & ~(uintptr_t)(page - 1));
     got = mmap(held, (size_t)page, PROT_NONE, flags, -1, 0);
     if (got == MAP_FAILED) return errno == EEXIST ? 1 : -1;
+    if (got == held) return -1; /* cannot be (no MAP_FIXED); never unmapped, it would be this file's data */
     munmap(got, (size_t)page);
-    return got == held ? -1 : 0;
+    return 0;
 }
 
 #if defined(__i386__)

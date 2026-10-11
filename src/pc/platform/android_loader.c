@@ -143,12 +143,14 @@ int SDL_main(int argc, char **argv)
                  strerror(errno));
         say(line);
         say_occupants((uintptr_t)base, (uintptr_t)base + MEMORIES_ANDROID_GAME_SPAN, held, sizeof(held));
+        device_line(device, sizeof(device));
+        snprintf(line, sizeof(line), "memories-pc: %s", device);
+        say(line);
 #if UINTPTR_MAX > 0xffffffffu
         /* Refused before anything of the game is loaded: elsewhere its
          * initialisers would run at an address it cannot work at. Short:
          * the system's box does not scroll in landscape, and its button
          * sits under the text. */
-        device_line(device, sizeof(device));
         snprintf(line, sizeof(line), "The game could not start: this phone already uses memory it needs (%p-%p). "
                  "Please send a screenshot of this to us on Discord or GitHub.\n\n%s\nHeld by %s", base,
                  (void *)((uintptr_t)base + MEMORIES_ANDROID_GAME_SPAN), device,

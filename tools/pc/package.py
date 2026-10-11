@@ -6,7 +6,9 @@
 
 Packing all three where the 64-bit Windows game cannot be built (no
 x86_64-w64-mingw32-clang 21 or later) skips that one with a message and
-packs the other two; asking for windows-x64 by name stops there instead.
+packs the other two, whose SDKs then need its export list from a build of
+the same tree made elsewhere (below); asking for windows-x64 by name stops
+there instead.
 
 Each archive is a folder a player unpacks and runs: the executable, the mods
 the release ships (the same object files for both systems), the mod SDK,
@@ -35,7 +37,10 @@ build_game32.py writes, must be this build's): tmp/pc/win32 (or game32),
 tmp/pc/win64 and tmp/pc/android-arm64-v8a, or the build folders
 --exports-from names (CI, where each is built in its own job and only its
 sdk/exports.<target>.txt and source are handed on). Packing stops when one
-is missing or from another tree.
+is missing (before anything is built) or from another tree (after the
+builds). So packing the default three needs the Android build of the same
+tree first (build_game32.py --target android-arm64-v8a --release; notes/
+pc-release.md, "Local commands").
 
     python3 tools/pc/package.py android-arm64  # the Android app, signed
 
@@ -168,23 +173,68 @@ def read_source(build_dir):
         return None
 
 
+def shown(path):
+    """`path` as messages name it: from the checkout's root when it is on
+    the same drive."""
+    try:
+        return os.path.relpath(path, ROOT)
+    except ValueError:
+        return path
+
+
+def export_folders(target, exports_from=()):
+    """Where `target`'s export list is looked for, in order: the folders
+    --exports-from names, then the target's game builds in tmp/pc."""
+    return ([os.path.abspath(path) for path in exports_from] +
+            [os.path.join(ROOT, BUILDS[other][0]) for other in EXPORT_BUILDS[target]])
+
+
+def build_command(target):
+    system = EXPORT_BUILDS[target][0]
+    return (f"python tools/pc/build_game32.py --target {TARGETS.get(system, system)} --backend sdl --release "
+            f"--build {BUILDS[system][0]}")
+
+
+def exports_unavailable(systems, exports_from=(), skipped=None):
+    """Before anything is built: why an SDK of `systems` could not get
+    another target's export list (none of `systems` builds that target, and
+    no folder has a list of it), or None. Whether a list is of this tree is
+    checked after the builds (sdk_exports)."""
+    for folder in exports_from:
+        if not os.path.isdir(folder):
+            return f"--exports-from {folder}: no such folder"
+    built = {MOD_TARGET[system] for system in systems}
+    for system in systems:
+        if system == "android-arm64":
+            continue
+        for target in SDK_TARGETS:
+            if target in built or any(os.path.isfile(os.path.join(folder, "sdk", f"exports.{target}.txt"))
+                                      for folder in export_folders(target, exports_from)):
+                continue
+            why = (f"{EXPORT_BUILDS[target][0]} is skipped ({skipped})" if skipped and target == "x86_64-windows"
+                   else f"{EXPORT_BUILDS[target][0]} is not packed here")
+            return (f"the {system} SDK needs the {target} game's export list: {why}, and no build has one "
+                    f"({', '.join(shown(folder) for folder in export_folders(target, exports_from))}). "
+                    f"Build it ({build_command(target)}) or name a build of this tree with --exports-from")
+    return None
+
+
 def sdk_exports(system, exports_from=()):
     """{target: its export list} for the other targets than `system`'s own,
-    each from a game build of the same tree as `system`'s: the folders
-    `exports_from` names, then the target's builds in tmp/pc. Stops, with
-    what to build, when one is missing or was built from another tree."""
+    each from a game build of the same tree as `system`'s (export_folders).
+    Stops, with what to build, when one is missing or was built from
+    another tree."""
     build_dir = os.path.join(ROOT, BUILDS[system][0])
     own = read_source(build_dir)
     if own in (None, "unknown"):
-        sys.exit(f"package: {os.path.relpath(build_dir, ROOT)} has no source stamp: build it again with "
+        sys.exit(f"package: {shown(build_dir)} has no source stamp: build it again with "
                  "tools/pc/build_game32.py, in a git checkout; nothing was packed")
     lists = {}
     for target in SDK_TARGETS:
         if target == MOD_TARGET[system]:
             continue
-        builds = [os.path.join(ROOT, BUILDS[other][0]) for other in EXPORT_BUILDS[target]]
         others = []
-        for folder in [os.path.abspath(path) for path in exports_from] + builds:
+        for folder in export_folders(target, exports_from):
             path = os.path.join(folder, "sdk", f"exports.{target}.txt")
             if not os.path.isfile(path):
                 continue
@@ -192,13 +242,11 @@ def sdk_exports(system, exports_from=()):
             if source == own:
                 lists[target] = path
                 break
-            others.append(f"{os.path.relpath(folder, ROOT)} is from {source or 'an unknown tree'}")
+            others.append(f"{shown(folder)} is from {source or 'an unknown tree'}")
         if target not in lists:
-            named = TARGETS.get(EXPORT_BUILDS[target][0], EXPORT_BUILDS[target][0])
-            found = "; ".join(others) if others else "no build has its exports." + target + ".txt"
+            found = "; ".join(others) if others else f"no build has its exports.{target}.txt"
             sys.exit(f"package: the {system} SDK needs the {target} game's export list from a build of this tree "
-                     f"({own}): {found}. Build it (python tools/pc/build_game32.py --target {named} --release "
-                     f"--build {BUILDS[EXPORT_BUILDS[target][0]][0]}) or name one with --exports-from; "
+                     f"({own}): {found}. Build it ({build_command(target)}) or name one with --exports-from; "
                      "nothing was packed")
     return lists
 
@@ -339,9 +387,14 @@ def main():
     if missing and options.systems:
         sys.exit(f"package: cannot pack windows-x64: {missing}")
     if missing:
-        # Packing everything: the other archives do not wait on it.
+        # Packing everything: the other archives do not wait on it, when
+        # their SDKs can have its export list from elsewhere (a build of the
+        # same tree in tmp/pc/win64, or --exports-from).
         print(f"package: windows-x64 skipped: {missing}; the other archives are packed", file=sys.stderr)
         systems = [system for system in systems if system != "windows-x64"]
+    unavailable = exports_unavailable(systems, options.exports_from, missing)
+    if unavailable:
+        sys.exit(f"package: {unavailable}; nothing was packed")
     if not options.no_build:
         for system in systems:
             build(system, label, options.skip_smoke)

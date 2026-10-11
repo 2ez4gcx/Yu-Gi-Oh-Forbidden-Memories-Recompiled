@@ -364,6 +364,12 @@ lower than a published one can never update it.
 Android build with a message naming the rule. `draft-release` needs the
 `android` job, so no draft is made for that tag, with no desktop archives
 either. This is on purpose: a release is never published without its APK.
+The `package` jobs need it too (and `sdk-exports-x64`): their SDKs carry
+the arm64 game's export list, which that job builds (notes/pc-build.md,
+"Sharing a build"). So when the Android build fails, on a tag or a pull
+request, the desktop archives and the checks after them (`test_package.py`,
+`check_mod_abi.py`, the FM Editor's) do not run either, and they start only
+once it is done.
 Delete the tag and tag again within the scheme
 (`git push --delete origin <tag>`, then a new tag).
 
@@ -408,7 +414,10 @@ cmake --build tmp/pc/cmake-test --parallel
 
 # Build, smoke-test with your own disc, then package all three archives
 # (32-bit Windows, 64-bit Windows, Linux; the 64-bit one is skipped with a
-# message where x86_64-w64-mingw32-clang 21 or later is missing):
+# message where x86_64-w64-mingw32-clang 21 or later is missing, and then its
+# export list must come from a build of the same tree, --exports-from). Every
+# SDK carries the arm64 game's export list too: build it at this commit first.
+python tools/pc/build_game32.py --target android-arm64-v8a --backend sdl --release --build tmp/pc/android-arm64-v8a
 python tools/pc/package.py --version v0.1.0
 
 # Compile/package without a disc (the CI path). Each SDK takes the other

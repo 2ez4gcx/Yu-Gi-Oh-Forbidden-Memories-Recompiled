@@ -133,13 +133,18 @@ def main():
     assert archives, "no release archives found"
     sdks = {path: check(path) for path in archives}
     # A target's list is one build's (tools/pc/package.py), the same in every
-    # archive packed together; the i386 one is each system's own, the same
-    # in both Windows archives.
+    # archive of one version; the i386 one is each system's own, the same in
+    # both Windows archives.
+    def release(path):
+        return next(path.name[:len(path.name) - len(end)] for end in
+                    ("-windows-x64.zip", "-windows.zip", "-linux.tar.gz", "") if path.name.endswith(end))
     for target in TARGETS:
         name = f"sdk/exports.{target}.txt"
-        group = [path for path in sdks if target != "i386" or path.suffix == ".zip"]
-        for path in group[1:]:
-            assert sdks[path][name] == sdks[group[0]][name], f"{name} differs between {group[0].name} and {path.name}"
+        for version in {release(path) for path in sdks}:
+            group = [path for path in sdks if release(path) == version and (target != "i386" or path.suffix == ".zip")]
+            for path in group[1:]:
+                assert sdks[path][name] == sdks[group[0]][name], \
+                    f"{name} differs between {group[0].name} and {path.name}"
 
 if __name__ == "__main__":
     main()

@@ -3129,9 +3129,11 @@ uncommitted changes); `package.py` builds every system it packs before it
 packs any, and takes each other target's list from that target's build in
 `tmp/pc` (`win32` or `game32`, `win64`, `android-arm64-v8a`) or from a
 folder `--exports-from` names, only when its `source` is this build's. It
-stops, naming what to build, when one is missing or from another tree; so
-packing without the Android build needs `build_game32.py --target
-android-arm64-v8a --release` first. The release workflow builds the arm64
+stops, naming what to build, when one is missing (before building
+anything) or from another tree (after the builds). So before packing, build
+the Android game once per commit (`build_game32.py --target
+android-arm64-v8a --release`); where the 64-bit Windows game is skipped,
+its list must come from a build of the same tree too. The release workflow builds the arm64
 game in its `android` job and the 64-bit Windows game in `sdk-exports-x64`,
 and hands their lists to the `package` jobs. `test_package.py` refuses an
 archive whose SDK lacks one, or whose lists differ from another archive's

@@ -1276,7 +1276,9 @@ second at fewer game frames.
 
 The HUD (F3) shows game frames a second and shown frames a second; with
 `MEMORIES_TRACE=frames` the same appears every 120 frames with the clock
-rate, VBlank rate and sequencer rate.
+rate, VBlank rate and sequencer rate, and the spread of the time between
+two `VSync(0)` returns (`frame interval`); every 600 VBlanks how late they
+came against when they were due (`VBlank lateness`).
 
 **Software OpenGL on Wayland.** The 32-bit build on an NVIDIA Wayland
 desktop gets Mesa's `llvmpipe` through EGL (there is no 32-bit NVIDIA EGL
@@ -1376,7 +1378,10 @@ normal priority in every run):
 
 The worst cases on both sides are the machine's stalls (a present or a
 game frame of 50-450 ms, in the log as `spike`); in the quietest runs a
-sleeping build's worst VBlank was under 1 ms.
+sleeping build's worst VBlank was under 1 ms. The sound is mixed on SDL's
+audio thread, apart from the wait; the HUD's underrun count came out the
+same in a 60 s duel run of each build (one about every 2 s, with polling
+and with sleeping, 32- and 64-bit), and so did the audio queue (2.8-3 ms).
 
 Not yet: Linux has only been compiled with it (its stall reports come from
 the crash monitor process, since no tick runs); the sampling profiler

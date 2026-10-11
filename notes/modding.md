@@ -1820,7 +1820,10 @@ and Android object formats too), on Linux x86-64
 `llvm-mingw-20260922-ucrt-ubuntu-22.04-x86_64.tar.xz`. Unpack it and put its
 `bin` folder on PATH, or set `MEMORIES_MOD_CC` to its `clang`. On Linux the
 distribution's packages do as well: `clang`, `lld` and `llvm` (which has
-`llvm-objcopy`), e.g. `sudo apt install clang lld llvm`.
+`llvm-objcopy`), e.g. `sudo apt install clang lld llvm`. The 64-bit games
+are built with clang 21 or later (clang 12 miscompiles their 4-byte
+pointers, and the versions between are not verified), so prefer a clang
+that new for the 64-bit objects.
 
 With clang, lld and llvm-objcopy it builds all three ELF targets unless
 `--target` names some. Without one of them it builds the `i386` object

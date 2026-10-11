@@ -203,7 +203,7 @@ def toolchain_help(missing, built=None, wanted=WIDE_TARGETS, compiler=True, outc
     named = os.environ.get("MEMORIES_MOD_CC")
     not_found = "Not found: " + ", ".join(missing)
     if named and "clang" in missing:
-        not_found += f" (MEMORIES_MOD_CC names {named}, which is not clang)"
+        not_found += f" (MEMORIES_MOD_CC names {named}, which is {'not clang' if resolve(named) else 'not there'})"
     games = {"x86_64-windows": "the 64-bit Windows game", "aarch64": "Android"}
     named_objects = ", ".join(f"{target}: {games[target]}" for target in wanted)
     if not compiler:
@@ -220,13 +220,18 @@ def toolchain_help(missing, built=None, wanted=WIDE_TARGETS, compiler=True, outc
                   f"  {LLVM_MINGW_DOWNLOADS['windows']}",
                   "unzip it, put its bin folder on PATH (or set MEMORIES_MOD_CC to its bin\\clang.exe), "
                   "and run build_mod.py again."]
+    elif sys.platform == "darwin":
+        lines += ["Install them with Homebrew (brew install llvm lld), put $(brew --prefix llvm)/bin on PATH "
+                  "(or set MEMORIES_MOD_CC to its clang), and run build_mod.py again."]
     else:
-        lines += ["Install clang, lld and llvm (llvm-objcopy is in llvm) from your distribution:",
+        lines += [f"Get llvm-mingw {LLVM_MINGW_RELEASE}, the toolchain the game is built with (Linux x86-64):",
+                  f"  {LLVM_MINGW_DOWNLOADS['linux']}",
+                  "and put its bin folder on PATH (or set MEMORIES_MOD_CC to its bin/clang); or install your "
+                  "distribution's clang, lld and llvm (llvm-objcopy is in llvm):",
                   "  Debian/Ubuntu: sudo apt install clang lld llvm    Fedora: sudo dnf install clang lld llvm",
                   "  Arch: sudo pacman -S clang lld llvm",
-                  f"or use llvm-mingw {LLVM_MINGW_RELEASE}, the toolchain the game is built with (Linux x86-64):",
-                  f"  {LLVM_MINGW_DOWNLOADS['linux']}",
-                  "with its bin folder on PATH (or MEMORIES_MOD_CC=<its bin>/clang), and run build_mod.py again."]
+                  "The 64-bit game is built with clang 21 or later (older ones are not verified with its 4-byte "
+                  "pointers; clang 12 miscompiles them): prefer one that new. Then run build_mod.py again."]
     return "\n".join(lines)
 
 
@@ -776,6 +781,9 @@ def main():
                         help="a game build directory to check the mod's names against (repeatable, for one "
                              "--target; default: the target's builds in tmp/pc when they exist)")
     options = parser.parse_args()
+    if not glob.glob(os.path.join(options.directory, "*.c")):
+        print(f"{options.directory}: no C sources; a data-only mod needs no build")
+        return
     # The 64-bit targets need clang with ld.lld and llvm-objcopy. Not asked
     # for by name, they are left out without them: the i386 object is built,
     # as before there were others, and the modder told what to get.

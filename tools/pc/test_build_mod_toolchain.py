@@ -74,19 +74,40 @@ class Toolchain(unittest.TestCase):
             build_mod.main()
         return str(stopped.exception.code) + error.getvalue()
 
-    def test_no_compiler(self):
+    def mod(self):
+        """A code mod (its source is never compiled here)."""
         mod = os.path.join(self.bin, "mod")
-        os.makedirs(mod)
-        text = self.run_main(mod)
-        self.assertIn("no compiler found", text)
+        os.makedirs(mod, exist_ok=True)
+        with open(os.path.join(mod, "mod.json"), "w") as handle:
+            handle.write('{"id": "mod", "library": "mod"}\n')
+        with open(os.path.join(mod, "mod.c"), "w") as handle:
+            handle.write("int x;\n")
+        return mod
+
+    def test_no_compiler(self):
+        text = self.run_main(self.mod())
+        self.assertIn("nothing was built: no compiler found", text)
         self.assertIn("Not found: clang, ld.lld, llvm-objcopy.", text)
 
     def test_asked_for_a_64bit_target(self):
         self.program("gcc")   # the 32-bit object could be built; the one asked for cannot
-        text = self.run_main(os.path.join(self.bin, "mod"), "--target", "aarch64")
+        text = self.run_main(self.mod(), "--target", "aarch64")
         self.assertIn("nothing was built", text)
-        self.assertIn("aarch64: Android", text)
+        self.assertIn("The 64-bit object (aarch64: Android) needs", text)
         self.assertNotIn("x86_64-windows:", text)
+
+    def test_data_only_needs_no_compiler(self):
+        data = os.path.join(self.bin, "data")
+        os.makedirs(data)
+        output = io.StringIO()
+        with mock.patch.object(sys, "argv", ["build_mod.py", data, "--target", "aarch64"]), \
+                contextlib.redirect_stdout(output):
+            build_mod.main()
+        self.assertIn("a data-only mod needs no build", output.getvalue())
+
+    def test_named_compiler(self):
+        with mock.patch.dict(os.environ, {"MEMORIES_MOD_CC": os.path.join(self.bin, "nowhere", "clang" + EXE)}):
+            self.assertIn("which is not there", build_mod.toolchain_help(build_mod.missing_64bit()))
 
 
 if __name__ == "__main__":

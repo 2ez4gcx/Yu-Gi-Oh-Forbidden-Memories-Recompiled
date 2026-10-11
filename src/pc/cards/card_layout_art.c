@@ -11,6 +11,7 @@
 #include "card_layout.h"
 #include "art.h"
 #include "pc/render/soft_gpu.h"
+#include "pc/render/texture_pack.h"
 #include "pc/debug/log.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -56,6 +57,7 @@ typedef struct {
     char path[1024];
     unsigned char *indices;   /* NULL: built and failed */
     unsigned short clut[256];
+    int png_w, png_h;
     int used;
 } FrameImage;
 static FrameImage images[FRAME_CACHE];
@@ -82,6 +84,7 @@ static FrameImage *image_for(const char *path, int build)
     memset(slot, 0, sizeof(*slot));
     snprintf(slot->path, sizeof(slot->path), "%s", path);
     slot->used = 1;
+    CardArt_ImageSize(path, &slot->png_w, &slot->png_h);
     slot->indices = malloc((size_t)FRAME_W * FRAME_H);
     if (slot->indices &&
         !CardArt_IndexedImage(path, FRAME_W, FRAME_H, slot->indices, slot->clut, why, sizeof(why))) {
@@ -89,6 +92,9 @@ static FrameImage *image_for(const char *path, int build)
         free(slot->indices);
         slot->indices = NULL;
     }
+    /* The PNG itself for above 1x (TexturePack_AddBankSprite), read with
+     * the rest of the build rather than when a tile is first drawn. */
+    if (slot->indices && slot->png_w > 0) TexturePack_BankImagePreload(path);
     return slot;
 }
 
@@ -118,6 +124,7 @@ int CardLayoutArt_FrameTile(int col, int row, int *tpage, int *clut, int *w, int
     const char *path = CardLayout_FramePath();
     const FrameImage *image;
     int tile = row * FRAME_COLS + col;
+    int sx, sy, sx1, sy1;
     if (col < 0 || col >= FRAME_COLS || row < 0 || row >= FRAME_ROWS) return 0;
     if (!path || !*path) { LOG(LOG_CARD_LAYOUT, "FrameTile: no path"); return 0; }
     if (!(bank = SoftGpu_Bank(FRAME_BANK))) { LOG(LOG_CARD_LAYOUT, "FrameTile: no bank"); return 0; }
@@ -132,6 +139,15 @@ int CardLayoutArt_FrameTile(int col, int row, int *tpage, int *clut, int *w, int
     *clut = (FRAME_CLUT_Y << 6) | 0;   /* getClut(0, FRAME_CLUT_Y) */
     *w = FRAME_TILE_W;
     *h = FRAME_TILE_H;
+    if (image->png_w > 0 && image->png_h > 0) {
+        TexturePack_BankSpritesUseOwner(TEXTURE_BANK_OWNER_LAYOUT_FRAME);
+        sx = col * FRAME_TILE_W * image->png_w / FRAME_W;
+        sx1 = (col + 1) * FRAME_TILE_W * image->png_w / FRAME_W;
+        sy = row * FRAME_TILE_H * image->png_h / FRAME_H;
+        sy1 = (row + 1) * FRAME_TILE_H * image->png_h / FRAME_H;
+        TexturePack_AddBankSpriteCrop(FRAME_BANK, (tile % 8 * 2) * 64, tile / 8 * 256, 1, 0, FRAME_CLUT_Y, 0, 0,
+                                      FRAME_TILE_W, FRAME_TILE_H, path, sx, sy, sx1 - sx, sy1 - sy);
+    }
     return 1;
 }
 
@@ -145,6 +161,7 @@ int CardLayoutArt_FrameTile(int col, int row, int *tpage, int *clut, int *w, int
 static char digits_path[1024];          /* the strip built (or failed) */
 static unsigned char *digits_indices;
 static unsigned short digits_clut[256];
+static int digits_png_w, digits_png_h;
 static char digits_bank_path[1024];     /* the strip the bank holds now */
 
 static void digits_build(const char *path)
@@ -154,6 +171,8 @@ static void digits_build(const char *path)
     if (!strcmp(digits_path, path)) return;
     free(digits_indices);
     snprintf(digits_path, sizeof(digits_path), "%s", path);
+    digits_png_w = digits_png_h = 0;
+    CardArt_ImageSize(path, &digits_png_w, &digits_png_h);
     digits_bank_path[0] = 0;
     digits_indices = malloc((size_t)DIGITS_W * DIGITS_H);
     if (digits_indices &&
@@ -162,12 +181,13 @@ static void digits_build(const char *path)
         free(digits_indices);
         digits_indices = NULL;
     }
+    if (digits_indices && digits_png_w > 0) TexturePack_BankImagePreload(path);
 }
 
 int CardLayoutArt_DigitCell(int digit, int dim, int *tpage, int *u, int *v, int *clut, int *w, int *h)
 {
     char path[1024];
-    int dw, dh, step, x, y;
+    int dw, dh, step, x, y, sx, sy, sx1, sy1;
     uint16_t *bank, *page;
 
     if (digit < 0 || digit > 9) return 0;
@@ -192,6 +212,16 @@ int CardLayoutArt_DigitCell(int digit, int dim, int *tpage, int *u, int *v, int 
     *v = (digit / CARD_LAYOUT_DIGIT_COLS + (dim ? 2 : 0)) * CARD_LAYOUT_DIGIT_CELL_H;
     *w = CARD_LAYOUT_DIGIT_CELL_W;
     *h = CARD_LAYOUT_DIGIT_CELL_H;
+    if (digits_png_w > 0 && digits_png_h > 0) {
+        TexturePack_BankSpritesUseOwner(TEXTURE_BANK_OWNER_LAYOUT_DIGITS);
+        sx = *u * digits_png_w / DIGITS_W;
+        sx1 = (*u + *w) * digits_png_w / DIGITS_W;
+        sy = *v * digits_png_h / DIGITS_H;
+        sy1 = (*v + *h) * digits_png_h / DIGITS_H;
+        TexturePack_AddBankSpriteCrop(FRAME_BANK, (DIGITS_SLOT % 8 * 2) * 64, DIGITS_SLOT / 8 * 256, 1,
+                                      DIGITS_SLOT % 8 * 128, DIGITS_SLOT / 8 * 256 + DIGITS_H, *u, *v, *w, *h, path,
+                                      sx, sy, sx1 - sx, sy1 - sy);
+    }
     return 1;
 }
 
@@ -199,15 +229,16 @@ void CardLayoutArt_Prewarm(void)
 {
     static unsigned int frame;
     char paths[FRAME_CACHE][1024];
-    char digits[1024];
+    char digits[1024] = "";
     int i, count, dw, dh, dstep;
 
     if (++frame % 30) return;   /* the layout changes with a setting, not a frame */
     if (CardLayout_Digits(digits, sizeof(digits), &dw, &dh, &dstep) && strcmp(digits_path, digits)) {
         digits_build(digits);
         return;
-    }
+    } else if (!digits[0]) TexturePack_BankSpritesClear(TEXTURE_BANK_OWNER_LAYOUT_DIGITS);
     count = CardLayout_FramePaths(paths, FRAME_CACHE);
+    if (!count) TexturePack_BankSpritesClear(TEXTURE_BANK_OWNER_LAYOUT_FRAME);
     for (i = 0; i < count; i++) {
         if (!image_for(paths[i], 0)) {
             image_for(paths[i], 1);

@@ -9,6 +9,7 @@
 #include <png.h>
 #include <unistd.h>
 #include <stdio.h>
+#include <limits.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
@@ -85,6 +86,364 @@ static int made_count;
 static Block *blocks;
 static int block_count;
 static uint32_t made_next = TEXTURE_MADE_BASE;
+
+/* Pictures placed in a software-GPU texture bank (TexturePack_AddBankSprite).
+ * A PNG is read once however many sprites show parts of it (a frame's
+ * tiles, a UI element's strips), when the first is placed, not when one is
+ * drawn; with it its smaller levels, each half the last, alpha-weighted, for
+ * drawing it smaller than it is without the PNG's detail aliasing. One that
+ * no sprite shows any more is kept while BANK_SPARE others are not newer: a
+ * card of another kind brings its frame back soon. A renderer knows an
+ * image by its key, which no other image ever has. */
+#define BANK_LEVELS 14
+#define BANK_SPARE 6
+typedef struct BankImage {
+    char *file;
+    unsigned char *level[BANK_LEVELS]; /* RGBA, level[0] the PNG's own; NULL: failed */
+    int width[BANK_LEVELS], height[BANK_LEVELS], levels;
+    int users;
+    unsigned key, released; /* released: when the last user went (bank_clock) */
+} BankImage;
+static BankImage **bank_images;
+static int bank_image_count;
+static unsigned bank_keys, bank_clock, bank_generation;
+
+typedef struct BankSprite {
+    unsigned owner;
+    int bank, page_x, page_y, depth, clut_x, clut_y, u, v, w, h;
+    int source_x, source_y, source_w, source_h;
+    BankImage *image;
+} BankSprite;
+static BankSprite *bank_sprites;
+static int bank_sprite_count;
+static unsigned bank_sprite_owner;
+static int bank_cached = -1; /* the current primitive normally stays in one sprite */
+
+/* The next level: half of `from` (rounded up), each texel the average of
+ * those it covers, colors weighted by their alpha so that transparent
+ * texels' colors do not bleed into the edges. */
+static int bank_halve(BankImage *image, int from)
+{
+    int width = image->width[from], height = image->height[from], half_w = (width + 1) / 2,
+        half_h = (height + 1) / 2, x, y;
+    const unsigned char *in = image->level[from];
+    unsigned char *out = malloc((size_t)half_w * half_h * 4);
+    if (!out) return 0;
+    for (y = 0; y < half_h; y++) {
+        for (x = 0; x < half_w; x++) {
+            unsigned long color[3] = {0, 0, 0}, alpha = 0, n = 0;
+            int sx, sy, k;
+            for (sy = y * 2; sy < y * 2 + 2 && sy < height; sy++) {
+                for (sx = x * 2; sx < x * 2 + 2 && sx < width; sx++, n++) {
+                    const unsigned char *p = &in[((size_t)sy * width + sx) * 4];
+                    for (k = 0; k < 3; k++) color[k] += (unsigned long)p[k] * p[3];
+                    alpha += p[3];
+                }
+            }
+            for (k = 0; k < 3; k++)
+                out[((size_t)y * half_w + x) * 4 + k] = (unsigned char)(alpha ? color[k] / alpha : 0);
+            out[((size_t)y * half_w + x) * 4 + 3] = (unsigned char)(alpha / n);
+        }
+    }
+    image->level[from + 1] = out;
+    image->width[from + 1] = half_w;
+    image->height[from + 1] = half_h;
+    image->levels = from + 2;
+    return 1;
+}
+
+static void bank_read(BankImage *image)
+{
+    png_image png = {0};
+    FILE *file;
+    png.version = PNG_IMAGE_VERSION;
+    file = fopen(image->file, "rb");
+    if (!file || !png_image_begin_read_from_stdio(&png, file)) {
+        fprintf(stderr, "memories-pc: texture bank image: %s cannot be read: %s\n", image->file, png.message);
+        if (file) fclose(file);
+        return;
+    }
+    png.format = PNG_FORMAT_RGBA;
+    image->level[0] = malloc(PNG_IMAGE_SIZE(png));
+    if (!image->level[0] || !png_image_finish_read(&png, NULL, image->level[0], 0, NULL)) {
+        fprintf(stderr, "memories-pc: texture bank image: %s cannot be read: %s\n", image->file,
+                image->level[0] ? png.message : "out of memory");
+        free(image->level[0]);
+        image->level[0] = NULL;
+        fclose(file);
+        png_image_free(&png);
+        return;
+    }
+    fclose(file);
+    image->width[0] = (int)png.width;
+    image->height[0] = (int)png.height;
+    image->levels = 1;
+    png_image_free(&png);
+    while (image->levels < BANK_LEVELS &&
+           (image->width[image->levels - 1] > 1 || image->height[image->levels - 1] > 1))
+        if (!bank_halve(image, image->levels - 1)) break;
+}
+
+static void bank_free(BankImage *image)
+{
+    int i;
+    for (i = 0; i < image->levels; i++) free(image->level[i]);
+    free(image->file);
+    free(image);
+    bank_generation++;
+}
+
+/* Down to BANK_SPARE images with no user, the longest unused going first. */
+static void bank_trim(void)
+{
+    int i, spare = 0, oldest;
+    for (i = 0; i < bank_image_count; i++) spare += !bank_images[i]->users;
+    while (spare > BANK_SPARE) {
+        oldest = -1;
+        for (i = 0; i < bank_image_count; i++) {
+            if (!bank_images[i]->users && (oldest < 0 || bank_images[i]->released < bank_images[oldest]->released))
+                oldest = i;
+        }
+        bank_free(bank_images[oldest]);
+        bank_images[oldest] = bank_images[--bank_image_count];
+        spare--;
+    }
+    if (!bank_image_count) { free(bank_images); bank_images = NULL; }
+}
+
+/* The image of `file`, read now if it has not been (a failed one is kept,
+ * so as not to be read again); NULL when out of memory. */
+static BankImage *bank_image(const char *file)
+{
+    BankImage *image, **more;
+    int i;
+    for (i = 0; i < bank_image_count; i++) {
+        if (!strcmp(bank_images[i]->file, file)) return bank_images[i];
+    }
+    more = realloc(bank_images, (size_t)(bank_image_count + 1) * sizeof(*more));
+    if (!more) return NULL;
+    bank_images = more;
+    if (!(image = calloc(1, sizeof(*image))) || !(image->file = strdup(file))) { free(image); return NULL; }
+    image->key = ++bank_keys;
+    image->released = ++bank_clock;
+    bank_read(image);
+    bank_images[bank_image_count++] = image;
+    return image;
+}
+
+static void bank_release(BankImage *image)
+{
+    if (image && !--image->users) image->released = ++bank_clock;
+}
+
+void TexturePack_BankImagePreload(const char *file)
+{
+    if (file && *file) bank_image(file);
+    bank_trim();
+}
+
+void TexturePack_BankSpritesUseOwner(unsigned owner) { bank_sprite_owner = owner; }
+
+void TexturePack_BankSpritesClear(unsigned owner)
+{
+    int i, kept = 0;
+    for (i = 0; i < bank_sprite_count; i++) {
+        BankSprite *at = &bank_sprites[i];
+        if (owner == UINT_MAX || at->owner == owner) { bank_release(at->image); continue; }
+        if (kept != i) bank_sprites[kept] = *at;
+        kept++;
+    }
+    bank_sprite_count = kept;
+    bank_cached = -1;
+    if (!kept) { free(bank_sprites); bank_sprites = NULL; }
+    bank_trim();
+}
+
+int TexturePack_AddBankSpriteCrop(int bank, int page_x, int page_y, int depth, int clut_x, int clut_y, int u, int v,
+                                  int w, int h, const char *file, int source_x, int source_y, int source_w,
+                                  int source_h)
+{
+    BankSprite *more, *at = NULL;
+    BankImage *image;
+    int i;
+    if (!file || bank <= 0 || w <= 0 || h <= 0 || u < 0 || v < 0 || u + w > 256 || v + h > 256 ||
+        source_x < 0 || source_y < 0 || (source_w == 0) != (source_h == 0) || source_w < 0 || source_h < 0) return 0;
+    if (depth == 2) clut_x = clut_y = 0; /* direct color: no palette */
+    for (i = 0; i < bank_sprite_count && !at; i++) {
+        BankSprite *same = &bank_sprites[i];
+        if (same->owner == bank_sprite_owner && same->bank == bank && same->page_x == page_x &&
+            same->page_y == page_y && same->depth == depth && same->u == u && same->v == v && same->w == w &&
+            same->h == h) at = same;
+    }
+    if (at && at->clut_x == clut_x && at->clut_y == clut_y && !strcmp(at->image->file, file) &&
+        at->source_x == source_x && at->source_y == source_y && at->source_w == source_w && at->source_h == source_h)
+        return 1;
+    if (!(image = bank_image(file))) return 0;
+    image->users++;
+    if (!at) {
+        more = realloc(bank_sprites, (size_t)(bank_sprite_count + 1) * sizeof(*more));
+        if (!more) { bank_release(image); bank_trim(); return 0; }
+        bank_sprites = more;
+        at = &bank_sprites[bank_sprite_count++];
+    } else bank_release(at->image);
+    *at = (BankSprite){bank_sprite_owner, bank, page_x, page_y, depth, clut_x, clut_y, u, v, w, h,
+                       source_x, source_y, source_w, source_h, image};
+    bank_cached = -1;
+    bank_trim();
+    TextureDump_BankSample = TexturePack_BankSample;
+    return 1;
+}
+
+int TexturePack_AddBankSprite(int bank, int page_x, int page_y, int depth, int clut_x, int clut_y, int u, int v,
+                              int w, int h, const char *file)
+{
+    return TexturePack_AddBankSpriteCrop(bank, page_x, page_y, depth, clut_x, clut_y, u, v, w, h, file, 0, 0, 0, 0);
+}
+
+/* Whether the sprite is in this page, read at this depth through this
+ * palette (a draw of the same texels through another palette, a fade's or
+ * an effect's, is the game's own). */
+static int bank_sprite_in(const BankSprite *at, int bank, int page_x, int page_y, int depth, int clut_x, int clut_y)
+{
+    return at->bank == bank && at->page_x == page_x && at->page_y == page_y && at->depth == depth &&
+           (depth == 2 || (at->clut_x == clut_x && at->clut_y == clut_y));
+}
+
+int TexturePack_BankEntryFor(int bank, int page_x, int page_y, int depth, int clut_x, int clut_y, int u, int v)
+{
+    int i;
+    for (i = bank_sprite_count - 1; i >= 0; i--) {
+        BankSprite *at = &bank_sprites[i];
+        if (bank_sprite_in(at, bank, page_x, page_y, depth, clut_x, clut_y) && u >= at->u && u < at->u + at->w &&
+            v >= at->v && v < at->v + at->h && at->image->level[0]) return -i - 1;
+    }
+    return 0;
+}
+
+int TexturePack_BankEntryForRegion(int bank, int page_x, int page_y, int depth, int clut_x, int clut_y, int u0,
+                                   int v0, int u1, int v1)
+{
+    int i;
+    for (i = bank_sprite_count - 1; i >= 0; i--) {
+        BankSprite *at = &bank_sprites[i];
+        if (bank_sprite_in(at, bank, page_x, page_y, depth, clut_x, clut_y) && u0 < at->u + at->w && u1 > at->u &&
+            v0 < at->v + at->h && v1 > at->v && at->image->level[0]) return -i - 1;
+    }
+    return 0;
+}
+
+static const BankSprite *bank_entry(int entry)
+{
+    return entry < 0 && -entry <= bank_sprite_count && bank_sprites[-entry - 1].image->level[0]
+               ? &bank_sprites[-entry - 1] : NULL;
+}
+
+/* The level to draw the sprite from at `scale` pixels to a texel: the
+ * smallest still with a texel to every pixel. */
+static int bank_level(const BankSprite *at, int scale)
+{
+    const BankImage *image = at->image;
+    int sw = at->source_w ? at->source_w : image->width[0], sh = at->source_h ? at->source_h : image->height[0];
+    int level = 0;
+    if (scale < 1) scale = 1;
+    while (level + 1 < image->levels && (long long)sw * image->width[level + 1] >= (long long)at->w * scale * image->width[0] &&
+           (long long)sh * image->height[level + 1] >= (long long)at->h * scale * image->height[0])
+        level++;
+    return level;
+}
+
+int TexturePack_BankSample(int bank, int page_x, int page_y, int depth, int clut_x, int clut_y, int u, int v,
+                           int scale, uint32_t *rgb)
+{
+    int entry = 0, tu = u >> 16, tv = v >> 16, x, y, level, width, height;
+    const BankSprite *at;
+    const BankImage *image;
+    const unsigned char *p;
+    int64_t sx, sy;
+    if (bank_cached >= 0 && bank_cached < bank_sprite_count) {
+        int newer;
+        at = &bank_sprites[bank_cached];
+        if (bank_sprite_in(at, bank, page_x, page_y, depth, clut_x, clut_y) && tu >= at->u && tu < at->u + at->w &&
+            tv >= at->v && tv < at->v + at->h && at->image->level[0]) {
+            for (newer = bank_sprite_count - 1; newer > bank_cached; newer--) {
+                const BankSprite *other = &bank_sprites[newer];
+                if (bank_sprite_in(other, bank, page_x, page_y, depth, clut_x, clut_y) && tu >= other->u &&
+                    tu < other->u + other->w && tv >= other->v && tv < other->v + other->h) break;
+            }
+            if (newer == bank_cached) entry = -bank_cached - 1;
+        }
+    }
+    if (!entry) entry = TexturePack_BankEntryFor(bank, page_x, page_y, depth, clut_x, clut_y, tu, tv);
+    if (!entry) return 0;
+    bank_cached = -entry - 1;
+    at = &bank_sprites[-entry - 1];
+    image = at->image;
+    level = bank_level(at, scale);
+    width = image->width[level];
+    height = image->height[level];
+    /* In level 0's texels, 16.16, then in the level's. */
+    sx = ((int64_t)at->source_x << 16) + (int64_t)(u - (at->u << 16)) * (at->source_w ? at->source_w : image->width[0]) / at->w;
+    sy = ((int64_t)at->source_y << 16) + (int64_t)(v - (at->v << 16)) * (at->source_h ? at->source_h : image->height[0]) / at->h;
+    x = (int)((sx * width / image->width[0]) >> 16);
+    y = (int)((sy * height / image->height[0]) >> 16);
+    x = x < 0 ? 0 : x >= width ? width - 1 : x;
+    y = y < 0 ? 0 : y >= height ? height - 1 : y;
+    p = image->level[level] + ((size_t)y * width + x) * 4;
+    if (p[3] < PACK_ALPHA_CLEAR) return 2;
+    *rgb = ((uint32_t)p[0] << 16) | ((uint32_t)p[1] << 8) | p[2] | ((uint32_t)(255 - p[3]) >> 1 << 24);
+    return 1;
+}
+
+int TexturePack_BankEntryRect(int entry, int *u, int *v, int *w, int *h)
+{
+    const BankSprite *at = bank_entry(entry);
+    if (!at) return 0;
+    *u = at->u; *v = at->v; *w = at->w; *h = at->h;
+    return 1;
+}
+
+int TexturePack_BankEntrySource(int entry, int *x, int *y, int *w, int *h)
+{
+    const BankSprite *at = bank_entry(entry);
+    if (!at) return 0;
+    *x = at->source_x; *y = at->source_y;
+    *w = at->source_w ? at->source_w : at->image->width[0];
+    *h = at->source_h ? at->source_h : at->image->height[0];
+    return 1;
+}
+
+unsigned TexturePack_BankEntryKey(int entry)
+{
+    const BankSprite *at = bank_entry(entry);
+    return at ? at->image->key : 0;
+}
+
+int TexturePack_BankEntryLevel(int entry, int level, const unsigned char **rgba, int *width, int *height)
+{
+    const BankSprite *at = bank_entry(entry);
+    if (!at || level < 0 || level >= at->image->levels) return 0;
+    *rgba = at->image->level[level];
+    *width = at->image->width[level];
+    *height = at->image->height[level];
+    return 1;
+}
+
+int TexturePack_BankEntryLevelFor(int entry, int scale)
+{
+    const BankSprite *at = bank_entry(entry);
+    return at ? bank_level(at, scale) : 0;
+}
+
+int TexturePack_BankKeyLive(unsigned key)
+{
+    int i;
+    for (i = 0; i < bank_image_count; i++) {
+        if (bank_images[i]->key == key) return 1;
+    }
+    return 0;
+}
+
+unsigned TexturePack_BankGeneration(void) { return bank_generation; }
 
 /* Readings of the same words: entries of one geometry, differing in depth
  * or palette (a sheet the game draws with several palettes). Sorted by
@@ -1635,6 +1994,13 @@ int TexturePack_EntryImage(int entry, const unsigned char **rgba, int *width, in
                            int *crop_width, int *rows, int *texels_per_word)
 {
     const Entry *at;
+    if (entry < 0) {
+        const BankSprite *sprite = bank_entry(entry);
+        if (!sprite) return 0;
+        *rgba = sprite->image->level[0]; *width = sprite->image->width[0]; *height = sprite->image->height[0];
+        *crop_left = 0; *crop_width = sprite->w; *rows = sprite->h; *texels_per_word = 1;
+        return 1;
+    }
     if (entry < 1 || entry > entry_count || !entries[entry - 1].image) return 0;
     at = &entries[entry - 1];
     *rgba = at->image;

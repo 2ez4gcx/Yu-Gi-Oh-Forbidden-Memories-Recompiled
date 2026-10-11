@@ -10,6 +10,10 @@
 #include "pc/mods/json.h"
 #include "pc/render/texture_dump.h"
 #include "pc/render/soft_gpu.h"
+/* Tests must execute their checks in Release CI too. */
+#ifdef NDEBUG
+#undef NDEBUG
+#endif
 #include <assert.h>
 #include <png.h>
 #include <stdio.h>
@@ -53,6 +57,23 @@ static void make_dir(const char *relative)
     char path[1024];
     snprintf(path, sizeof(path), "%s/%s", root, relative);
     assert(!mkdir(path, 0777));
+}
+
+static void write_png(const char *relative, const unsigned char *rgba, int width, int height)
+{
+    char path[1024];
+    unsigned char encoded[1024];
+    png_alloc_size_t size = sizeof(encoded);
+    png_image png = {0};
+    FILE *file;
+    png.version = PNG_IMAGE_VERSION;
+    png.width = (png_uint_32)width;
+    png.height = (png_uint_32)height;
+    png.format = PNG_FORMAT_RGBA;
+    assert(png_image_write_to_memory(&png, encoded, &size, 0, rgba, 0, NULL) && size <= sizeof(encoded));
+    snprintf(path, sizeof(path), "%s/%s", root, relative);
+    file = fopen(path, "wb");
+    assert(file && fwrite(encoded, 1, size, file) == size && !fclose(file));
 }
 
 /* A mod whose settings are named after the catalog's own folders. */
@@ -476,6 +497,85 @@ static void duplicate_settings(void)
     TexturePack_Unload();
 }
 
+/* Bank-backed pictures have independent owners, newest-overlap priority,
+ * half-open UV bounds, their palette, one read of a PNG for all sprites of
+ * it, levels for drawing small, and survive an ordinary texture-pack reload
+ * without touching its generation. */
+static void bank_sprites(void)
+{
+    static const unsigned char red[] = {255, 0, 0, 255};
+    static const unsigned char green[] = {0, 255, 0, 255};
+    unsigned char big[8 * 8 * 4];
+    char a[1024], b[1024], c[1024];
+    uint32_t rgb;
+    unsigned generation, key;
+    const unsigned char *pixels;
+    int i, w, h;
+    make_dir("bank");
+    write_png("bank/a.png", red, 1, 1);
+    write_png("bank/b.png", green, 1, 1);
+    /* 8x8: left half white, right half clear; level 1 4x4, level 3 1x1. */
+    for (i = 0; i < 64; i++) {
+        unsigned char *p = &big[i * 4];
+        p[0] = p[1] = p[2] = i % 8 < 4 ? 255 : 0;
+        p[3] = i % 8 < 4 ? 255 : 0;
+    }
+    write_png("bank/c.png", big, 8, 8);
+    snprintf(a, sizeof(a), "%s/bank/a.png", root);
+    snprintf(b, sizeof(b), "%s/bank/b.png", root);
+    snprintf(c, sizeof(c), "%s/bank/c.png", root);
+    TexturePack_BankSpritesClear(TEXTURE_BANK_OWNER_STARS);
+    TexturePack_BankSpritesClear(TEXTURE_BANK_OWNER_DUEL_UI);
+    generation = TexturePack_Generation();
+    TexturePack_BankSpritesUseOwner(TEXTURE_BANK_OWNER_STARS);
+    assert(TexturePack_AddBankSprite(14, 0, 0, 0, 0, 257, 0, 0, 16, 16, a));
+    assert(TexturePack_BankSample(14, 0, 0, 0, 0, 257, 1 << 16, 1 << 16, 2, &rgb) == 1 && rgb == 0xff0000);
+    /* Another palette (an effect's pass) draws the bank's own texels. */
+    assert(TexturePack_BankSample(14, 0, 0, 0, 544, 255, 1 << 16, 1 << 16, 2, &rgb) == 0);
+    assert(!TexturePack_BankEntryFor(14, 0, 0, 0, 544, 255, 1, 1));
+    TexturePack_BankSpritesUseOwner(TEXTURE_BANK_OWNER_DUEL_UI);
+    assert(TexturePack_AddBankSprite(14, 0, 0, 0, 0, 257, 8, 0, 8, 16, b));
+    /* Cache the older sprite first: the overlap must still choose newer. */
+    assert(TexturePack_BankSample(14, 0, 0, 0, 0, 257, 1 << 16, 1 << 16, 2, &rgb) == 1 && rgb == 0xff0000);
+    assert(TexturePack_BankSample(14, 0, 0, 0, 0, 257, 10 << 16, 1 << 16, 2, &rgb) == 1 && rgb == 0x00ff00);
+    assert(TexturePack_BankSample(14, 0, 0, 0, 0, 257, 1 << 16, 1 << 16, 2, &rgb) == 1 && rgb == 0xff0000);
+    TexturePack_BankSpritesClear(TEXTURE_BANK_OWNER_DUEL_UI);
+    assert(TexturePack_BankSample(14, 0, 0, 0, 0, 257, 10 << 16, 1 << 16, 2, &rgb) == 1 && rgb == 0xff0000);
+    TexturePack_BankSpritesUseOwner(TEXTURE_BANK_OWNER_STARS);
+    assert(TexturePack_AddBankSprite(14, 0, 0, 0, 0, 257, 16, 0, 16, 16, b));
+    assert(TexturePack_BankEntryForRegion(14, 0, 0, 0, 0, 257, 0, 0, 16, 16) == -1);
+    /* Two sprites of one PNG share it; placing one anew leaves the pack's
+     * generation (its textures) alone. */
+    TexturePack_BankSpritesUseOwner(TEXTURE_BANK_OWNER_LAYOUT_FRAME);
+    assert(TexturePack_AddBankSpriteCrop(13, 0, 0, 1, 0, 254, 0, 0, 4, 8, c, 0, 0, 4, 8));
+    assert(TexturePack_AddBankSpriteCrop(13, 128, 0, 1, 0, 254, 0, 0, 4, 8, c, 4, 0, 4, 8));
+    key = TexturePack_BankEntryKey(TexturePack_BankEntryFor(13, 0, 0, 1, 0, 254, 0, 0));
+    assert(key && key == TexturePack_BankEntryKey(TexturePack_BankEntryFor(13, 128, 0, 1, 0, 254, 0, 0)));
+    assert(TexturePack_BankEntryKey(TexturePack_BankEntryFor(14, 0, 0, 0, 0, 257, 0, 0)) != key);
+    assert(TexturePack_AddBankSpriteCrop(13, 0, 0, 1, 0, 254, 0, 0, 4, 8, a, 0, 0, 0, 0));
+    assert(TexturePack_AddBankSpriteCrop(13, 0, 0, 1, 0, 254, 0, 0, 4, 8, c, 0, 0, 4, 8));
+    assert(TexturePack_Generation() == generation && TexturePack_BankKeyLive(key));
+    /* A 4x8 crop on 4x8 texels has a PNG pixel to a texel: level 0 at any
+     * scale. The whole 8x8 on 2x2 texels is four to one: level 2 at 1x,
+     * level 1 at 2x, level 0 at 4x. */
+    i = TexturePack_BankEntryFor(13, 0, 0, 1, 0, 254, 0, 0);
+    assert(TexturePack_BankEntryLevelFor(i, 1) == 0 && TexturePack_BankEntryLevelFor(i, 2) == 0);
+    assert(TexturePack_BankEntryLevel(i, 1, &pixels, &w, &h) && w == 4 && h == 4);
+    assert(pixels[0] == 255 && pixels[3] == 255 && pixels[2 * 4 + 3] == 0);
+    assert(TexturePack_BankEntryLevel(i, 3, &pixels, &w, &h) && w == 1 && h == 1);
+    /* Half covered: white at half alpha, the clear texels' black unmixed. */
+    assert(pixels[0] == 255 && pixels[3] == 127);
+    assert(!TexturePack_BankEntryLevel(i, 4, &pixels, &w, &h));
+    assert(TexturePack_AddBankSpriteCrop(13, 256, 0, 1, 0, 254, 0, 0, 2, 2, c, 0, 0, 8, 8));
+    i = TexturePack_BankEntryFor(13, 256, 0, 1, 0, 254, 0, 0);
+    assert(TexturePack_BankEntryLevelFor(i, 1) == 2 && TexturePack_BankEntryLevelFor(i, 2) == 1);
+    assert(TexturePack_BankEntryLevelFor(i, 4) == 0);
+    TexturePack_BankSpritesClear(TEXTURE_BANK_OWNER_LAYOUT_FRAME);
+    TexturePack_Unload();
+    assert(TexturePack_BankSample(14, 0, 0, 0, 0, 257, 1 << 16, 1 << 16, 2, &rgb) == 1 && rgb == 0xff0000);
+    TexturePack_BankSpritesClear(TEXTURE_BANK_OWNER_STARS);
+}
+
 int main(void)
 {
     char path[1024], problems[256];
@@ -507,6 +607,7 @@ int main(void)
     named_folder();
     shared_word();
     duplicate_settings();
+    bank_sprites();
     field_thumbnail(0);
     field_thumbnail(1);
     made_image();

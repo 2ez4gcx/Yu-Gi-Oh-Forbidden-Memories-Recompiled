@@ -943,13 +943,9 @@ static int low_and_fast(uintptr_t start, size_t size)
 
 static unsigned char *map_at(uintptr_t at, size_t size)
 {
-    void *got = mmap((void *)at, size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
-    if (got == MAP_FAILED) return NULL;
-    if ((uintptr_t)got != at) {   /* a kernel older than MAP_FIXED_NOREPLACE takes it as a hint */
-        munmap(got, size);
-        return NULL;
-    }
-    return got;
+    void *got = Memories_MapFixed((void *)at, size, PROT_READ | PROT_WRITE,
+                                  MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
+    return got == MAP_FAILED ? NULL : got;
 }
 
 /* The image's memory: the first free place in the game's range, in 64 KiB

@@ -81,8 +81,8 @@ static unsigned char *arena_take(size_t size)
     if (!tried) {
         void *wanted = (void *)(uintptr_t)ARENA_BASE, *got;
         tried = 1;
-        got = mmap(wanted, ARENA_SIZE, PROT_READ | PROT_WRITE, MAP_FIXED_NOREPLACE | MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-        if (got != MAP_FAILED && got != wanted) munmap(got, ARENA_SIZE); /* taken as a hint */
+        got = Memories_MapFixed(wanted, ARENA_SIZE, PROT_READ | PROT_WRITE,
+                                MAP_FIXED_NOREPLACE | MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
         if (got == wanted) {
             arena = got;
         } else {

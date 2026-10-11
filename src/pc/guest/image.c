@@ -18,8 +18,11 @@
 #include "pc/platform/win32.h"
 #include <windows.h>
 #else
+#include "pc/compat/mman.h" /* <sys/mman.h> and Memories_MapFixed */
 #include <signal.h>
-#include <sys/mman.h>
+#ifdef __linux__
+#include <sys/prctl.h>
+#endif
 #include <ucontext.h>
 #endif
 
@@ -68,6 +71,9 @@ int Memories_ScratchpadRetailView;
 /* Memories_GuestMapError: the first step Memories_GuestMap failed at. */
 static char map_error[160];
 const char *Memories_GuestMapError(void) { return map_error; }
+/* The mappings that held the range of that step (say_occupants). */
+static char map_occupants[1024];
+const char *Memories_GuestMapOccupants(void) { return map_occupants; }
 
 static void report_low_access(uint32_t eip, uint32_t address)
 {
@@ -724,45 +730,80 @@ int Memories_GuestMap(void)
 #endif
     return result ? -1 : 0;
 }
+
+int Memories_KernelRefusesTakenRange(void) { return -1; }
 #else
 static int view_protection = PROT_READ | PROT_WRITE;
 
 /* What already holds part of [low, high) (/proc/self/maps), for a guest
  * range that cannot be mapped: in an Android app ART's heap can reach the
- * guest's ranges (notes/pc-build.md, "Android arm64"). */
-static void say_occupants(uint32_t low, uint64_t high)
+ * guest's ranges (notes/pc-build.md, "Android arm64"). With `keep`, the
+ * mappings also go to map_occupants (Memories_GuestMapOccupants) as
+ * "start-end perms name", for the player's report. */
+static void say_occupants(uint32_t low, uint64_t high, int keep)
 {
     char text[512];
     unsigned long long start, end;
+    size_t used = strlen(map_occupants);
     FILE *maps = fopen("/proc/self/maps", "r");
     if (!maps) return;
     while (fgets(text, sizeof(text), maps)) {
-        if (sscanf(text, "%llx-%llx", &start, &end) == 2 && start < high && end > low)
-            fprintf(stderr, "memories-pc: occupied by %s", text);
+        char perms[8];
+        int name = 0;
+        if (sscanf(text, "%llx-%llx %7s %*s %*s %*s %n", &start, &end, perms, &name) < 3 || start >= high ||
+            end <= low)
+            continue;
+        fprintf(stderr, "memories-pc: occupied by %s", text);
+        if (keep && used + 1 < sizeof(map_occupants)) {
+            int added = snprintf(map_occupants + used, sizeof(map_occupants) - used, "%llx-%llx %s %.*s\n", start,
+                                 end, perms, name ? (int)strcspn(text + name, "\r\n") : 0, name ? text + name : "");
+            if (added > 0)
+                used = used + (size_t)added < sizeof(map_occupants) ? used + (size_t)added : sizeof(map_occupants) - 1;
+        }
     }
     fclose(maps);
 }
 
 static int map_at(uint32_t address, size_t length, int fd, off_t offset)
 {
-    void *wanted = (void *)(uintptr_t)address, *got;
+    void *wanted = (void *)(uintptr_t)address;
     int flags = MAP_FIXED_NOREPLACE | (fd < 0 ? MAP_PRIVATE | MAP_ANONYMOUS : MAP_SHARED);
-    got = mmap(wanted, length, fd < 0 ? PROT_READ | PROT_WRITE : view_protection, flags, fd, offset);
-    if (got != wanted) {
-        /* EEXIST: something holds part of the range; a kernel before 4.17
-         * takes the address as a hint and may map elsewhere. */
-        int error = errno;
-        if (got != MAP_FAILED) munmap(got, length);
-        fprintf(stderr, "cannot map guest memory at 0x%08x: %s\n", (unsigned)address,
-                got == MAP_FAILED ? strerror(error) : "the system mapped it elsewhere");
-        if (!map_error[0])
+    if (Memories_MapFixed(wanted, length, fd < 0 ? PROT_READ | PROT_WRITE : view_protection, flags, fd, offset) !=
+        wanted) {
+        /* EEXIST: something holds part of the range (a kernel before 4.17,
+         * which takes the address as a hint, put it elsewhere: told the
+         * same way by Memories_MapFixed). */
+        int error = errno, first = !map_error[0];
+        const char *why = error == EEXIST ? "something else in this process already holds them" : strerror(error);
+        fprintf(stderr, "cannot map guest memory at 0x%08x: %s\n", (unsigned)address, why);
+        if (first)
             snprintf(map_error, sizeof(map_error), "the addresses from 0x%08X to 0x%08llX could not be had (%s)",
-                     (unsigned)address, (unsigned long long)address + length - 1,
-                     got == MAP_FAILED ? strerror(error) : "the system placed them elsewhere");
-        say_occupants(address, (uint64_t)address + length);
+                     (unsigned)address, (unsigned long long)address + length - 1, why);
+        say_occupants(address, (uint64_t)address + length, first);
         return -1;
     }
     return 0;
+}
+
+int Memories_KernelRefusesTakenRange(void)
+{
+    /* MAP_FIXED_NOREPLACE over a page that is surely mapped (this file's
+     * own data): EEXIST where the kernel knows the flag; a kernel before
+     * 4.17 maps a page elsewhere, never over it (without MAP_FIXED the
+     * address is only a hint). */
+    long page = sysconf(_SC_PAGESIZE);
+    void *held, *got;
+    int flags = MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE;
+#ifdef MEMORIES_TEST_HOOKS
+    const char *old = getenv("MEMORIES_TEST_OLD_KERNEL");
+    if (old && old[0] && old[0] != '0') flags &= ~MAP_FIXED_NOREPLACE;
+#endif
+    if (page <= 0) return -1;
+    held = (void *)((uintptr_t)map_error & ~(uintptr_t)(page - 1));
+    got = mmap(held, (size_t)page, PROT_NONE, flags, -1, 0);
+    if (got == MAP_FAILED) return errno == EEXIST ? 1 : -1;
+    munmap(got, (size_t)page);
+    return got == held ? -1 : 0;
 }
 
 #if defined(__i386__)
@@ -1011,10 +1052,9 @@ static void hold_retail_scratchpad(void)
     int writable;
     if (!value || !*value || !strcmp(value, "0")) return;
     writable = !strcmp(value, "rw");
-    got = mmap(wanted, 0x1000, writable ? PROT_READ | PROT_WRITE : PROT_NONE,
-               MAP_FIXED_NOREPLACE | MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    got = Memories_MapFixed(wanted, 0x1000, writable ? PROT_READ | PROT_WRITE : PROT_NONE,
+                            MAP_FIXED_NOREPLACE | MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     if (got != wanted) {
-        if (got != MAP_FAILED) munmap(got, 0x1000);
         fprintf(stderr, "memories-pc: MEMORIES_TEST_HOLD_SCRATCHPAD: 0x%08x could not be held\n",
                 MEMORIES_GUEST_SCRATCHPAD_RETAIL);
         return;
@@ -1027,6 +1067,36 @@ static void hold_retail_scratchpad(void)
         atexit(report_held_page);
     }
 }
+
+/* MEMORIES_TEST_HOLD_GUEST=1 (or an address, 0x80000000 by default): 2 MiB
+ * there are held before the guest is mapped, as the large object space of
+ * an Android app's Java runtime holds guest RAM on phones whose runtime
+ * uses the concurrent copying collector (notes/pc-build.md, "Android
+ * arm64"). Named as that space is where the kernel names anonymous
+ * mappings (Android's), so the start-up report reads as the phone's would.
+ * With MEMORIES_TEST_OLD_KERNEL=1 the guest's mappings then take the path
+ * of a kernel before 4.17. A test hook: not in a release. */
+static void hold_guest(void)
+{
+    const char *value = getenv("MEMORIES_TEST_HOLD_GUEST");
+    unsigned long at;
+    void *wanted, *got;
+    if (!value || !*value || !strcmp(value, "0")) return;
+    at = strtoul(value, NULL, 0);
+    if (at <= 1) at = MEMORIES_GUEST_RAM;
+    wanted = (void *)(uintptr_t)(at & ~0xFFFul);
+    got = Memories_MapFixed(wanted, 0x200000, PROT_NONE, MAP_FIXED_NOREPLACE | MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (got != wanted) {
+        fprintf(stderr, "memories-pc: MEMORIES_TEST_HOLD_GUEST: %p could not be held\n", wanted);
+        return;
+    }
+#ifdef __linux__
+    /* PR_SET_VMA, PR_SET_VMA_ANON_NAME: Android kernels, Linux 5.17+. */
+    prctl(0x53564d41, 0, (unsigned long)(uintptr_t)got, 0x200000ul,
+          (unsigned long)(uintptr_t)"dalvik-free list large object space (MEMORIES_TEST_HOLD_GUEST)");
+#endif
+    fprintf(stderr, "memories-pc: %p-%p is held (MEMORIES_TEST_HOLD_GUEST)\n", got, (void *)((char *)got + 0x200000));
+}
 #endif
 
 int Memories_GuestMap(void)
@@ -1035,6 +1105,7 @@ int Memories_GuestMap(void)
     int fd, result;
 #ifdef MEMORIES_TEST_HOOKS
     if (guest_ram_executable()) view_protection |= PROT_EXEC;
+    hold_guest();
 #endif
     Memories_GuestBranchResolver = guest_branch_target;
     check_code_address();
@@ -1073,9 +1144,9 @@ int Memories_GuestMap(void)
 #endif
     if (!result) {
         void *wanted = (void *)(uintptr_t)MEMORIES_GUEST_SCRATCHPAD_RETAIL;
-        void *got = mmap(wanted, 0x1000, view_protection, MAP_FIXED_NOREPLACE | MAP_SHARED, fd, MEMORIES_GUEST_RAM_SIZE);
+        void *got = Memories_MapFixed(wanted, 0x1000, view_protection, MAP_FIXED_NOREPLACE | MAP_SHARED, fd,
+                                      MEMORIES_GUEST_RAM_SIZE);
         Memories_ScratchpadRetailView = got == wanted;
-        if (got != MAP_FAILED && got != wanted) munmap(got, 0x1000); /* taken as a hint */
         if (!Memories_ScratchpadRetailView) {
             fprintf(stderr, "memories-pc: 0x%08x is taken here; the scratchpad is reached at 0x%08x\n",
                     MEMORIES_GUEST_SCRATCHPAD_RETAIL, MEMORIES_GUEST_SCRATCHPAD);
@@ -1133,13 +1204,12 @@ void Memories_ReserveModCode(void)
     if (!dladdr((void *)Memories_GuestMap, &info) || !info.dli_fbase) return;
     start = (uintptr_t)info.dli_fbase + MOD_CODE_GAME_SPAN;
     if (start + MOD_CODE_SIZE > 0x100000000ull) return;
-    got = mmap((void *)start, MOD_CODE_SIZE, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE |
-               MAP_FIXED_NOREPLACE, -1, 0);
+    got = Memories_MapFixed((void *)start, MOD_CODE_SIZE, PROT_NONE,
+                            MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE | MAP_FIXED_NOREPLACE, -1, 0);
     if (got != (void *)start) {
-        if (got != MAP_FAILED) munmap(got, MOD_CODE_SIZE);   /* a kernel without MAP_FIXED_NOREPLACE */
         fprintf(stderr, "memories-pc: the code mods' range at %p is taken; no code mod can be loaded\n",
                 (void *)start);
-        say_occupants((uint32_t)start, (uint64_t)start + MOD_CODE_SIZE);
+        say_occupants((uint32_t)start, (uint64_t)start + MOD_CODE_SIZE, 0);
         return;
     }
     mod_code_start = start;

@@ -285,7 +285,8 @@ replay can begin at a state.
      `run_tick` in libetc.c) and at every `Platform_WaitVBlank` turn, keyed
      by a count of service calls since the start; a play feeds the same
      values to the same calls. About two thousand service calls a second
-     (the VBlank wait wakes every 0.5 ms), so a few tens of KB a second
+     (the VBlank wait wakes every 0.5 ms on Linux, about every millisecond
+     on Windows), so a few tens of KB a second
      before compression; the interrupt clock (`MEMORIES_CLOCK=interrupt`,
      the profiler) would be left out. Not built: the first way makes every
      session replayable with nothing recorded but the pads.

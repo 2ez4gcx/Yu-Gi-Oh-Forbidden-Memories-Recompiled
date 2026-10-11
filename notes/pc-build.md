@@ -1303,8 +1303,9 @@ profiler takes its samples from that timer, so `MEMORIES_PROFILE` without
 `MEMORIES_CLOCK` chooses it too, and the log says so. The console's interrupt
 work (the VBlank callback, the sequencer's root counter, disc delivery,
 MDEC, memory card) is run on the main thread where the game calls in to
-wait or to read the time: every `VSync`, `Platform_WaitVBlank` (which wakes
-every 0.5 ms and runs what is due) and `Platform_PollTime`. The game's
+wait or to read the time: every `VSync`, `Platform_WaitVBlank` (which sleeps
+between services and runs what is due; see "The wait's sleeps" below) and
+`Platform_PollTime`. The game's
 interrupt code therefore never runs in the middle of anything, which is what
 the SIGALRM holds and, on Windows, the suspend-and-redirect clock thread and
 its repairs exist for; in this mode that thread only watches for stalls.
@@ -1341,6 +1342,41 @@ the duel cases do not, with either clock, from one real-time run to the
 next: the deck is shuffled from time-dependent state, so the scripted
 presses meet a different hand (checked on the hand camera case: three
 clocks, three hands).
+
+**The wait's sleeps.** Between two services `Platform_WaitVBlank` sleeps.
+On Linux, macOS and Android that is `nanosleep` for 0.5 ms (a little more
+with the kernel's timer slack). On Windows `nanosleep` is winpthreads',
+which counts whole milliseconds: 0.5 ms came out as 0 ms and returned at
+once without even yielding, so until 2026-10-11 the main thread polled the
+clock flat out, a whole core (about 980 ms of CPU a second in a duel, 32-
+and 64-bit alike), and a 1-5 ms `nanosleep` sleeps to the 15.6 ms system
+tick, 10-15 ms late. The Windows wait now naps with a high-resolution
+waitable timer (`Win32_Sleep`; Windows 10 1803 and later, else
+`timeBeginPeriod(1)` and `Sleep`). It asks for at most 0.5 ms, as on Linux,
+since the disc's plain reads (2 sectors a service), its completions and
+the MDEC move a piece at each service; Windows' 0.5 ms timer tick makes
+that about 1 ms. A high-resolution timer wakes 0.3-0.6 ms after the time
+asked, about 1 ms at worst, so the wait does not sleep in the last
+`Win32_SleepMargin` (1 ms; 2.5 ms on the fallback) before the next VBlank
+or the sequencer's next tick (`Platform_SetTickDue`, from libetc's
+`run_tick`), and polls through it as before. The virtual clock's pacing in
+a window uses the same sleeps. The interrupt clock still polls.
+
+Measured in a real-time duel (`MEMORIES_TRACE=frames`, the control client
+stepping 3600 VBlanks; five interleaved 60 s runs of each, medians; the
+machine runs Process Lasso, which lowered the polling builds to below
+normal priority in every run):
+
+| build | main thread CPU | process CPU | VBlanks/s | sequencer lateness, mean / worst | VBlank lateness, mean / worst | frame interval deviation | menus to duel |
+|---|---|---|---|---|---|---|---|
+| 32-bit, polling | 978 ms/s | 102% of a core | 59.94 | 91 us / 8.4 ms | 4 us / 3.8 ms | 184 us | 17.3 s |
+| 32-bit, sleeping | 208 ms/s | 24% | 59.94 | 105 us / 4.3 ms | 25 us / 7.7 ms | 179 us | 17.2 s |
+| 64-bit, polling | 968 ms/s | 101% | 59.94 | 89 us / 23 ms | 47 us / 43 ms | 396 us | 17.2 s |
+| 64-bit, sleeping | 187 ms/s | 23% | 59.94 | 83 us / 3.7 ms | 11 us / 2.0 ms | 101 us | 17.2 s |
+
+The worst cases on both sides are the machine's stalls (a present or a
+game frame of 50-450 ms, in the log as `spike`); in the quietest runs a
+sleeping build's worst VBlank was under 1 ms.
 
 Not yet: Linux has only been compiled with it (its stall reports come from
 the crash monitor process, since no tick runs); the sampling profiler

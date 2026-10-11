@@ -61,6 +61,7 @@ static void run_tick(uint64_t game_now, uint64_t real_now)
     Memories_DiscService(game_now);
     Memories_MdecService();
     if (!counter_running || !counter_handler || !counter_period_us) {
+        Platform_SetTickDue(0);
         return;
     }
     if (!counter_next_us) {
@@ -90,6 +91,7 @@ static void run_tick(uint64_t game_now, uint64_t real_now)
     if (real_now >= counter_next_us) {
         counter_next_us = real_now + counter_period_us;
     }
+    Platform_SetTickDue(counter_next_us); /* the wait sleeps no later than this (Windows) */
 }
 
 static void run_vblank(void)

@@ -99,6 +99,8 @@ static void deliver_vblank(void)
 static int cooperative;
 /* VBlanks the clock may still deliver, -1 for no limit (Platform_LimitVBlanks). */
 static volatile int vblank_budget = -1;
+/* When the tick handler's next timed work is due, in real us (Platform_SetTickDue). */
+static volatile uint64_t tick_due;
 
 static void advance(uint64_t real_now, uintptr_t eip)
 {
@@ -551,6 +553,40 @@ void Platform_StopTimers(void)
 #endif
 }
 
+#ifdef _WIN32
+/* Sleeps from `now` toward `due` (real us), at most `longest` us, and not
+ * at all in the last Win32_SleepMargin before it, which the caller polls
+ * through as it did: a Windows timer can wake that late, so `due` is kept
+ * as well as the loop's polling kept it. */
+static void sleep_toward(uint64_t now, uint64_t due, unsigned longest)
+{
+    unsigned margin = Win32_SleepMargin();
+    if (due > now + margin) {
+        uint64_t rest = due - now - margin;
+        Win32_Sleep(rest < longest ? (unsigned)rest : longest);
+    }
+}
+
+/* The cooperative clock's wait between two services (Platform_WaitVBlank),
+ * on Windows: naps of 0.5 ms, as on Linux, since the disc's plain reads,
+ * its completions and the MDEC move a piece at each service, but none in
+ * the last Win32_SleepMargin before the VBlank or the sequencer's next tick
+ * (Platform_SetTickDue), so that neither comes later than when the wait
+ * polled the clock without a break. */
+static void nap_before_due(void)
+{
+    uint64_t now = now_us(), due = tick_due ? tick_due : UINT64_MAX;
+    if (rate > 0 && next_vblank > virtual_now) {
+        /* As of the service just run (advance): real_prev is its real time. */
+        uint64_t vblank = real_prev + (next_vblank - virtual_now) * 100u / (unsigned)rate;
+        if (vblank < due) due = vblank;
+    } else if (rate > 0) {
+        due = now; /* due, and held back by the VBlank limit: poll */
+    }
+    sleep_toward(now, due, 500);
+}
+#endif
+
 /* The virtual clock in a window (MEMORIES_DETERMINISTIC=1 without
  * MEMORIES_HEADLESS), before a VBlank: paused, nothing moves until the pause
  * ends or a frame step lets one VBlank through; running, the VBlank waits
@@ -558,7 +594,9 @@ void Platform_StopTimers(void)
  * window's events, so the game sees the same as uncapped. */
 static void pace(void)
 {
+#ifndef _WIN32
     struct timespec nap = {0, 500000};
+#endif
     uint64_t now;
     if (!deterministic_paced || controlled) return;
     while (rate == 0 && !step_pending && !Platform_ShouldQuit()) {
@@ -566,8 +604,10 @@ static void pace(void)
         Platform_PumpEvents();
 #ifdef _WIN32
         Win32_Heartbeat(); /* paused, not hung */
-#endif
+        Win32_Sleep(500);
+#else
         nanosleep(&nap, NULL);
+#endif
     }
     step_pending = 0;
     if (rate <= 0) {
@@ -577,8 +617,12 @@ static void pace(void)
     now = now_us();
     if (!pace_next || now > pace_next + 100000u) pace_next = now; /* a stall: start the grid again */
     while (now < pace_next) {
+#ifdef _WIN32
+        sleep_toward(now, pace_next, ~0u);
+#else
         struct timespec rest = {0, (long)(pace_next - now) * 1000};
         nanosleep(&rest, NULL);
+#endif
         now = now_us();
     }
     pace_next += (uint64_t)vblank_period * 100u / (unsigned)rate;
@@ -640,6 +684,11 @@ void Platform_LimitVBlanks(int count)
     vblank_budget = count;
 }
 
+void Platform_SetTickDue(uint64_t real_us)
+{
+    tick_due = real_us;
+}
+
 void Platform_WaitVBlank(unsigned count_at_entry)
 {
     struct timespec nap = {0, 500000};
@@ -690,8 +739,12 @@ void Platform_WaitVBlank(unsigned count_at_entry)
             if (rate == 0) Win32_Heartbeat(); /* paused, not hung */
             Win32_ServiceInterrupt();
             if (vblank_count != count_at_entry) break;
+            if (cooperative) {
+                nap_before_due();
+                continue;
+            }
 #endif
-            nanosleep(&nap, NULL);
+            nanosleep(&nap, NULL); /* on Windows (interrupt clock), returns at once */
         }
     }
 }

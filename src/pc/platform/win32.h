@@ -26,6 +26,13 @@ int Win32_UndoInterruptedFault(void *context);
  * the executable (sleeping, in a driver). Call from waits on the main thread. */
 void Win32_ServiceInterrupt(void);
 
+/* Sleeps about `microseconds` on the calling thread (nanosleep sleeps whole
+ * milliseconds here, and not at all below one). It can wake up to
+ * Win32_SleepMargin microseconds late: a wait for a deadline stops sleeping
+ * that long before it. */
+void Win32_Sleep(unsigned microseconds);
+unsigned Win32_SleepMargin(void);
+
 /* The hang watchdog, run from the clock thread so that it also sees a main
  * thread stuck outside the executable (a driver, a lock), which the tick
  * cannot reach: `report` gets the main thread's registers once VSync has not

@@ -4485,14 +4485,22 @@ then goes depends on the scan's random start). AOSP's own arm64 sample of
 an app's maps (`system/libprocinfo/testdata/maps`) shows that resulting
 layout, though from a smaller region space (0x12C00000-0x2AC00000): the
 512 MiB large object space at 0x77B8B000-0x97B8B000, after the
-non-moving space, and the JIT caches after it to 0x9BB8B000. The Xiaomi 11T Pro above runs
-the userfaultfd collector (`ro.dalvik.vm.enable_uffd_gc`), whose moving
-space is the heap size once (0x02000000-0x22000000), so the large object
-space fits below the boot image (0x42000000) and the game runs. So the
-phones in question are the ones whose ART runs the concurrent copying or
-CMS collector with a heap size of about 450m or more (512m is the usual value): Android 7 to 11
-(ART is not an updatable module there), and 12 and later where the ART
-module does not use userfaultfd. The x86_64 emulator does not show it
+non-moving space, and the JIT caches after it to 0x9BB8B000. The Xiaomi 11T Pro above has
+ART code from android-16 on (an updated ART module), which starts the heap
+at 0x02000000 instead of 0x12C00000: its layout is exactly the concurrent
+copying collector's at that base (a region space of twice 512m to
+0x42000000 in the zygote, clamped to twice the 256m growth limit in the
+app, which leaves 0x22000000-0x42000000 a hole), so the large object space
+fits below the boot image (0x42000000) and the game runs. Whether that
+phone uses the userfaultfd collector is not shown; it would fit too. So the
+phones in question are the ones whose ART is older than android-16's and
+runs the concurrent copying or CMS collector, with a heap size of about
+450m or more (the JIT caches, 128 MiB in an app from Android 11, can take
+the range from about 450m; the large object space always does from about
+503m; 512m is the usual value): Android 7 to 11 (the ART module never
+updates there), and 12 to 15 without ART module updates (no Play system
+updates, e.g. HarmonyOS) or where the module runs concurrent copying
+because the kernel lacks the userfaultfd features. The x86_64 emulator does not show it
 (x86_64 ART maps with `MAP_32BIT` and a map-per-object large object
 space), so the layout is known from ART's source and that sample, and is
 to be confirmed by a player's report (below). Nothing in the app comes

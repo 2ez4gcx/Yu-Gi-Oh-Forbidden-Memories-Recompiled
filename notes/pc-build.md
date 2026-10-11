@@ -1382,6 +1382,10 @@ sleeping build's worst VBlank was under 1 ms. The sound is mixed on SDL's
 audio thread, apart from the wait; the HUD's underrun count came out the
 same in a 60 s duel run of each build (one about every 2 s, with polling
 and with sleeping, 32- and 64-bit), and so did the audio queue (2.8-3 ms).
+Loads did not slow: the control client's jumps to Library, Build Deck, the
+map, the title and a duel, and the duel's deal, took the same VBlanks with
+either wait (377, 184, 184, 2, 132 and 688, within a frame or ten), two
+real-time runs of each build.
 
 Not yet: Linux has only been compiled with it (its stall reports come from
 the crash monitor process, since no tick runs); the sampling profiler

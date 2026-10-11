@@ -26,6 +26,7 @@
 #ifdef MEMORIES_PC
 #include "pc/cards/cards.h"
 #include "pc/cards/tables.h"
+#include "pc/cards/monster_effects_duel.h"
 #endif
 
 /* The combined-deck producer and one duel card record's lifecycle, in address
@@ -96,6 +97,9 @@ void DuelCard_DeactivateRecord(DuelCardRecord *object)
 
 void DuelCard_RemoveFromField(DuelCardRecord *object)
 {
+#ifdef MEMORIES_PC
+    MonsterEffects_Removed((int)(object - D_801A7AD8));
+#endif
     DuelCard_DeactivateRecord(object);
     object->flags = 0;
 }

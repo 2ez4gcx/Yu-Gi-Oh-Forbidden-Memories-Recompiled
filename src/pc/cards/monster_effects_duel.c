@@ -156,27 +156,32 @@ int MonsterEffects_BattleAbortMask(void)
     return aborted;
 }
 
+void MonsterEffects_Removed(int record)
+{
+    int i;
+    if (!S.trap_pending || phase() != PHASE_BATTLE) return;
+    for (i = 0; i < 2; i++) {
+        if (record == S.trap_battle_record[i]) S.battle_abort |= 1 << i;
+    }
+}
+
+static int trap_participant(int record)
+{
+    int i;
+    if (!S.trap_pending || phase() != PHASE_BATTLE) return 0;
+    for (i = 0; i < 2; i++) {
+        if (record == S.trap_battle_record[i] && !(S.battle_abort & (1 << i))) return 1;
+    }
+    return 0;
+}
+
 static int finish_attack_trap(void)
 {
-    int i, abort = 0;
-
     if (!S.trap_pending) return 0;
-    /* Replacement traps run before combat. Once their custom work has
-     * drained, cancel that combat only if it actually removed one of its
-     * original participants; heals and boosts leave it to proceed. */
-    for (i = 0; i < 2; i++) {
-        int record = S.trap_battle_record[i];
-        if (record >= 0 && record < MONSTER_RECORDS &&
-            !(D_801A7AD8[record].flags & DUEL_CARD_FLAG_OCCUPIED)) {
-            S.battle_abort |= 1 << i;
-            abort = 1;
-        }
-    }
+    /* Battle setup deactivates both field records while their separate
+     * battle objects are shown. Only an explicit removal cancels combat. */
     S.trap_pending = 0;
-    /* A harmless replacement only postpones combat while its own queue is
-     * handled. Now that it is safe to continue, run the participants' normal
-     * combat triggers once; the abort path has no combat to resume. */
-    if (!abort) MonsterEffects_Battle();
+    if (!S.battle_abort) MonsterEffects_Battle();
     return S.count || S.battle_life_count;
 }
 
@@ -424,13 +429,15 @@ static int resolve(void)
         S.destroy_mask = 0;
         for (record = 0; record < MONSTER_RECORDS; record++) {
             DuelCardRecord *card = &D_801A7AD8[record];
-            if (!monster_zone(record) || !(card->flags & DUEL_CARD_FLAG_OCCUPIED)) continue;
+            if (!monster_zone(record) ||
+                (!(card->flags & DUEL_CARD_FLAG_OCCUPIED) && !trap_participant(record))) continue;
             if (!reaches(effect, trigger.record, record, card->card_id)) continue;
             /* Crush Card only walks the opposing physical row.  A data
              * effect which explicitly names its owner (or all monsters)
-             * removes that row here; the retail sequencer still presents
-             * the opposing row below. */
-            if (card_effect && owner(record) == side) {
+             * removes that row here. Lifted battle participants have no
+             * field object for Crush Card to walk, so remove them here too;
+             * the retail sequencer still presents the opposing row below. */
+            if (trap_participant(record) || (card_effect && owner(record) == side)) {
                 DuelCard_RemoveFromField(card);
                 hit = 1;
             } else {

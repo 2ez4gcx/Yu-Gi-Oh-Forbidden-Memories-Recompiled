@@ -93,6 +93,8 @@ void MonsterEffects_AttackTrapPlayed(int card, int side);
 void MonsterEffects_TrapPresented(int card, int side);
 void MonsterEffects_TrackBattleParticipants(int attacker, int defender);
 int MonsterEffects_BattleAbortMask(void);
+/* Explicit field removal, distinct from lifting a record for battle. */
+void MonsterEffects_Removed(int record);
 /* Placement committed a card to `record` (func_8001B170, the ritual):
  * `equip` when it put a field monster back on its zone (an equip, or a
  * fusion onto it). */

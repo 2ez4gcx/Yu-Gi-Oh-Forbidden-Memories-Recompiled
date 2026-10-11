@@ -1651,9 +1651,11 @@ into isolated folders and play real duels (no changes to your saves or mods):
     python3 tests/pc/editor_mods_runtime.py
     python3 tests/pc/editor_mods_runtime.py --hard-mode
     python3 tests/pc/editor_round_trip_runtime.py
+    xvfb-run -a python3 tests/pc/editor_tables_runtime.py
     xvfb-run -a python3 tests/pc/editor_duelists_runtime.py
     python3 tests/pc/ritual_tributes_runtime.py --editor --interpreter
     xvfb-run -a python3 tests/pc/editor_values_runtime.py
+    xvfb-run -a python3 tests/pc/editor_values_runtime.py --parts ends --end-repeats 10
     xvfb-run -a python3 tests/pc/editor_ui_runtime.py [--baseline <a build before>]
     xvfb-run -a python3 tests/pc/editor_board_runtime.py [--out DIR]
     xvfb-run -a -s "-screen 0 1600x1000x24" python3 tests/pc/editor_menu_runtime.py [--baseline <a build before>]
@@ -1692,6 +1694,22 @@ duel effects interpreted (its docstring lists every check). The
 art, fusions, equips, rituals, duelists, starter decks, values, Guardian
 Stars, packs, the map, a setting), exports it, and starts a new game into
 a duel on it: the game must read each part and note nothing against it.
+`editor_tables_runtime.py` exports edits through the tabs, reopens the mod,
+and checks their behavior with it enabled and disabled: added and removed
+fusions, a new equip target, a Guardian Star bonus in an actual battle,
+the campaign map's live camera and route table, imported card and map-panel
+artwork rendered by the game, and a pack purchase's price and cards added
+to the chest. Its screenshots and logs are saved
+under `--out` (default `tmp/pc/editor-tables`).
+`replacement_trap_combat_runtime.py` checks healing traps against direct
+and defended attacks, destruction of the attacker, defender or both, and
+exactly one combat trigger when combat continues. `tools/pc/test_libgs_priority.py`
+is a disc-free test of the actual packet sorter with an ILP32 C compiler:
+it checks valid priorities and Exodia's out-of-range depths without allowing
+writes into adjacent memory.
+`editor_values_runtime.py --parts ends --end-repeats 10` repeats Exodia and
+deck-out checks in fresh games with ten deterministic RNG seeds, both with
+and without the Values mod.
 `editor_values_runtime.py` types every new value into the Values tab and
 plays the mod and the game without it: a duel to its end and results (LP,
 Crush Card, Spellbinding Circle, Shadow Spell, the Swords' turns, the rank

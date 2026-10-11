@@ -304,18 +304,30 @@ class Run:
 
     # --- the ends of a duel ----------------------------------------------
 
-    def ends(self) -> None:
-        with self.game("ends") as g:
+    def ends(self, repeats: int = 1) -> None:
+        for iteration in range(repeats):
+            self.end_pair(iteration if repeats > 1 else None)
+
+    def end_pair(self, iteration: int | None) -> None:
+        suffix = "" if iteration is None else f"-{iteration}"
+
+        def arrange(g):
+            g.arrange_deck(0, EXODIA)
+            if iteration is not None:
+                # Vary the ray choreography reproducibly across fresh games.
+                g.poke("gRand_dwSeed", struct.pack("<I", iteration + 1))
+
+        with self.game(f"ends{suffix}") as g:
             g.goto("duel", opponent=1, deck=EXODIA + [ELF] * 35)
-            g.duel_ready(before_deal=lambda g: g.arrange_deck(0, EXODIA))
-            self.results(g, "exodia")
+            g.duel_ready(before_deal=arrange)
+            self.results(g, f"exodia{suffix}")
             g.goto("duel", opponent=1, deck=[ELF] * 40)
             g.duel_ready()
             g.play_card(0)
             # The CPU's next draw is past its forty: it loses by its empty deck.
             g.poke(g.address("D_800E9FF0") + SIDE + DECK_CURSOR, bytes([40]))
             g.press_until(lambda g: g.turn() != 0 or g.duel_over(), "start", every=60, timeout=1200)
-            self.results(g, "deck-out")
+            self.results(g, f"deck-out{suffix}")
 
     # --- Build Deck ------------------------------------------------------
 
@@ -376,7 +388,11 @@ def main():
     parser.add_argument("--out", type=Path, default=OUT)
     parser.add_argument("--shots", type=Path, help="where the pictures are copied (default OUT/shots)")
     parser.add_argument("--parts", default="duel,ends,build_deck,new_game", help="which checks (comma-separated)")
+    parser.add_argument("--end-repeats", type=int, default=1,
+                        help="repeat Exodia/deck-out in fresh games with varied RNG seeds")
     arguments = parser.parse_args()
+    if arguments.end_repeats < 1:
+        parser.error("--end-repeats must be at least 1")
     out = arguments.out
     shots = arguments.shots or out / "shots"
     shutil.rmtree(out, ignore_errors=True)
@@ -388,7 +404,10 @@ def main():
         run = Run(arguments.executable, out, shots, which)
         parts = arguments.parts.split(",")
         for part in parts:
-            getattr(run, part)()
+            if part == "ends":
+                run.ends(arguments.end_repeats)
+            else:
+                getattr(run, part)()
         said = run.said()
         if which == "mod":
             for key in VALUES:

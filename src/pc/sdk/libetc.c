@@ -91,7 +91,9 @@ static void run_tick(uint64_t game_now, uint64_t real_now)
     if (real_now >= counter_next_us) {
         counter_next_us = real_now + counter_period_us;
     }
-    Platform_SetTickDue(counter_next_us); /* the wait sleeps no later than this (Windows) */
+    /* The wait sleeps no later than this (Windows). Under the virtual clock
+     * real_now is virtual time, but that clock's waits never nap. */
+    Platform_SetTickDue(counter_next_us);
 }
 
 static void run_vblank(void)
@@ -355,8 +357,9 @@ int Memories_VSync(int mode)
             struct timespec previous = left;
             clock_gettime(CLOCK_MONOTONIC, &left);
             if (previous.tv_sec) {
-                unsigned interval = (unsigned)((left.tv_sec - previous.tv_sec) * 1000000 +
-                                               (left.tv_nsec - previous.tv_nsec) / 1000);
+                int64_t micros = (int64_t)(left.tv_sec - previous.tv_sec) * 1000000 +
+                                 (left.tv_nsec - previous.tv_nsec) / 1000;
+                unsigned interval = micros > 0xFFFFFFFFll ? 0xFFFFFFFFu : (unsigned)micros; /* a long pause */
                 intervals++;
                 interval_sum += interval;
                 interval_squares += (double)interval * interval;
@@ -457,4 +460,5 @@ void LibEtc_State(MemoriesState *state)
         (uint64_t)phase <= counter_period_us) {
         counter_next_us = last_real_us + (uint64_t)phase;
     }
+    Platform_SetTickDue(counter_next_us); /* a loaded state's next tick, for the wait */
 }

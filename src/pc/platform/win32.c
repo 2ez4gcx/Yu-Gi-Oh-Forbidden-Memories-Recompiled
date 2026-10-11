@@ -142,12 +142,54 @@ int Memories_SigProcMask(int how, const sigset_t *set, sigset_t *previous)
 static volatile LONG clock_stop;
 static int watch_only; /* the cooperative clock: the thread reports stalls and never touches the main thread */
 static HANDLE clock_thread;
+/* The watch alone wakes this often (the stall is seconds long, so a report
+ * comes at most this much late), and Win32_StopInterrupt wakes it at once. */
+#define WATCH_PERIOD_MS 100
+static HANDLE watch_stop;
+
+/* The stall reporter, on every wakeup of the clock thread. Elapsed time, as
+ * Linux measures it: a wakeup is 1 ms only with the interrupt clock's
+ * high-resolution timer; its fallback timer coalesces to ~15 ms, and the
+ * watch alone wakes every WATCH_PERIOD_MS. */
+static void watch_for_stall(void)
+{
+    static LONG seen_beat;
+    static ULONGLONG quiet_since;
+    static int stall_reported;
+    CONTEXT context;
+    if (heartbeat != seen_beat) {
+        seen_beat = heartbeat;
+        quiet_since = GetTickCount64();
+        stall_reported = 0;
+    } else if (stall_report && stall_ms && seen_beat && !stall_reported &&
+               GetTickCount64() - quiet_since >= stall_ms) {
+        /* Registers taken while suspended, reported after resuming: the
+         * report writes files, and the main thread may hold the C
+         * runtime's locks. */
+        stall_reported = 1;
+        if (SuspendThread(main_thread) != (DWORD)-1) {
+            context.ContextFlags = CONTEXT_CONTROL | CONTEXT_INTEGER;
+            GetThreadContext(main_thread, &context);
+            ResumeThread(main_thread);
+            stall_report(&context);
+            /* The monitor's dump, taken from outside, is the better one. */
+            if (!Monitor_Active()) write_dump("hang", NULL, main_id);
+        }
+    }
+}
 
 static DWORD WINAPI run_clock(void *unused)
 {
-    HANDLE timer = CreateWaitableTimerExW(NULL, NULL, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS);
+    HANDLE timer;
     LARGE_INTEGER due;
     (void)unused;
+    if (watch_only) {
+        /* Nothing to deliver: no 1 kHz timer, which woke this thread at
+         * the highest priority a thousand times a second for the watch. */
+        while (WaitForSingleObject(watch_stop, WATCH_PERIOD_MS) == WAIT_TIMEOUT && !clock_stop) watch_for_stall();
+        return 0;
+    }
+    timer = CreateWaitableTimerExW(NULL, NULL, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS);
     if (!timer) timer = CreateWaitableTimerW(NULL, FALSE, NULL);
     due.QuadPart = -10000; /* 1 ms, in 100 ns units */
     if (!timer || !SetWaitableTimer(timer, &due, 1, NULL, NULL, FALSE)) {
@@ -156,36 +198,12 @@ static DWORD WINAPI run_clock(void *unused)
     }
     for (;;) {
         CONTEXT context;
-        static LONG seen_beat;
-        static ULONGLONG quiet_since;
-        static int stall_reported;
         WaitForSingleObject(timer, INFINITE);
         if (clock_stop) {
             CloseHandle(timer);
             return 0;
         }
-        /* Elapsed time, as Linux measures it: a wakeup is 1 ms only with the
-         * high-resolution timer; the fallback timer coalesces to ~15 ms. */
-        if (heartbeat != seen_beat) {
-            seen_beat = heartbeat;
-            quiet_since = GetTickCount64();
-            stall_reported = 0;
-        } else if (stall_report && stall_ms && seen_beat && !stall_reported &&
-                   GetTickCount64() - quiet_since >= stall_ms) {
-            /* Registers taken while suspended, reported after resuming: the
-             * report writes files, and the main thread may hold the C
-             * runtime's locks. */
-            stall_reported = 1;
-            if (SuspendThread(main_thread) != (DWORD)-1) {
-                context.ContextFlags = CONTEXT_CONTROL | CONTEXT_INTEGER;
-                GetThreadContext(main_thread, &context);
-                ResumeThread(main_thread);
-                stall_report(&context);
-                /* The monitor's dump, taken from outside, is the better one. */
-                if (!Monitor_Active()) write_dump("hang", NULL, main_id);
-            }
-        }
-        if (watch_only) continue;
+        watch_for_stall();
         if (SuspendThread(main_thread) == (DWORD)-1) continue;
         context.ContextFlags = CONTEXT_CONTROL | CONTEXT_INTEGER | CONTEXT_SEGMENTS | CONTEXT_EXCEPTION_REQUEST;
         if (GetThreadContext(main_thread, &context)) {
@@ -307,9 +325,13 @@ int Win32_StartInterrupt(void (*tick)(uintptr_t eip, void *context))
         return -1;
     }
     Win32_ImageRange(&image_low, &image_high);
+    if (watch_only && !watch_stop && !(watch_stop = CreateEventW(NULL, TRUE, FALSE, NULL))) return -1;
     thread = CreateThread(NULL, 0, run_clock, NULL, 0, NULL);
     if (!thread) return -1;
-    SetThreadPriority(thread, THREAD_PRIORITY_TIME_CRITICAL);
+    /* The interrupt clock must preempt the game every millisecond. The
+     * watch needs only to run while the main thread spins, which a priority
+     * above the game's threads ensures. */
+    SetThreadPriority(thread, watch_only ? THREAD_PRIORITY_HIGHEST : THREAD_PRIORITY_TIME_CRITICAL);
     clock_thread = thread;
     atexit(Win32_StopInterrupt);
     return 0;
@@ -338,6 +360,7 @@ void Win32_StopInterrupt(void)
 {
     if (!clock_thread || GetCurrentThreadId() != main_id) return;
     InterlockedExchange(&clock_stop, 1);
+    if (watch_stop) SetEvent(watch_stop);
     WaitForSingleObject(clock_thread, 1000);
     CloseHandle(clock_thread);
     clock_thread = NULL;

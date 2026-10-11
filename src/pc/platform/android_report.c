@@ -703,4 +703,106 @@ void Android_OfferCrashReport(void)
                     "no personal data and none of your saves.",
                     save ? with_save : share_only, save ? 4 : 3, save ? 3 : 2, chosen);
 }
+
+/* --- a start that failed before the window opened -------------------- */
+
+/* The game's own notices need the window, and the next launch, which would
+ * offer a report, stops at the same place: so the report is offered here,
+ * in the system's message box, with Share and Save to Downloads as the
+ * crash report has them. The box comes back after each, for the share
+ * sheet runs while this process (whose ReportProvider serves the file)
+ * still lives; Close ends it. */
+int Android_OfferStartupReport(const char *title, const char *message, const char *details)
+{
+    static const SDL_MessageBoxButtonData with_save[] = {
+        {0, 0, "Share"}, {0, 1, "Save to Downloads"}, {SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT, 2, "Close"}};
+    static const SDL_MessageBoxButtonData share_only[] = {
+        {0, 0, "Share"}, {SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT, 2, "Close"}};
+    char line[2048], clean[2600], value[PROP_VALUE_MAX], value2[PROP_VALUE_MAX], memory[64], build[64], commit[96];
+    char *text, *shown;
+    const char *at, *facts, *headless = getenv("MEMORIES_HEADLESS");
+    size_t used = 0, room = 8192, shown_size;
+    struct tm when;
+    time_t seconds = time(NULL);
+    int save, button;
+    fprintf(stderr, "memories-pc: %s\n%s\n", title, details);
+    if (headless && *headless && strcmp(headless, "0")) return 0;
+    if (!(text = malloc(room))) return 0;
+    text[0] = '\0';
+#define ADD(...)                                                                                   \
+    do {                                                                                           \
+        int length_ = snprintf(line, sizeof(line), __VA_ARGS__);                                   \
+        if (length_ > 0) append(&text, &used, &room, line, (size_t)length_ < sizeof(line) ? (size_t)length_ : sizeof(line) - 1); \
+    } while (0)
+    program_file("buildid", build, sizeof(build));
+    program_file("commit", commit, sizeof(commit));
+    ADD("YFM Re-Decomp start-up report (Android)\n");
+    ADD("app version: %s\n", Memories_Version[0] ? Memories_Version : "development build");
+    ADD("build: %s (commit %s)\n", build[0] ? build : "unknown", commit[0] ? commit : "unknown");
+    property("ro.product.manufacturer", value);
+    property("ro.product.model", value2);
+    ADD("device: %s %s\n", value, value2);
+    property("ro.build.version.release", value);
+    property("ro.build.version.sdk", value2);
+    ADD("Android: %s (API %s)\n", value, value2);
+    free_memory(memory, sizeof(memory));
+    ADD("free memory now: %s\n", memory);
+    ADD("%s\n\n%s\n\n", title, message);
+#undef ADD
+    /* The details line by line, the player's own paths taken out. */
+    for (at = details; text && *at;) {
+        size_t length = strcspn(at, "\n");
+        snprintf(line, sizeof(line), "%.*s\n", (int)(length < sizeof(line) - 2 ? length : sizeof(line) - 2), at);
+        redact(line, clean, sizeof(clean));
+        append(&text, &used, &room, clean, strlen(clean));
+        at += length + (at[length] == '\n');
+    }
+    if (!text) return 0;
+    free(offer.text);
+    offer.text = text;
+    offer.size = used;
+    property("ro.build.version.sdk", value);
+    offer.api = atoi(value);
+    save = offer.api >= DOWNLOADS_API;
+    localtime_r(&seconds, &when);
+    strftime(offer.file_name, sizeof(offer.file_name), "yfm-redecomp-startup-%Y%m%d-%H%M%S.txt", &when);
+    snprintf(offer.name, sizeof(offer.name), "%s", offer.file_name);
+    shown_size = strlen(message) + 512;
+    if (!(shown = malloc(shown_size))) return 0;
+    snprintf(shown, shown_size, "%s", message);
+    if (!(facts = strstr(message, "\n\n"))) facts = "";
+    if (!SDL_InitSubSystem(SDL_INIT_VIDEO)) fprintf(stderr, "memories-pc: start-up report: %s\n", SDL_GetError());
+    for (;;) {
+        const SDL_MessageBoxData box = {SDL_MESSAGEBOX_ERROR, NULL, title, shown, save ? 3 : 2,
+                                        save ? with_save : share_only, NULL};
+        Java call;
+        button = 2;
+        if (!SDL_ShowMessageBox(&box, &button)) {
+            fprintf(stderr, "memories-pc: start-up report: no message box (%s)\n", SDL_GetError());
+            free(shown);
+            return 0;
+        }
+        if (button != 0 && button != 1) break;
+        memset(&call, 0, sizeof(call));
+        call.share = button == 0;
+        offer.saved_name[0] = '\0';
+        Memories_OnHostStack(java_call, &call);
+        /* What happened takes the place of the message's first paragraph
+         * (what to do), so the box keeps its height: its buttons sit under
+         * the text, and it does not scroll in landscape. */
+        if (call.bad)
+            snprintf(shown, shown_size, "%s %s%s", call.share ? "Not shared:" : "Not saved:",
+                     call.why[0] ? call.why : "something went wrong.", facts);
+        else if (call.share)
+            snprintf(shown, shown_size, "The report went to the share sheet. Close this once it is sent.%s",
+                     facts);
+        else
+            snprintf(shown, shown_size, "The report is in your Downloads folder as %s.%s",
+                     offer.saved_name[0] ? offer.saved_name : offer.file_name, facts);
+        fprintf(stderr, "memories-pc: start-up report %s: %s\n", offer.file_name,
+                call.bad ? call.why : call.share ? "shared" : "saved to Downloads");
+    }
+    free(shown);
+    return 1;
+}
 #endif

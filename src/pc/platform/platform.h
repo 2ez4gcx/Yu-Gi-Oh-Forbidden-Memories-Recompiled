@@ -109,6 +109,14 @@ int Platform_CopyText(const char *text);
  * (Android 10+) or Not now. Nothing when there is none, and never in a
  * scripted or headless run. Desktops have no such thing. */
 void Android_OfferCrashReport(void);
+/* android_report.c: a start that failed before the window opened (the
+ * guest memory could not be mapped). `message`, for the player, is shown in
+ * the system's message box with Share, Save to Downloads (Android
+ * 10+) and Close; the report is the app's version, the device, `message`
+ * and `details` (the player's paths taken out). 1 once the player closed
+ * it, 0 when no box could be shown (or a headless run): the caller then
+ * shows `message` its own way. */
+int Android_OfferStartupReport(const char *title, const char *message, const char *details);
 #endif
 /* PS1 digital pad bits, active high (Select 0x0001 ... Square 0x8000).
  * Async-signal-safe: it only reads a word written by Platform_Present. */

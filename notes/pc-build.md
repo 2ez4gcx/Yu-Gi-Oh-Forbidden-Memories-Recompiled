@@ -4479,15 +4479,18 @@ the usual `heapsize` of 512m (`phone-xhdpi-*-dalvik-heap.mk`) it ends
 near 0x52C00000, the 484 MiB or less left before the boot image
 (0x70000000 with up to 16 MiB of random shift either way) cannot take
 512 MiB, and the large object space goes right after the boot image and
-the non-moving space: 0x77B8B000-0x97B8B000 in AOSP's own arm64 sample of
-an app's maps (`system/libprocinfo/testdata/maps`), with the JIT caches
-after it to 0x9BB8B000. That holds 0x80000000 and 0x90000000 on every
-start of such a phone, not one boot in some. The Xiaomi 11T Pro above runs
+the non-moving space, over 0x80000000 and 0x90000000, on every start of
+such a phone (a heap size of about 450m or less fits below, and where it
+then goes depends on the scan's random start). AOSP's own arm64 sample of
+an app's maps (`system/libprocinfo/testdata/maps`) shows that resulting
+layout, though from a smaller region space (0x12C00000-0x2AC00000): the
+512 MiB large object space at 0x77B8B000-0x97B8B000, after the
+non-moving space, and the JIT caches after it to 0x9BB8B000. The Xiaomi 11T Pro above runs
 the userfaultfd collector (`ro.dalvik.vm.enable_uffd_gc`), whose moving
 space is the heap size once (0x02000000-0x22000000), so the large object
 space fits below the boot image (0x42000000) and the game runs. So the
 phones in question are the ones whose ART runs the concurrent copying or
-CMS collector with a heap size of about 490m or more: Android 7 to 11
+CMS collector with a heap size of about 450m or more (512m is the usual value): Android 7 to 11
 (ART is not an updatable module there), and 12 and later where the ART
 module does not use userfaultfd. The x86_64 emulator does not show it
 (x86_64 ART maps with `MAP_32BIT` and a map-per-object large object
@@ -4502,8 +4505,11 @@ a guest that is not at fixed addresses.
 phones: 3.18, 4.4, 4.9, 4.14) and take the address as a hint: a free range
 is given as asked, a taken one goes wherever the kernel puts it (in a
 64-bit app top-down from below the stack, far above 4 GB, so never onto
-another fixed range). Every fixed mapping of the port goes through
-`Memories_MapFixed` (`compat/mman.h`), which undoes such a mapping and
+another fixed range). Every fixed mapping that must not replace anything
+(the guest's ranges and views, the stacks, the low memory region, the
+text arena, mod arenas and images, the loader's reservation; not the code
+mod loader's map over its own held range, nor the kernel probe) goes
+through `Memories_MapFixed` (`compat/mman.h`), which undoes such a mapping and
 answers EEXIST as a newer kernel does; it never checks the range and then
 maps with `MAP_FIXED`, since ART's own threads map below 4 GB in between.
 On such a kernel the message read "the system placed them elsewhere";
@@ -4526,8 +4532,14 @@ process below 4 GB. The loader's own refusal (0xC0000000 taken) puts the
 device and the first two holders in its message the same way. In a test
 build, `MEMORIES_TEST_HOLD_GUEST=1` (or an address) holds 2 MiB at
 0x80000000 named as ART's large object space, and
-`MEMORIES_TEST_OLD_KERNEL=1` drops the flag as a kernel before 4.17 does
-(both through `environment.txt` in the app).
+`MEMORIES_TEST_OLD_KERNEL=1` drops the flag from the game's own fixed
+mappings as a kernel before 4.17 does (both through `environment.txt` in
+the app; the loader runs before that file is read and is built without
+test hooks, so its reservation keeps the flag). A scripted or headless
+run gets no box with buttons: the message goes to the error box (and the
+log) with "send a screenshot" instead. On Linux -m32 the replays
+first-duel, mod-3d-monsters and mod-hand-camera match with
+`--env MEMORIES_TEST_OLD_KERNEL=1`.
 
 **The retail scratchpad is never used in the app.** 0x1F800000 lies inside
 ART's heap there (the port says "0x1f800000 is taken here; the scratchpad

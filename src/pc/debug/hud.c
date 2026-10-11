@@ -17,6 +17,9 @@
 #include <string.h>
 
 static struct { int x, y, w, h; } bounds;
+/* The mods' overlays when Hud_DrawMods drew them ahead of the next Hud_Draw:
+ * what they covered. */
+static struct { int drawn, x, y, w, h; } mods_first;
 
 static uint32_t blend(uint32_t under, uint32_t over, unsigned alpha)
 {
@@ -122,12 +125,22 @@ static void cover(int x, int y, int w, int h)
     bounds.x = x; bounds.y = y; bounds.w = w; bounds.h = h;
 }
 
+void Hud_DrawMods(MenuCanvas *canvas)
+{
+    Mods_DrawOverlay(canvas, Menu_Scale(), Menu_DrawTextScaled, Menu_TextWidthScaled, &mods_first.x, &mods_first.y,
+                     &mods_first.w, &mods_first.h);
+    mods_first.drawn = 1;
+}
+
 /* The statistics, the fusion helper, duel rank and Free Duel progress, the
- * mods' overlays, then the save slot or deck menu over them. */
+ * mods' overlays (unless Hud_DrawMods drew them first), then the save slot or
+ * deck menu over them. */
 void Hud_Draw(MenuCanvas *canvas)
 {
-    int x, y, w, h;
+    int x, y, w, h, mods_drawn = mods_first.drawn;
+    mods_first.drawn = 0;
     draw_stats(canvas);
+    if (mods_drawn) cover(mods_first.x, mods_first.y, mods_first.w, mods_first.h);
     FusionHelper_Draw(canvas, &x, &y, &w, &h);
     cover(x, y, w, h);
     RankMeter_Draw(canvas, &x, &y, &w, &h);
@@ -136,8 +149,10 @@ void Hud_Draw(MenuCanvas *canvas)
     cover(x, y, w, h);
     TitleScreen_Draw(canvas, &x, &y, &w, &h);
     cover(x, y, w, h);
-    Mods_DrawOverlay(canvas, Menu_Scale(), Menu_DrawTextScaled, Menu_TextWidthScaled, &x, &y, &w, &h);
-    cover(x, y, w, h);
+    if (!mods_drawn) {
+        Mods_DrawOverlay(canvas, Menu_Scale(), Menu_DrawTextScaled, Menu_TextWidthScaled, &x, &y, &w, &h);
+        cover(x, y, w, h);
+    }
     SaveMenu_Draw(canvas, &x, &y, &w, &h);
     if (!w || !h) DeckMenu_Draw(canvas, &x, &y, &w, &h);
     cover(x, y, w, h);

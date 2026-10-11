@@ -26,6 +26,17 @@ the 32-bit one, its SDK the same (build_mod.py builds every target), and
 its README's Mods section says that a code mod needs a 64-bit build
 there.
 
+Every archive's SDK carries the export list of each target build_mod.py
+builds for (sdk/exports.<target>.txt: i386, x86_64-windows, aarch64), so
+it checks every object it makes, not only the one for the game beside it.
+A game build writes only its own target's list; the others come from those
+targets' game builds of the same tree (their <build>/source, which
+build_game32.py writes, must be this build's): tmp/pc/win32 (or game32),
+tmp/pc/win64 and tmp/pc/android-arm64-v8a, or the build folders
+--exports-from names (CI, where each is built in its own job and only its
+sdk/exports.<target>.txt and source are handed on). Packing stops when one
+is missing or from another tree.
+
     python3 tools/pc/package.py android-arm64  # the Android app, signed
 
 android-arm64 is not among the default ones (it needs the Android SDK, the
@@ -53,6 +64,12 @@ TARGETS = {"android-arm64": "android-arm64-v8a"}
 # The archive's top folder: the two Windows archives unpacked side by side
 # must not mix (one game's mod objects beside the other executable).
 FOLDER = {"windows-x64": "-x64"}
+# The mod target each system's game loads (build_mod.py's TARGETS), and the
+# builds another system's archive takes that target's export list from, in
+# the order they are looked in (the 32-bit Windows game's for i386 first).
+MOD_TARGET = {"windows": "i386", "linux": "i386", "windows-x64": "x86_64-windows", "android-arm64": "aarch64"}
+SDK_TARGETS = ("i386", "x86_64-windows", "aarch64")
+EXPORT_BUILDS = {"i386": ["windows", "linux"], "x86_64-windows": ["windows-x64"], "aarch64": ["android-arm64"]}
 # What the README's Mods section adds for the 64-bit Windows game, before
 # its paragraph on installing mods (tools/pc/release/README.txt).
 X64_MODS = """This is the 64-bit Windows game. A mod that contains code needs a 64-bit
@@ -141,7 +158,52 @@ def set_pe_checksum(executable):
         handle.write(data)
 
 
-def stage(system, label):
+def read_source(build_dir):
+    """The tree a game build was made from (build_game32.py's source_stamp),
+    or None."""
+    try:
+        with open(os.path.join(build_dir, "source")) as handle:
+            return handle.read().strip() or None
+    except OSError:
+        return None
+
+
+def sdk_exports(system, exports_from=()):
+    """{target: its export list} for the other targets than `system`'s own,
+    each from a game build of the same tree as `system`'s: the folders
+    `exports_from` names, then the target's builds in tmp/pc. Stops, with
+    what to build, when one is missing or was built from another tree."""
+    build_dir = os.path.join(ROOT, BUILDS[system][0])
+    own = read_source(build_dir)
+    if own in (None, "unknown"):
+        sys.exit(f"package: {os.path.relpath(build_dir, ROOT)} has no source stamp: build it again with "
+                 "tools/pc/build_game32.py, in a git checkout; nothing was packed")
+    lists = {}
+    for target in SDK_TARGETS:
+        if target == MOD_TARGET[system]:
+            continue
+        builds = [os.path.join(ROOT, BUILDS[other][0]) for other in EXPORT_BUILDS[target]]
+        others = []
+        for folder in [os.path.abspath(path) for path in exports_from] + builds:
+            path = os.path.join(folder, "sdk", f"exports.{target}.txt")
+            if not os.path.isfile(path):
+                continue
+            source = read_source(folder)
+            if source == own:
+                lists[target] = path
+                break
+            others.append(f"{os.path.relpath(folder, ROOT)} is from {source or 'an unknown tree'}")
+        if target not in lists:
+            named = TARGETS.get(EXPORT_BUILDS[target][0], EXPORT_BUILDS[target][0])
+            found = "; ".join(others) if others else "no build has its exports." + target + ".txt"
+            sys.exit(f"package: the {system} SDK needs the {target} game's export list from a build of this tree "
+                     f"({own}): {found}. Build it (python tools/pc/build_game32.py --target {named} --release "
+                     f"--build {BUILDS[EXPORT_BUILDS[target][0]][0]}) or name one with --exports-from; "
+                     "nothing was packed")
+    return lists
+
+
+def stage(system, label, exports=None):
     build_dir, executable, extras = BUILDS[system]
     build_dir = os.path.join(ROOT, build_dir)
     folder = os.path.join(DIST, "stage", system, f"{NAME}-{label}{FOLDER.get(system, '')}")
@@ -153,6 +215,9 @@ def stage(system, label):
         strip(os.path.join(folder, executable))
     for name in ("mods", "sdk", "languages"):
         shutil.copytree(os.path.join(build_dir, name), os.path.join(folder, name))
+    # The other targets' export lists, beside this game's own (sdk_exports).
+    for target, path in (exports or {}).items():
+        shutil.copyfile(path, os.path.join(folder, "sdk", f"exports.{target}.txt"))
     # This build's symbol table, under its build id and under the game
     # fingerprint (the same table): not the ones earlier builds left there.
     with open(os.path.join(build_dir, "buildid")) as handle:
@@ -252,6 +317,9 @@ def main():
     parser.add_argument("--no-build", action="store_true", help="pack what is already built")
     parser.add_argument("--skip-smoke", action="store_true", help="build without ROM-dependent gameplay tests (CI)")
     parser.add_argument("--version", help="archive version, e.g. v0.1.0 or dev-abcdef0")
+    parser.add_argument("--exports-from", action="append", default=[], metavar="BUILD",
+                        help="another target's game build folder (its sdk/exports.<target>.txt and source) to take "
+                             "that target's export list from for the SDK (repeatable; default: tmp/pc's builds)")
     options = parser.parse_args()
     systems = options.systems or ["windows", "windows-x64", "linux"]
     if set(systems) - set(BUILDS):
@@ -274,11 +342,15 @@ def main():
         # Packing everything: the other archives do not wait on it.
         print(f"package: windows-x64 skipped: {missing}; the other archives are packed", file=sys.stderr)
         systems = [system for system in systems if system != "windows-x64"]
+    if not options.no_build:
+        for system in systems:
+            build(system, label, options.skip_smoke)
+    # Every build first: each SDK takes the other targets' export lists from
+    # theirs, and nothing is packed while one is missing.
+    exports = {system: sdk_exports(system, options.exports_from) for system in systems if system != "android-arm64"}
     made = []
     for system in systems:
-        if not options.no_build:
-            build(system, label, options.skip_smoke)
-        made.append(pack_apk(label) if system == "android-arm64" else pack(system, stage(system, label)))
+        made.append(pack_apk(label) if system == "android-arm64" else pack(system, stage(system, label, exports[system])))
     shutil.rmtree(os.path.join(DIST, "stage"), ignore_errors=True)
     for path in made:
         print(f"{os.path.relpath(path, ROOT)}: {os.path.getsize(path) / 1e6:.1f} MB")

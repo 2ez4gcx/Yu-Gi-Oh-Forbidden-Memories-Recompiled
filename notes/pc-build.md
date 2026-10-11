@@ -3120,6 +3120,23 @@ in place of the 32-bit one, and the same mod SDK ("Mod SDK M1" below). Where its
 or later), `package.py` with no arguments skips it with a message and packs
 the other two; `package.py windows-x64` stops instead.
 
+Every archive's SDK carries the export list of each mod target
+(`sdk/exports.i386.txt`, `exports.x86_64-windows.txt`, `exports.aarch64.txt`,
+and `exports.txt`, the i386 one under its old name, in the 32-bit ones), so
+its `build_mod.py` checks every object it builds. A game build writes only
+its own target's list, with `<build>/source` (the commit, and a digest of
+uncommitted changes); `package.py` builds every system it packs before it
+packs any, and takes each other target's list from that target's build in
+`tmp/pc` (`win32` or `game32`, `win64`, `android-arm64-v8a`) or from a
+folder `--exports-from` names, only when its `source` is this build's. It
+stops, naming what to build, when one is missing or from another tree; so
+packing without the Android build needs `build_game32.py --target
+android-arm64-v8a --release` first. The release workflow builds the arm64
+game in its `android` job and the 64-bit Windows game in `sdk-exports-x64`,
+and hands their lists to the `package` jobs. `test_package.py` refuses an
+archive whose SDK lacks one, or whose lists differ from another archive's
+packed with it.
+
 ### Crash reports
 
 The executable runs the game as its own child and stays as its monitor

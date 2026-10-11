@@ -411,7 +411,11 @@ cmake --build tmp/pc/cmake-test --parallel
 # message where x86_64-w64-mingw32-clang 21 or later is missing):
 python tools/pc/package.py --version v0.1.0
 
-# Compile/package without a disc (the CI path):
+# Compile/package without a disc (the CI path). Each SDK takes the other
+# targets' export lists from their builds of the same tree (notes/pc-build.md,
+# "Sharing a build"), so build those first, or name them with --exports-from:
+python tools/pc/build_game32.py --target android-arm64-v8a --backend sdl --release --build tmp/pc/android-arm64-v8a
+python tools/pc/build_game32.py --target windows-x64 --backend sdl --release --build tmp/pc/win64
 python tools/pc/package.py linux --skip-smoke --version dev-preview
 python tools/pc/package.py windows --skip-smoke --version dev-preview
 

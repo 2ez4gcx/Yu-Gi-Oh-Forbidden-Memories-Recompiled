@@ -194,18 +194,27 @@ def missing_64bit():
     return missing
 
 
-def toolchain_help(missing, built=None, wanted=WIDE_TARGETS):
+def toolchain_help(missing, built=None, wanted=WIDE_TARGETS, compiler=True, outcome=True):
     """What to tell a modder whose 64-bit objects cannot be built: what is
-    missing, that only the i386 object was built (`built`, its path) or
-    nothing, and where to get the toolchain the game is built with. No
-    download here: the modder gets it."""
+    missing, what was built (with `outcome`: the i386 object at `built`, or
+    nothing; with no compiler at all, `compiler` false, nothing), and where
+    to get the toolchain the game is built with. No download here: the
+    modder gets it."""
     named = os.environ.get("MEMORIES_MOD_CC")
+    not_found = "Not found: " + ", ".join(missing)
+    if named and "clang" in missing:
+        not_found += f" (MEMORIES_MOD_CC names {named}, which is not clang)"
     games = {"x86_64-windows": "the 64-bit Windows game", "aarch64": "Android"}
-    lines = [f"build_mod: only the 32-bit object was built, {built} (the 32-bit Windows and Linux games)."
-             if built else "build_mod: nothing was built.",
-             "The 64-bit objects (" + ", ".join(f"{target}: {games[target]}" for target in wanted) +
-             ") need clang with ld.lld and llvm-objcopy. Not found: " + ", ".join(missing) +
-             (f" (MEMORIES_MOD_CC names {named}, which is not clang)" if named and "clang" in missing else "") + "."]
+    named_objects = ", ".join(f"{target}: {games[target]}" for target in wanted)
+    if not compiler:
+        lines = ["build_mod: nothing was built: no compiler found.",
+                 "Every object builds with clang, ld.lld and llvm-objcopy; gcc with 32-bit support builds the "
+                 f"32-bit one only. {not_found}."]
+    else:
+        lines = [f"build_mod: only the 32-bit object was built, {built} (the 32-bit Windows and Linux games)."
+                 if built else "build_mod: nothing was built."] if outcome else []
+        lines.append(f"The 64-bit object{'s' if len(wanted) > 1 else ''} ({named_objects}) "
+                     f"need{'' if len(wanted) > 1 else 's'} clang with ld.lld and llvm-objcopy. {not_found}.")
     if sys.platform == "win32":
         lines += [f"Get llvm-mingw {LLVM_MINGW_RELEASE}, the toolchain the game is built with (it has all three):",
                   f"  {LLVM_MINGW_DOWNLOADS['windows']}",
@@ -229,7 +238,7 @@ def compiler(target="i386"):
         return [path], (CLANG_FLAGS if clang else GCC_FLAGS) + ["-isystem", builtin_headers(path, clang)], list(linker)
     if not clang:
         sys.exit(f"build_mod: the {target} object needs clang (with lld); {path} is not clang\n" +
-                 toolchain_help(missing_64bit() or ["clang"], wanted=(target,)))
+                 toolchain_help(missing_64bit() or ["clang"], wanted=(target,), outcome=False))
     return [path], TARGET_FLAGS[target] + ["-isystem", builtin_headers(path, clang)], list(linker)
 
 
@@ -247,8 +256,7 @@ def programs():
     starting either: the cache keys need only their files."""
     found = find_programs(os.environ.get("MEMORIES_MOD_CC"))
     if not found:
-        sys.exit("build_mod: no compiler found: the 32-bit object needs clang with ld.lld, or gcc with 32-bit "
-                 "support (or MEMORIES_MOD_CC naming one)\n" + toolchain_help(missing_64bit()))
+        sys.exit(toolchain_help(missing_64bit(), compiler=False))
     return found
 
 
@@ -603,7 +611,7 @@ def tag_abi(output, target):
     objcopy = find_objcopy()
     if not objcopy:
         sys.exit("build_mod: llvm-objcopy (beside clang, or on PATH) is needed for the 64-bit targets\n" +
-                 toolchain_help(["llvm-objcopy"], wanted=(target,)))
+                 toolchain_help(["llvm-objcopy"], wanted=(target,), outcome=False))
     with tempfile.NamedTemporaryFile("wb", suffix=".abi", delete=False) as handle:
         handle.write(target.encode() + b"\0")
     try:

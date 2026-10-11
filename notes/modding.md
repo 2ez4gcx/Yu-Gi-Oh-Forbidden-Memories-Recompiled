@@ -1802,14 +1802,30 @@ object per target. Beside a released game the same script is
 `sdk/tools/build_mod.py`, and it builds against `sdk/include` there. The
 release's `sdk/` also carries `extract_images.py` and `upscale_pack.py` in
 `sdk/tools`, the example mods in `sdk/examples/mods`, and this note with
-`mod-api-3.md` and `more-cards.md` in `sdk/notes`. It needs
-clang (on Windows, the llvm-mingw clang; it builds the Linux object format
-there too) or, on Linux, gcc with 32-bit support. clang is used only with
-lld beside it or on PATH. With clang it builds all three ELF targets unless
-`--target` names some; the 64-bit ones also need `llvm-objcopy` (looked for
-beside clang and beside the file a `clang` link points to, then on PATH and
-in llvm-mingw), and without it the script builds the `i386` object alone
-and says so. gcc builds the `i386` object only. `./build-pc.sh` builds
+`mod-api-3.md` and `more-cards.md` in `sdk/notes`.
+
+What it needs:
+
+| Targets | Tools |
+|---|---|
+| all three | clang, with `ld.lld` beside it or on PATH, and `llvm-objcopy` (beside clang, beside the file a `clang` link points to, or on PATH) |
+| `i386` only | the above, or on Linux gcc with 32-bit support |
+
+The simplest way to have all three is the toolchain the game itself is built
+with, [llvm-mingw 20260922](https://github.com/mstorsjo/llvm-mingw/releases/tag/20260922):
+on Windows `llvm-mingw-20260922-ucrt-x86_64.zip` (its clang builds the Linux
+and Android object formats too), on Linux x86-64
+`llvm-mingw-20260922-ucrt-ubuntu-22.04-x86_64.tar.xz`. Unpack it and put its
+`bin` folder on PATH, or set `MEMORIES_MOD_CC` to its `clang`. On Linux the
+distribution's packages do as well: `clang`, `lld` and `llvm` (which has
+`llvm-objcopy`), e.g. `sudo apt install clang lld llvm`.
+
+With clang, lld and llvm-objcopy it builds all three ELF targets unless
+`--target` names some. Without one of them it builds the `i386` object
+alone (with gcc, or a clang that has lld), then says which of the three is
+missing, that only the 32-bit object was built, and where to get
+llvm-mingw; with none at all it builds nothing and says the same. A 64-bit
+target named with `--target` without them builds nothing. `./build-pc.sh` builds
 every directory under `mods/` this way, once, and copies the same file into
 both games' `mods/` directories. The script keeps what it builds in
 `tmp/pc/mod-build` (beside `sdk/`, or in the repository), under a key of the
@@ -1820,7 +1836,9 @@ any time.
 A mod reaches the game directly. Its undefined names are bound when it is
 loaded, against a table compiled into the game (`mod_exports.c`, generated
 by `tools/pc/build_game32.py`; beside a game, its SDK's
-`exports.<target>.txt`). The table holds every game function and
+`exports.<target>.txt`, one for each target, so every object the SDK's
+`build_mod.py` builds is checked, not only the one for the game beside it).
+The table holds every game function and
 variable, every guest variable pinned to its retail address, and the
 port's own globals. That is what makes something like 3D Monsters possible:
 it borrows the model loader, the software GPU's texture banks and the duel's

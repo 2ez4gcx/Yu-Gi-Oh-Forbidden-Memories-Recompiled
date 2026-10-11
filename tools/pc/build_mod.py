@@ -124,12 +124,101 @@ TARGET_FLAGS = {
 }
 
 
+# The toolchain the game itself is built with, which has clang, ld.lld and
+# llvm-objcopy and builds every target: the llvm-mingw release
+# tools/pc/fetch_tools.py (Windows) and tools/pc/build_win32_deps.py (Linux)
+# fetch. Named here for a modder who has none (toolchain_help), since the
+# SDK ships neither script; test_build_mod_toolchain.py keeps them the same.
+LLVM_MINGW_RELEASE = "20260922"
+LLVM_MINGW_DOWNLOADS = {
+    "windows": "https://github.com/mstorsjo/llvm-mingw/releases/download/20260922/"
+               "llvm-mingw-20260922-ucrt-x86_64.zip",
+    "linux": "https://github.com/mstorsjo/llvm-mingw/releases/download/20260922/"
+             "llvm-mingw-20260922-ucrt-ubuntu-22.04-x86_64.tar.xz",
+}
+WIDE_TARGETS = ("x86_64-windows", "aarch64")
+
+
 def tool(name):
     """A program from PATH, or from the llvm-mingw this repository fetches."""
     found = shutil.which(name)
     if not found and os.path.exists(os.path.join(LLVM_MINGW, name + (".exe" if os.name == "nt" else ""))):
         found = os.path.join(LLVM_MINGW, name)
     return found
+
+
+def beside(program, name):
+    """`name` in the folder of `program`, with Windows' .exe spelled out:
+    "ld.lld" already has an extension, so none is added to it."""
+    path = os.path.join(os.path.dirname(program), name)
+    return next((p for p in (path + ".exe", path) if os.path.exists(p)), None)
+
+
+def linker_for(clang):
+    """The lld that came with `clang`, else one on PATH."""
+    return beside(clang, "ld.lld") or tool("ld.lld")
+
+
+def objcopy_for(clang):
+    """llvm-objcopy beside `clang` and beside the clang a link points to
+    (Debian's /usr/bin/clang is /usr/lib/llvm-NN/bin/clang, the only place
+    its llvm-objcopy has no version suffix), then on PATH and in llvm-mingw."""
+    for program in dict.fromkeys((clang, os.path.realpath(clang)) if clang else ()):
+        found = beside(program, "llvm-objcopy")
+        if found:
+            return found
+    return tool("llvm-objcopy")
+
+
+def clang_candidates(named):
+    """The compilers build_mod.py tries, in order (programs): `named`
+    (MEMORIES_MOD_CC) alone when set."""
+    return [named] if named else [os.path.join(LLVM_MINGW, "clang"), "clang", "gcc"]
+
+
+def resolve(candidate):
+    return candidate if os.path.isabs(candidate) and os.path.exists(candidate) else tool(candidate)
+
+
+def missing_64bit():
+    """What the 64-bit targets need that this machine lacks, by name: clang,
+    ld.lld (beside it or on PATH) and llvm-objcopy. [] when all are here."""
+    found = [path for path in map(resolve, clang_candidates(os.environ.get("MEMORIES_MOD_CC")))
+             if path and "clang" in os.path.basename(path)]
+    clang = next((path for path in found if linker_for(path)), found[0] if found else None)
+    missing = [] if clang else ["clang"]
+    if not (linker_for(clang) if clang else tool("ld.lld")):
+        missing.append("ld.lld")
+    if not objcopy_for(clang):
+        missing.append("llvm-objcopy")
+    return missing
+
+
+def toolchain_help(missing, built=None, wanted=WIDE_TARGETS):
+    """What to tell a modder whose 64-bit objects cannot be built: what is
+    missing, that only the i386 object was built (`built`, its path) or
+    nothing, and where to get the toolchain the game is built with. No
+    download here: the modder gets it."""
+    named = os.environ.get("MEMORIES_MOD_CC")
+    games = {"x86_64-windows": "the 64-bit Windows game", "aarch64": "Android"}
+    lines = [f"build_mod: only the 32-bit object was built, {built} (the 32-bit Windows and Linux games)."
+             if built else "build_mod: nothing was built.",
+             "The 64-bit objects (" + ", ".join(f"{target}: {games[target]}" for target in wanted) +
+             ") need clang with ld.lld and llvm-objcopy. Not found: " + ", ".join(missing) +
+             (f" (MEMORIES_MOD_CC names {named}, which is not clang)" if named and "clang" in missing else "") + "."]
+    if sys.platform == "win32":
+        lines += [f"Get llvm-mingw {LLVM_MINGW_RELEASE}, the toolchain the game is built with (it has all three):",
+                  f"  {LLVM_MINGW_DOWNLOADS['windows']}",
+                  "unzip it, put its bin folder on PATH (or set MEMORIES_MOD_CC to its bin\\clang.exe), "
+                  "and run build_mod.py again."]
+    else:
+        lines += ["Install clang, lld and llvm (llvm-objcopy is in llvm) from your distribution:",
+                  "  Debian/Ubuntu: sudo apt install clang lld llvm    Fedora: sudo dnf install clang lld llvm",
+                  "  Arch: sudo pacman -S clang lld llvm",
+                  f"or use llvm-mingw {LLVM_MINGW_RELEASE}, the toolchain the game is built with (Linux x86-64):",
+                  f"  {LLVM_MINGW_DOWNLOADS['linux']}",
+                  "with its bin folder on PATH (or MEMORIES_MOD_CC=<its bin>/clang), and run build_mod.py again."]
+    return "\n".join(lines)
 
 
 def compiler(target="i386"):
@@ -139,7 +228,8 @@ def compiler(target="i386"):
     if target == "i386":
         return [path], (CLANG_FLAGS if clang else GCC_FLAGS) + ["-isystem", builtin_headers(path, clang)], list(linker)
     if not clang:
-        sys.exit(f"build_mod: the {target} object needs clang (with lld); {path} is not clang")
+        sys.exit(f"build_mod: the {target} object needs clang (with lld); {path} is not clang\n" +
+                 toolchain_help(missing_64bit() or ["clang"], wanted=(target,)))
     return [path], TARGET_FLAGS[target] + ["-isystem", builtin_headers(path, clang)], list(linker)
 
 
@@ -155,26 +245,26 @@ def target_flags(target, cc_flags):
 def programs():
     """(compiler, whether it is clang, linker command), found without
     starting either: the cache keys need only their files."""
-    return find_programs(os.environ.get("MEMORIES_MOD_CC"))
+    found = find_programs(os.environ.get("MEMORIES_MOD_CC"))
+    if not found:
+        sys.exit("build_mod: no compiler found: the 32-bit object needs clang with ld.lld, or gcc with 32-bit "
+                 "support (or MEMORIES_MOD_CC naming one)\n" + toolchain_help(missing_64bit()))
+    return found
 
 
 @functools.lru_cache(maxsize=None)
 def find_programs(named):
-    candidates = [named] if named else [os.path.join(LLVM_MINGW, "clang"), "clang", "gcc"]
-    for candidate in candidates:
-        path = candidate if os.path.isabs(candidate) and os.path.exists(candidate) else tool(candidate)
+    for candidate in clang_candidates(named):
+        path = resolve(candidate)
         if not path:
             continue
         if "clang" in os.path.basename(path):
-            # The lld that came with this clang. Windows needs the .exe
-            # spelled out: "ld.lld" already has an extension, so it adds none.
-            beside = os.path.join(os.path.dirname(path), "ld.lld")
-            linker = next((p for p in (beside + ".exe", beside) if os.path.exists(p)), None) or tool("ld.lld")
+            linker = linker_for(path)
             if not linker:
                 continue  # clang without lld cannot merge the objects; try the next compiler
             return path, True, (linker, "-r")
         return path, False, (tool("ld") or "ld", "-m", "elf_i386", "-r")
-    sys.exit("build_mod: no compiler found; install clang or gcc (with 32-bit support), or set MEMORIES_MOD_CC")
+    return None
 
 
 @functools.lru_cache(maxsize=None)
@@ -502,18 +592,9 @@ def through_pass(command, source, obj):
 
 @functools.lru_cache(maxsize=None)
 def find_objcopy():
-    """llvm-objcopy: beside clang first, as ld.lld is, and beside the clang
-    a link points to (Debian's /usr/bin/clang is /usr/lib/llvm-NN/bin/clang,
-    and that is the only place its llvm-objcopy has no version suffix); then
-    PATH and llvm-mingw. None when there is none."""
+    """llvm-objcopy for the compiler in use (objcopy_for), or None."""
     path, clang, _ = programs()
-    if clang:
-        for folder in dict.fromkeys((os.path.dirname(path), os.path.dirname(os.path.realpath(path)))):
-            beside = os.path.join(folder, "llvm-objcopy")
-            found = next((p for p in (beside + ".exe", beside) if os.path.exists(p)), None)
-            if found:
-                return found
-    return tool("llvm-objcopy")
+    return objcopy_for(path if clang else None)
 
 
 def tag_abi(output, target):
@@ -521,7 +602,8 @@ def tag_abi(output, target):
     the game's loader holds against its own (object_loader.c)."""
     objcopy = find_objcopy()
     if not objcopy:
-        sys.exit("build_mod: llvm-objcopy (beside clang, or on PATH) is needed for the 64-bit targets")
+        sys.exit("build_mod: llvm-objcopy (beside clang, or on PATH) is needed for the 64-bit targets\n" +
+                 toolchain_help(["llvm-objcopy"], wanted=(target,)))
     with tempfile.NamedTemporaryFile("wb", suffix=".abi", delete=False) as handle:
         handle.write(target.encode() + b"\0")
     try:
@@ -686,16 +768,16 @@ def main():
                         help="a game build directory to check the mod's names against (repeatable, for one "
                              "--target; default: the target's builds in tmp/pc when they exist)")
     options = parser.parse_args()
-    targets = options.target or (list(TARGETS) if programs()[1] else ["i386"])
+    # The 64-bit targets need clang with ld.lld and llvm-objcopy. Not asked
+    # for by name, they are left out without them: the i386 object is built,
+    # as before there were others, and the modder told what to get.
+    wide = programs()[1] and find_objcopy()
+    asked = [target for target in options.target or () if target in WIDE_TARGETS]
+    if asked and not wide:
+        sys.exit(toolchain_help(missing_64bit() or ["llvm-objcopy"], wanted=asked))
+    targets = options.target or (list(TARGETS) if wide else ["i386"])
     if options.game and len(targets) != 1:
         parser.error("--game checks one target's names: name it with --target")
-    if not options.target and not programs()[1]:
-        print("build_mod: gcc builds the i386 object only; the 64-bit ones need clang")
-    elif not options.target and not find_objcopy():
-        # Not asked for by name: the i386 object, as before there were others.
-        targets = ["i386"]
-        print("build_mod: no llvm-objcopy beside clang or on PATH; building the i386 object only "
-              "(the 64-bit ones need it)")
     for target in targets:
         if target == "macos":
             from build_mod_arm64 import build as build_arm64_mod
@@ -706,6 +788,8 @@ def main():
         if not output:
             print(f"{options.directory}: no C sources; a data-only mod needs no build")
             break
+        if not options.target and not wide:
+            print(toolchain_help(missing_64bit() or ["llvm-objcopy"], built=output), file=sys.stderr)
 
 
 if __name__ == "__main__":

@@ -70,6 +70,10 @@ int TypeIcons_Cell(int type, int *tpage, int *u, int *v, int *clut)
         made[type] = 2;
         if (!CardArt_IconFromImage(path, NULL, pixels, palette, why, sizeof(why))) {
             fprintf(stderr, "memories-pc: type %d: %s\n", type, why);
+            /* A mod file may arrive after startup (or a temporary I/O error
+             * may clear).  Do not turn one failed read into a session-long
+             * negative cache: the next draw is allowed to try again. */
+            made[type] = 0;
             return 0;
         }
         memcpy(&bank[(CLUT_Y + type - 24) * SOFT_GPU_WIDTH], palette, sizeof(palette));

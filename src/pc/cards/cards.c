@@ -455,7 +455,7 @@ static unsigned char *encode_type_name(const char *mod, const char *text, const 
     unsigned char *glyphs = Memories_LowAlloc(strlen(text) * 2 + 1);
     size_t length = 0;
     const char *at = text;
-    int bad = 0;
+    int bad = 0, dropped = 0;
     if (!glyphs) return NULL;
     while (*at) {
         const char *letter = at;
@@ -467,6 +467,7 @@ static unsigned char *encode_type_name(const char *mod, const char *text, const 
         }
         code = Glyphs_Code(character);
         if (code < 0) {
+            dropped++;
             Mods_Note(mod, "%s.types[%d]: the game has no letter \"%.*s\"; left out of its name", where, index,
                       (int)(at - letter), letter);
             continue;
@@ -476,6 +477,10 @@ static unsigned char *encode_type_name(const char *mod, const char *text, const 
     if (!length) {
         Mods_Note(mod, "%s.types[%d]: \"name\" has no letter the game can display; type left out", where, index);
         return NULL;
+    }
+    if (dropped) {
+        Mods_Note(mod, "%s.types[%d]: its displayed name omits %d unsupported character%s; manifests must still use the original UTF-8 name",
+                  where, index, dropped, dropped == 1 ? "" : "s");
     }
     glyphs[length] = 0xFF;
     return glyphs;
@@ -640,22 +645,24 @@ static void add_card_types_section(const char *mod, const char *directory, const
              * (encode_type_name) leaves the whole type out, the way an
              * invalid id or an empty name already does, rather than
              * registering an identity nothing can show. */
-            unsigned char *encoded = encode_type_name(mod, Json_String(name, ""), where, index);
             int other;
-            if (!encoded) continue;
             /* Cards_TypeNamed returns the first match by id: a name that
              * collides with an earlier type's (any mod's, retail or
              * custom) silently shadows that type whenever this one's name
              * is looked up by text instead of id. */
             for (other = 0; other < CARD_TYPE_LIMIT; other++) {
                 if (other != id && type_names[other] && same_letters(Json_String(name, ""), type_names[other])) {
-                    Mods_Note(mod, "%s.types[%d]: \"%s\" is also type %d's name; looking it up by name always finds %d",
-                              where, index, Json_String(name, ""), other, other);
-                    break;
+                    Mods_Note(mod, "%s.types[%d]: \"%s\" is already type %d's name; declaration left out",
+                              where, index, Json_String(name, ""), other);
+                    goto next_type;
                 }
             }
-            type_names[id] = Json_String(name, ""); /* later mods deliberately replace earlier names */
-            type_name_text[id] = encoded;
+            {
+                unsigned char *encoded = encode_type_name(mod, Json_String(name, ""), where, index);
+                if (!encoded) goto next_type;
+                type_names[id] = Json_String(name, ""); /* later mods deliberately replace earlier names */
+                type_name_text[id] = encoded;
+            }
         }
         type_icons[id][0] = '\0';
         if (icon) {
@@ -665,6 +672,8 @@ static void add_card_types_section(const char *mod, const char *directory, const
                 Mods_Note(mod, "%s.types[%d]: \"icon\" must name a PNG inside the mod", where, index);
             }
         }
+next_type:
+        ;
     }
 }
 

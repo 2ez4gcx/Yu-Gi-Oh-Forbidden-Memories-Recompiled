@@ -174,6 +174,10 @@ void Tower_UnlockRetailDuelists(const TowerFloor *floor)
 
 /* The other towers' sections of the save's file: written back with it. */
 static char *foreign;
+/* The slot token and duelist code of the save loaded last, whose file a
+ * save written while no tower mod is on carries over (Tower_SaveWritten). */
+static unsigned loaded_token;
+static uint32_t loaded_code;
 
 static int progress_path(char *out, size_t size, unsigned token)
 {
@@ -204,6 +208,8 @@ void Tower_SaveLoaded(const void *state)
     uint32_t code, identity = Tower_Identity(tower);
     FILE *file;
     int found;
+    loaded_token = slot_token();
+    loaded_code = state_code(state);
     if (!tower) return;
     free(foreign);
     foreign = NULL;
@@ -263,6 +269,40 @@ static int nothing_done(const TowerProgress *done)
     return 1;
 }
 
+/* A save written while no tower mod is on: every slot write is a new token,
+ * so the loaded save's file goes with it whole, every section of it a tower
+ * not here this run, rather than be forgotten as the old token's. */
+static void carry_over(const void *state, unsigned token)
+{
+    char from[1024], to[1024], temporary[1040], directory[1024], *slash, buffer[4096];
+    FILE *in, *out;
+    size_t n;
+    int failed = 0;
+    if (!token || !loaded_token || token == loaded_token || state_code(state) != loaded_code) return;
+    if (progress_path(from, sizeof(from), loaded_token) || progress_path(to, sizeof(to), token)) return;
+    if (!(in = fopen(from, "rb"))) return;
+    snprintf(directory, sizeof(directory), "%s", to);
+    slash = strrchr(directory, '/');
+    if (slash) { *slash = '\0'; Paths_MakeDirs(directory); }
+    snprintf(temporary, sizeof(temporary), "%s.tmp", to);
+    if (!(out = fopen(temporary, "wb"))) {
+        fclose(in);
+        return;
+    }
+    while ((n = fread(buffer, 1, sizeof(buffer), in)) > 0) {
+        if (fwrite(buffer, 1, n, out) != n) failed = 1;
+    }
+    fclose(in);
+    if (ferror(out)) failed = 1;
+    if (fclose(out)) failed = 1;
+    if (failed || rename(temporary, to)) {
+        remove(temporary);
+        return;
+    }
+    loaded_token = token;
+    forget_progress(token);
+}
+
 void Tower_SaveWritten(const void *state)
 {
     const TowerConfig *tower = Tower_Config();
@@ -271,7 +311,11 @@ void Tower_SaveWritten(const void *state)
     uint32_t code;
     FILE *file;
     int failed;
-    if (!tower || !token) return;
+    if (!tower) {
+        carry_over(state, token);
+        return;
+    }
+    if (!token) return;
     code = state_code(state);
     if (progress()->owner != code) {
         Tower_ClearProgress(&gTower.progress, code, Tower_Identity(tower));
@@ -303,6 +347,8 @@ void Tower_SaveWritten(const void *state)
     }
     LOG(LOG_MODS, "tower: progress written to %s (floor %u, checkpoint %u)", path, (unsigned)gTower.progress.floor,
         (unsigned)gTower.progress.checkpoint);
+    loaded_token = token;
+    loaded_code = code;
     forget_progress(token);
 }
 

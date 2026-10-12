@@ -5,8 +5,11 @@
  * address the game's text boxes can point into, and inside every save
  * state, so a state saved in the tower, or in a tower duel, comes back to
  * the same floor and the same rules. Game units link in name order, and the
- * "zz_" keeps this one after every other: no existing variable moves, which
- * would keep states from earlier builds from loading. */
+ * "zz_" keeps this one after every other, as drops.c sorts after
+ * card_storage.c: no existing variable moves. Its zeros still make the
+ * game's bss longer, and state.c restores a bss chunk only of this build's
+ * size, so a state from a build before tower mode loads without the game's
+ * zeroed variables (as after drops.c or free_duel_storage.c came in). */
 #include "types.h"
 #include "pc/tower/tower_state.h"
 #include "game/func_8003B6AC.h"

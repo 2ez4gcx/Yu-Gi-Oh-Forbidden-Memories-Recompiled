@@ -5,6 +5,7 @@
  * mistake leaves of the tower), the last mod's tower winning, a duel's
  * result moving the progress on (checkpoints, restarts, the top), and the
  * progress file keeping the sections of towers that are not this run's. */
+#include "scratch.h"
 #include "../../src/pc/tower/tower_config.c"
 #include <stdarg.h>
 
@@ -250,6 +251,10 @@ static void mistakes(void)
     CHECK(Tower_Config()->unlock.kind == TOWER_UNLOCK_NEVER && heard("\"wins\" is 0 to 65535"));
     read_as("m", "{\"tower\": {\"unlock\": 3, \"floors\": [{\"duelist\": 1}]}}");
     CHECK(Tower_Config()->unlock.kind == TOWER_UNLOCK_NEVER);
+    /* "after_ending": "yes" is no condition to open it on, not none at all. */
+    forget();
+    read_as("m", "{\"tower\": {\"unlock\": {\"after_ending\": \"yes\"}, \"floors\": [{\"duelist\": 1}]}}");
+    CHECK(Tower_Config()->unlock.kind == TOWER_UNLOCK_NEVER && heard("\"after_ending\" is true or false"));
 }
 
 /* --- progress ---------------------------------------------------------------- */
@@ -305,7 +310,13 @@ static void progress_file(void)
 {
     TowerProgress progress, back;
     char *foreign = NULL;
-    FILE *file = tmpfile();
+    /* tmpfile() makes its file in the drive's root on Windows, which a CI
+     * runner may not write to (packs_test.c). */
+    char directory[SCRATCH_MAX], path[SCRATCH_MAX + 32];
+    FILE *file;
+    CHECK(scratch_dir(directory, sizeof(directory), "memories-tower") != NULL);
+    snprintf(path, sizeof(path), "%s/progress.txt", directory);
+    file = fopen(path, "w+b");
     CHECK(file != NULL);
     Tower_ClearProgress(&progress, 0xABCD1234u, 0x55AA55AAu);
     progress.floor = 2;
@@ -330,6 +341,9 @@ static void progress_file(void)
     rewind(file);
     CHECK(!Tower_ReadProgress(file, "my-mod", 0x11111111u, &back, &foreign));
     CHECK(back.floor == 0 && back.tower == 0x11111111u && !Tower_FloorCleared(&back, 0));
+    /* ...and its stale lines are no other tower's, to be written back. */
+    CHECK(foreign && !strstr(foreign, "owner ABCD1234") && !strstr(foreign, "floor 2\n"));
+    CHECK(strstr(foreign, "tower old-mod") && strstr(foreign, "tower gone-mod"));
     free(foreign);
     /* A tower the file has not. */
     rewind(file);

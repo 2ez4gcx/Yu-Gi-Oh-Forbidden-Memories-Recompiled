@@ -6,6 +6,7 @@
  * progress beside the save: written, read back by a new save's load, kept
  * apart by duelist code, the other towers' sections kept, and carried by a
  * save state. */
+#include "scratch.h"
 #include "pc/tower/tower.h"
 #include "pc/mods/json.h"
 #include "pc/guest/state.h"
@@ -54,7 +55,7 @@ void Library_UpdateCardUsedFlag(int flag) { flags[(flag & 0x7FF) >> 3] |= (unsig
 int Log_Wanted(int channel) { (void)channel; return 0; }
 void Log_Printf(int channel, const char *format, ...) { (void)channel; (void)format; }
 
-static char user[512];
+static char user[SCRATCH_MAX];  /* scratch_dir(): removed again at exit */
 static int slot = 0;
 static unsigned tokens[SAVE_SLOT_COUNT] = {0x11111111, 0x22222222, 0x33333333};
 int SaveMenu_CurrentSlot(void) { return slot; }
@@ -280,30 +281,30 @@ static void beside_the_save(void)
     Tower_ApplyResult(Tower_Config(), &gTower.progress, 0, 1);
     Tower_SaveWritten(save);
     assert(exists("tower/44444444.txt") && !exists("tower/11111111.txt"));
+    /* Saved once while the tower's mod is off (a new token, as every write
+     * has): the climb goes with it, and is back with the mod. */
+    Tower_Reset();
+    tokens[0] = 0x55555555;
+    Tower_SaveWritten(save);
+    assert(exists("tower/55555555.txt") && !exists("tower/44444444.txt"));
+    tower_of("{\"tower\": {\"floors\": [{\"duelist\": 1, \"checkpoint\": true}, {\"duelist\": 2}, {\"duelist\": 3}]}}");
+    Tower_SaveLoaded(save);
+    assert(gTower.progress.floor == 1 && Tower_FloorCleared(&gTower.progress, 0));
 }
 
 int main(void)
 {
     int i;
-    snprintf(user, sizeof(user), "tower-game-test-%ld", (long)time(NULL));
-    Paths_MakeDirs(user);
+    if (!scratch_dir(user, sizeof(user), "memories-tower")) {
+        fprintf(stderr, "tower game: no scratch folder\n");
+        return 1;
+    }
     unlocks();
     rules();
     duelists();
     beside_the_save();
     Tower_Reset();
     for (i = 0; i < document_count; i++) Json_Free(documents[i]);
-    {   /* The folder the cases wrote, gone. */
-        char path[1024];
-        static const char *const files[] = {"tower/11111111.txt", "tower/44444444.txt"};
-        for (i = 0; i < 2; i++) {
-            snprintf(path, sizeof(path), "%s/%s", user, files[i]);
-            remove(path);
-        }
-        snprintf(path, sizeof(path), "%s/tower", user);
-        rmdir(path);
-        rmdir(user);
-    }
     printf("tower game: ok\n");
     return 0;
 }

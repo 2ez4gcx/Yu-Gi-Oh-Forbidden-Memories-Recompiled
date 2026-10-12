@@ -405,6 +405,10 @@ static void read_unlock(const char *mod, const JsonValue *value)
     check_keys(mod, "tower unlock", value, known, sizeof(known) / sizeof(known[0]));
     unlock->kind = TOWER_UNLOCK_CONDITIONS;
     unlock->after_ending = read_flag(mod, "tower unlock", value, "after_ending");
+    if (Json_Member(value, "after_ending") && Json_TypeOf(Json_Member(value, "after_ending")) != JSON_BOOL) {
+        Mods_Note(mod, "tower unlock: the tower stays locked");   /* "yes" is no condition to open it on */
+        unlock->kind = TOWER_UNLOCK_NEVER;
+    }
     if (Json_Member(value, "beat")) reference(Json_Member(value, "beat"), unlock->beat, sizeof(unlock->beat));
     if (Json_Member(value, "card")) reference(Json_Member(value, "card"), unlock->card, sizeof(unlock->card));
     if (Json_Member(value, "wins")) {
@@ -593,7 +597,7 @@ static void append(char **buffer, size_t *length, const char *line)
 int Tower_ReadProgress(FILE *file, const char *mod, uint32_t identity, TowerProgress *progress, char **foreign)
 {
     char line[512];
-    int mine = 0, found = 0, inside = 0;
+    int mine = 0, found = 0, inside = 0, stale = 0;
     size_t foreign_length = 0;
     *foreign = NULL;
     Tower_ClearProgress(progress, 0, identity);
@@ -608,19 +612,23 @@ int Tower_ReadProgress(FILE *file, const char *mod, uint32_t identity, TowerProg
             }
             continue;
         }
-        if (!mine) append(foreign, &foreign_length, line);
+        if (!mine && !stale) append(foreign, &foreign_length, line);
         if (sscanf(line, "%63s", word) != 1) continue;
         if (!strcmp(word, "end")) {
             inside = 0;
             mine = 0;
+            stale = 0;
             continue;
         }
         if (!mine) continue;
         if (!strcmp(word, "identity") && sscanf(line, "identity %x", &value) == 1) {
             /* The same mod with another tower ("name" changed): the floors
-             * may be others, so its progress begins again. */
+             * may be others, so its progress begins again, and the rest of
+             * the section is left out (written again as this tower's). */
             if (value != identity) {
+                Tower_ClearProgress(progress, 0, identity);
                 mine = 0;
+                stale = 1;
                 continue;
             }
             found = 1;

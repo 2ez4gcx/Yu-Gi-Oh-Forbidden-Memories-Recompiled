@@ -129,6 +129,7 @@ static void newline(Out *out)
 static void glyph(Out *out, int code)
 {
     if (code < 0 || out->x + LETTER > out->limit) return;
+    if (out->at + (code >= 0xF0 ? 2 : 1) > out->end) return;   /* never half of a two-byte code */
     if (code >= 0xF0) put(out, 0xF0 + (code >> 8));
     put(out, code & 0xFF);
     out->x += LETTER;
@@ -166,7 +167,10 @@ static void number(Out *out, unsigned value)
 }
 
 /* One of the port's own strings (text.h): a translation's, else `english`;
- * each %d the next number, each %s the next name (UTF-8). */
+ * each %d the next number, each %s the next name (UTF-8). A translation may
+ * hold more of them than the port gives: past OWN_NUMBERS and OWN_NAMES
+ * they are 0 and nothing. */
+enum { OWN_NUMBERS = 2, OWN_NAMES = 1 };
 static void own(Out *out, int id, const char *english, const unsigned *numbers, const char *const *names)
 {
     const u8 *text = Text_Own(id);
@@ -174,8 +178,8 @@ static void own(Out *out, int id, const char *english, const unsigned *numbers, 
     if (!text) {
         const char *c;
         for (c = english; *c; c++) {
-            if (c[0] == '%' && c[1] == 'd') { number(out, numbers ? numbers[used++] : 0); c++; }
-            else if (c[0] == '%' && c[1] == 's') { words(out, names ? names[named++] : ""); c++; }
+            if (c[0] == '%' && c[1] == 'd') { number(out, numbers && used < OWN_NUMBERS ? numbers[used++] : 0); c++; }
+            else if (c[0] == '%' && c[1] == 's') { words(out, names && named < OWN_NAMES ? names[named++] : ""); c++; }
             else glyph(out, *c == ' ' ? 0 : Glyphs_Code((unsigned char)*c));
         }
         return;
@@ -184,9 +188,15 @@ static void own(Out *out, int id, const char *english, const unsigned *numbers, 
         int code = *text++;
         if (code >= 0xF6) break;                       /* letters and spaces only */
         if (code >= 0xF0) code = ((code - 0xF0) << 8) | *text++;
-        if (code == percent && *text == letter_d) { text++; number(out, numbers ? numbers[used++] : 0); }
-        else if (code == percent && *text == letter_s) { text++; words(out, names ? names[named++] : ""); }
-        else glyph(out, code);
+        if (code == percent && *text == letter_d) {
+            text++;
+            number(out, numbers && used < OWN_NUMBERS ? numbers[used++] : 0);
+        } else if (code == percent && *text == letter_s) {
+            text++;
+            words(out, names && named < OWN_NAMES ? names[named++] : "");
+        } else {
+            glyph(out, code);
+        }
     }
 }
 
@@ -417,7 +427,7 @@ static void step_story(void)
     const TowerConfig *config = tower();
     int duelist = gTower.floor >= 0 && gTower.floor < config->floor_count ? config->floors[gTower.floor].duelist : 0;
     if (gTower.phase == 0) {
-        if (gTower.line >= story.count) {
+        if (gTower.line < 0 || gTower.line >= story.count) {
             close_box();
             gTower.step = gTower.then;
             gTower.phase = 0;
@@ -447,8 +457,8 @@ static void show_status(void)
     const TowerProgress *done = &gTower.progress;
     int floor = done->floor < config->floor_count ? done->floor : 0;
     const TowerFloor *one = &config->floors[floor];
-    unsigned numbers[2];
-    const char *names[1];
+    unsigned numbers[OWN_NUMBERS] = {0, 0};
+    const char *names[OWN_NAMES] = {""};
     /* The heading's rows composed apart (each ends in FF), then laid under
      * the choice command (choices). */
     static u8 rows[3][160];
@@ -539,12 +549,26 @@ static void step_no_deck(void)
 
 /* What the duel just fought did: FLOOR N CLEARED, the reward, a
  * checkpoint; or the loss and the floor it goes back to. */
+/* The next line of a notice: a page wait instead after every
+ * NOTICE_LINES, so a long reward stays inside its box. */
+enum { NOTICE_LINES = 5 };
+static void notice_line(Out *out, int *lines)
+{
+    if (*lines % NOTICE_LINES == 0) {
+        put(out, 0xFA);
+        out->x = 0;
+    } else {
+        newline(out);
+    }
+    ++*lines;
+}
+
 static void show_notice(void)
 {
     const TowerConfig *config = tower();
-    const TowerFloor *one = &config->floors[gTower.floor];
-    unsigned numbers[2];
-    const char *names[1];
+    const TowerFloor *one = &config->floors[gTower.floor >= 0 && gTower.floor < config->floor_count ? gTower.floor : 0];
+    unsigned numbers[OWN_NUMBERS] = {0, 0};
+    const char *names[OWN_NAMES] = {""};
     int lines = 1, i;
     char name[128];
     Out out = begin(MENU_W - 2 * LETTER);
@@ -557,36 +581,32 @@ static void show_notice(void)
         /* The reward, the first time only (gTower.choice holds that). */
         if (gTower.choice) {
             for (i = 0; i < one->reward_card_count; i++) {
-                newline(&out);
+                notice_line(&out, &lines);
                 codes(&out, Cards_NameCodes(one->reward_cards[i]));
-                lines++;
             }
             if (one->reward_starchips) {
-                newline(&out);
+                notice_line(&out, &lines);
                 numbers[0] = one->reward_starchips;
                 own(&out, TEXT_OWN_TOWER_STARCHIPS, "%d STARCHIPS", numbers, NULL);
-                lines++;
             }
             for (i = 0; i < one->reward_duelist_count; i++) {
-                newline(&out);
+                notice_line(&out, &lines);
                 snprintf(name, sizeof(name), "%s", Duelists_Name(one->reward_duelists[i]));
                 names[0] = name;
                 own(&out, TEXT_OWN_TOWER_UNLOCKED, "%s UNLOCKED", NULL, names);
-                lines++;
             }
         }
         if (gTower.outcome == OUTCOME_CHECKPOINT) {
-            newline(&out);
+            notice_line(&out, &lines);
             own(&out, TEXT_OWN_TOWER_CHECKPOINT, "CHECKPOINT", NULL, NULL);
-            lines++;
         }
         if (gTower.outcome == OUTCOME_COMPLETED) {
-            newline(&out);
+            notice_line(&out, &lines);
             own(&out, TEXT_OWN_TOWER_COMPLETE, "THE TOWER IS CLEARED!", NULL, NULL);
-            lines++;
         }
     }
     finish(&out);
+    if (lines > NOTICE_LINES) lines = NOTICE_LINES;
     open_box(MENU_X, 0x78 - (lines * 12 + 16) / 2, MENU_W, lines * 12 + 16, BOX_KEPT);
 }
 
@@ -601,7 +621,7 @@ static void step_notice(void)
     close_box();
     gTower.phase = 0;
     if (gTower.outcome == OUTCOME_CHECKPOINT) gTower.step = STEP_SAVE_ASK;
-    else if (gTower.outcome == OUTCOME_COMPLETED) tell(STORY_ENDING, -1, STEP_STATUS);
+    else if (gTower.outcome == OUTCOME_COMPLETED) tell(STORY_ENDING, -1, STEP_SAVE_ASK);   /* the top: a save too */
     else gTower.step = STEP_STATUS;
     gTower.outcome = OUTCOME_NONE;
 }

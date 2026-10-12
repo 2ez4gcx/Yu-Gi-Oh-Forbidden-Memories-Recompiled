@@ -346,6 +346,14 @@ static void progress_file(void)
     CHECK(foreign && !strstr(foreign, "owner ABCD1234") && !strstr(foreign, "floor 2\n"));
     CHECK(strstr(foreign, "tower old-mod") && strstr(foreign, "tower gone-mod"));
     free(foreign);
+    /* A stale section after this tower's (a file edited by hand): what was
+     * read of this tower stays. */
+    fseek(file, 0, SEEK_END);
+    fputs("tower my-mod\nidentity 00000003\nfloor 7\nend\n", file);
+    rewind(file);
+    CHECK(Tower_ReadProgress(file, "my-mod", 0x55AA55AAu, &back, &foreign));
+    CHECK(back.owner == 0xABCD1234u && back.floor == 2 && back.checkpoint == 1);
+    free(foreign);
     /* A tower the file has not. */
     rewind(file);
     CHECK(!Tower_ReadProgress(file, "new-mod", 7, &back, &foreign));

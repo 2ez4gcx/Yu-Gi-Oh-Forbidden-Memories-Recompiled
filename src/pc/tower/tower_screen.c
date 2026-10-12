@@ -550,8 +550,9 @@ static void step_no_deck(void)
 /* What the duel just fought did: FLOOR N CLEARED, the reward, a
  * checkpoint; or the loss and the floor it goes back to. */
 /* The next line of a notice: a page wait instead after every
- * NOTICE_LINES, so a long reward stays inside its box. */
-enum { NOTICE_LINES = 5 };
+ * NOTICE_LINES, so a long reward stays inside a box no taller than the
+ * status box (the end-to-end test pages an eight-line notice). */
+enum { NOTICE_LINES = 4 };
 static void notice_line(Out *out, int *lines)
 {
     if (*lines % NOTICE_LINES == 0) {

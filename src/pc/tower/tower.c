@@ -372,11 +372,18 @@ void Tower_Frame(void)
  * which every state holds; the other towers' sections of the save's file
  * are this module's, and go with the state rather than stay those of the
  * save loaded since: else a save written after the load would be given
- * another save's. Their size first, then the text. */
+ * another save's. Their size first, then the text.
+ *
+ * The save loaded last (whose file a save with no tower on carries over)
+ * goes with the state too, tower or not: a state of another slot's line
+ * would else have that slot's climb copied to the one it is saved to. A
+ * state from before this knew none, and carries nothing over. */
 void Tower_State(MemoriesState *state)
 {
     uint32_t length = foreign ? (uint32_t)strlen(foreign) : 0;
     MemoriesStateField count = {&length, sizeof(length)};
+    MemoriesStateField loaded[] = {{&loaded_token, sizeof(loaded_token)}, {&loaded_code, sizeof(loaded_code)}};
+    if (!Memories_StateChunk(state, "tower-loaded", loaded, 2) && Memories_StateLoading(state)) loaded_token = 0;
     if (!Tower_Config()) return;
     if (!Memories_StateLoading(state)) {
         MemoriesStateField text = {foreign, length};

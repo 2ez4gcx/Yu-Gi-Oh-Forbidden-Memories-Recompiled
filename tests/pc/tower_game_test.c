@@ -72,7 +72,7 @@ int Paths_MakeDirs(const char *path)
 }
 
 /* A save state's chunks, kept in memory: one at a time is enough here. */
-struct MemoriesState { int loading; char tag[2][32]; unsigned char data[2][4096]; size_t size[2]; int count; };
+struct MemoriesState { int loading; char tag[4][32]; unsigned char data[4][4096]; size_t size[4]; int count; };
 int Memories_StateLoading(const MemoriesState *state) { return state->loading; }
 int Memories_StateChunk(MemoriesState *state, const char *tag, const MemoriesStateField *fields, size_t count)
 {
@@ -257,7 +257,8 @@ static void beside_the_save(void)
     /* A save state carries the other towers' lines, the rest is game data. */
     memset(&state, 0, sizeof(state));
     Tower_State(&state);
-    assert(state.count == 2 && strstr((const char *)state.data[1], "tower other"));
+    assert(state.count == 3 && !strcmp(state.tag[0], "tower-loaded") &&
+           strstr((const char *)state.data[2], "tower other"));
     state.loading = 1;
     Tower_SaveLoaded(save);
     Tower_State(&state);
@@ -291,6 +292,24 @@ static void beside_the_save(void)
     tower_of("{\"tower\": {\"floors\": [{\"duelist\": 1, \"checkpoint\": true}, {\"duelist\": 2}, {\"duelist\": 3}]}}");
     Tower_SaveLoaded(save);
     assert(gTower.progress.floor == 1 && Tower_FloorCleared(&gTower.progress, 0));
+    /* A state knows the save loaded last, the mod off too: loaded, a save
+     * carries that save's climb over. */
+    Tower_Reset();
+    memset(&state, 0, sizeof(state));
+    Tower_State(&state);
+    assert(state.count == 1 && !strcmp(state.tag[0], "tower-loaded"));
+    state.loading = 1;
+    Tower_State(&state);
+    tokens[0] = 0x66666666;
+    Tower_SaveWritten(save);
+    assert(exists("tower/66666666.txt") && !exists("tower/55555555.txt"));
+    /* A state from before that (no such chunk): nothing is carried over. */
+    memset(&state, 0, sizeof(state));
+    state.loading = 1;
+    Tower_State(&state);
+    tokens[0] = 0x77777777;
+    Tower_SaveWritten(save);
+    assert(!exists("tower/77777777.txt"));
 }
 
 int main(void)

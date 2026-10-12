@@ -624,9 +624,10 @@ int Tower_ReadProgress(FILE *file, const char *mod, uint32_t identity, TowerProg
         if (!strcmp(word, "identity") && sscanf(line, "identity %x", &value) == 1) {
             /* The same mod with another tower ("name" changed): the floors
              * may be others, so its progress begins again, and the rest of
-             * the section is left out (written again as this tower's). */
+             * the section is left out (written again as this tower's). A
+             * section of this tower read before it stays read. */
             if (value != identity) {
-                Tower_ClearProgress(progress, 0, identity);
+                if (!found) Tower_ClearProgress(progress, 0, identity);
                 mine = 0;
                 stale = 1;
                 continue;

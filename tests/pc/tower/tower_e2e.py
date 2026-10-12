@@ -34,11 +34,12 @@ import struct
 import sys
 import time
 import traceback
+import zlib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / "tools/pc"))
-from yfm_control import Game  # noqa: E402
+from yfm_control import Game, MODE  # noqa: E402
 
 MOD = ROOT / "tests/pc/tower/tower-test"
 MENU, DUEL, TOWER, FREE_DUEL, ANIMATED_BATTLE = 8, 3, 17, 6, 1
@@ -61,7 +62,8 @@ def check(what: str, ok: bool) -> bool:
 class Tower:
     """A game with the tower mod, and what its log says."""
 
-    def __init__(self, exe: Path, out: Path, name: str, manifest: dict | None = None, fresh: bool = True):
+    def __init__(self, exe: Path, out: Path, name: str, manifest: dict | None = None, fresh: bool = True,
+                 files=None):
         self.out = out / name
         if fresh:
             shutil.rmtree(self.out, ignore_errors=True)
@@ -71,6 +73,8 @@ class Tower:
         shutil.copytree(MOD, mods / "tower-test")
         if manifest is not None:
             (mods / "tower-test" / "mod.json").write_text(json.dumps(manifest, indent=1), encoding="utf-8")
+        if files:
+            files(mods / "tower-test")
         self.game = Game(executable=exe, out=self.out / "run", mods_dir=mods, env={"MEMORIES_TRACE": "mods"},
                          settings={"mod.3d-monsters": 0, "mod.hand-camera": 0, "mod.tower-test": 1})
         self.read = 0
@@ -317,6 +321,9 @@ def phase_climb(exe: Path, out: Path) -> Tower:
     t.until_said("tower: status")
     g.step(150)
     t.shot(out, "12-status-after-loss.png")
+    log = t.log()
+    for kind in ("intro", "before", "after", "lose"):
+        check(f"the {kind} was told on a stage (its scene and characters)", f"tower: the {kind} on scene 0x" in log)
     return t
 
 
@@ -382,6 +389,263 @@ def free_duel_cell(t: Tower, page: int) -> int:
     armed = g.mode() == DUEL
     opponent = g.u8("gDuel_bOpponentID") if armed else 0
     return opponent
+
+
+# --- the stage a story is told on (notes/tower-mode.md, Story) ---------------------------
+
+def write_png(path: Path, width: int, height: int, pixel) -> None:
+    """A PNG of `pixel(x, y)` -> (r, g, b, a): the test's own pictures,
+    nothing taken from the disc."""
+    rows = bytearray()
+    for y in range(height):
+        rows.append(0)
+        for x in range(width):
+            rows.extend(pixel(x, y))
+
+    def chunk(kind: bytes, body: bytes) -> bytes:
+        return struct.pack(">I", len(body)) + kind + body + struct.pack(">I", zlib.crc32(kind + body) & 0xFFFFFFFF)
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0)) +
+                     chunk(b"IDAT", zlib.compress(bytes(rows), 6)) + chunk(b"IEND", b""))
+
+
+HERO_BODY = (40, 90, 200)
+
+
+def near(color, wanted, slack=12) -> bool:
+    """A color as the console shows one (five bits a channel, the PNG's
+    colors reduced to 255)."""
+    return all(abs(a - b) <= slack for a, b in zip(color, wanted))
+
+
+def hero(x, y):
+    """A figure, 160 x 224, on a clear ground: a head and a body."""
+    if (x - 80) ** 2 + (y - 40) ** 2 < 32 ** 2:
+        return (240, 200, 150, 255)
+    if 80 <= y and abs(x - 80) < 20 + (y - 80) // 3:
+        return HERO_BODY + (255,)
+    return (0, 0, 0, 0)
+
+
+def sky(x, y):
+    """A scene, 640 x 320 (twice the console's 320 x 160): a sky, a sun, a ground."""
+    if (x - 500) ** 2 + (y - 100) ** 2 < 60 ** 2:
+        return (250, 230, 120, 255)
+    if y >= 240:
+        return (80, 60, 40, 255) if (x // 40) % 2 else (100, 80, 50, 255)
+    return (30, 60 + y // 3, 160 + y // 4, 255)
+
+
+def stage_files(mod: Path):
+    write_png(mod / "art/hero.png", 160, 224, hero)
+    write_png(mod / "scenes/sky.png", 640, 320, sky)
+
+
+RECORDS = 0x800EB010     # the display-effect records, 0x4C each (menu_record.h)
+SCENE_SLOTS = 0x800EAE98  # the scene's image slots; +0x3C the image id, -1 none (script_image_objects.h)
+
+
+def stage_of(game: Game) -> dict:
+    records = [game.peek(RECORDS + i * 0x4C, 0x4C) for i in range(3)]
+    scene = game.u16(SCENE_SLOTS + 0x3C)
+    return {"on": int(scene != 0xFFFF), "scene": scene,
+            "left": records[0][0x30], "right": records[1][0x30], "steps": (records[0][0x33], records[1][0x33]),
+            "quiet": (records[0][0x32] & 0x10, records[1][0x32] & 0x10)}
+
+
+def page_wait(t: Tower, timeout=3000):
+    """Until the story's box waits for a button at a page's end, its
+    characters settled."""
+    g = t.game
+    g.wait_until(lambda g: g.u8(0x800EB0F8 + 0x51) == 0x84 and stage_of(g)["steps"] == (0, 0), timeout,
+                 what="a page's end")
+    g.step(20)
+
+
+def pixels(path: Path):
+    """The frame's 320 x 240 pixels, (r, g, b) a pixel (the shots are PNGs
+    yfm_control writes: 8-bit RGB or RGBA, no interlace)."""
+    data = path.read_bytes()
+    at, idat, width, height, kind = 8, b"", 0, 0, 2
+    while at < len(data):
+        length, name = struct.unpack(">I4s", data[at:at + 8])
+        body = data[at + 8:at + 8 + length]
+        if name == b"IHDR":
+            width, height, _, kind = struct.unpack(">IIBB", body[:10])
+        elif name == b"IDAT":
+            idat += body
+        at += 12 + length
+    raw, per = zlib.decompress(idat), 4 if kind == 6 else 3
+    stride, out, previous = width * per, [], bytearray(width * per)
+    for y in range(height):
+        filt, line = raw[y * (stride + 1)], bytearray(raw[y * (stride + 1) + 1:(y + 1) * (stride + 1)])
+        for i in range(stride):
+            left = line[i - per] if i >= per else 0
+            up, corner = previous[i], previous[i - per] if i >= per else 0
+            if filt == 1: line[i] = (line[i] + left) & 255
+            elif filt == 2: line[i] = (line[i] + up) & 255
+            elif filt == 3: line[i] = (line[i] + (left + up) // 2) & 255
+            elif filt == 4:
+                p = left + up - corner
+                pa, pb, pc = abs(p - left), abs(p - up), abs(p - corner)
+                line[i] = (line[i] + (left if pa <= pb and pa <= pc else up if pb <= pc else corner)) & 255
+        out.append([tuple(line[x * per:x * per + 3]) for x in range(width)])
+        previous = line
+    return out
+
+
+def differences(a: Path, b: Path, rows=range(0, 240)):
+    """Where two frames differ: the count and the box around them."""
+    pa, pb = pixels(a), pixels(b)
+    found = [(x, y) for y in rows for x in range(len(pa[0])) if pa[y][x] != pb[y][x]]
+    if not found:
+        return 0, None
+    xs, ys = [x for x, _ in found], [y for _, y in found]
+    return len(found), (min(xs), min(ys), max(xs), max(ys))
+
+
+def retail_simon(exe: Path, out: Path) -> Path:
+    """The campaign's first scene, without a mod: Simon Muran on the left
+    of the palace gate at night (scene 0x001), at his first page's end."""
+    folder = out / "stage-retail"
+    shutil.rmtree(folder, ignore_errors=True)
+    (folder / "mods").mkdir(parents=True)
+    g = Game(executable=exe, out=folder / "run", mods_dir=folder / "mods", settings={"mod.3d-monsters": 0})
+    try:
+        g.wait_until(lambda g: g.resident("main_menu"), 3000, what="the title")
+        g.press_until(lambda g: g.resident("password"), ["start", "cross"], every=40, what="the name entry")
+        g.press_until(lambda g: g.player_name(), "cross", every=20, what="a letter of the name")
+        g.press("start")
+        g.press_until(lambda g: g.mode() == MODE["campaign"], "cross", every=40, what="the story")
+        # The prologue's pages, on to Simon's.
+        g.press_until(lambda g: g.peek(RECORDS, 0x4C)[0x30] == 1 and g.u8(0x800EB0F8 + 0x51) == 0x84 and
+                      g.peek(RECORDS, 0x4C)[0x33] == 0, "cross", every=40, timeout=20000, what="Simon's first page")
+        g.step(20)
+        path = g.shot("retail-simon.png")
+        shutil.copy(path, out / "25-retail-simon.png")
+        return out / "25-retail-simon.png"
+    finally:
+        g.quit()
+
+
+def phase_stage(exe: Path, out: Path):
+    """The stage: a retail scene and character as the campaign shows them
+    (the same frame as the campaign's own, but for the words), a mod's
+    scene and character, another scene mid-story with a character on the
+    right, a pan, a save state taken mid-story, and "dim"."""
+    reference = retail_simon(exe, out)
+
+    def staged(tower):
+        tower["intro"] = {
+            "scene": 1, "characters": {"left": 1, "right": "none"},
+            "lines": [
+                {"text": "My dear prince!", "speaker": "left"},
+                {"text": "A figure of the mod's on the right.", "speaker": "right",
+                 "characters": {"right": "art/hero.png"}},
+                {"text": "Another scene, the mod's own.", "scene": "scenes/sky.png", "speaker": "left"},
+                {"text": "A retail one again, and a pan.", "scene": "seal shrine",
+                 "pan": {"x": 64, "y": 0, "frames": 30, "wait": True}},
+                {"text": "A portrait of the campaign's.", "portrait": 3,
+                 "characters": {"left": {"character": 1, "expression": 1}}},
+                "The end."]}
+        tower["floors"][0]["before"] = {"lines": ["Show me what you have learned."]}
+    t = Tower(exe, out, "stage", manifest_variant(staged), files=stage_files)
+    g = t.game
+    to_second_menu(g)
+    enter_tower(t)
+    page_wait(t)
+    t.shot(out, "26-stage-retail-scene.png")
+    stage = stage_of(g)
+    check(f"the stage is up: scene 0x001, Simon Muran (1) on the left, nobody on the right ({stage})",
+          stage["on"] == 1 and stage["scene"] == 0x001 and stage["left"] == 1 and stage["right"] == 0xFF)
+    count, box = differences(reference, out / "26-stage-retail-scene.png", range(0, 176))
+    check(f"above the box, the frame is the campaign's own for the same scene and character "
+          f"({count} pixels differ{', around ' + str(box) if box else ''}: Simon's eyes blink when they will)",
+          box is None or (box[0] >= 64 and box[1] >= 84 and box[2] <= 144 and box[3] <= 120))
+    count, box = differences(reference, out / "26-stage-retail-scene.png", range(176, 240))
+    check(f"the box is the campaign's stone-framed one: only its words differ ({count} pixels, {box})",
+          box is None or (box[0] >= 16 and box[1] >= 180 and box[2] <= 304 and box[3] <= 232))
+    g.press("cross", hold=4, after=10)
+    page_wait(t)
+    t.shot(out, "27-stage-mod-character.png")
+    stage = stage_of(g)
+    frame = pixels(out / "27-stage-mod-character.png")
+    body = [frame[150][x] for x in range(220, 300)]
+    check(f"a mod's PNG stands on the right as a character of the campaign's (record 1 holds {stage['right']:#x}), "
+          f"speaking while the left is still ({stage['quiet']})",
+          stage["right"] == 0x27 and stage["quiet"] == (0x10, 0) and any(near(c, HERO_BODY) for c in body))
+    g.press("cross", hold=4, after=0)
+    # Frame by frame through the change: the right side empty while the
+    # scene's image id moves on, then its character back.
+    seen = []
+    for _ in range(400):
+        now = stage_of(g)
+        seen.append((now["scene"], now["right"]))
+        if now["scene"] == 0x0A1 and now["right"] == 0x27 and now["steps"] == (0, 0):
+            break
+        g.step(1)
+    page_wait(t)
+    t.shot(out, "28-stage-mod-scene.png")
+    stage = stage_of(g)
+    after = pixels(out / "28-stage-mod-scene.png")
+    same = all(after[150][x] == frame[150][x] for x in range(220, 300) if near(frame[150][x], HERO_BODY))
+    first_new = next((i for i, (scene, _) in enumerate(seen) if scene != 0x001), len(seen))
+    out_before = any(right == 0xFF for _, right in seen[:first_new + 1])
+    check(f"another scene mid-story (the mod's, 0x{stage['scene']:03x}): the right character out before the "
+          f"scene's image changed ({out_before}), back after, whole ({same})",
+          stage["scene"] == 0x0A1 and stage["right"] == 0x27 and same and out_before)
+    check("the mod's scene is its PNG made at 320 x 160 (the sky's top row, its ground)",
+          after[2][10][2] > 100 and after[2][10][0] < 80 and
+          (near(after[130][20], (80, 60, 40)) or near(after[130][20], (100, 80, 50))))
+    state = g.save(t.out / "mid-story.state")
+    g.press("cross", hold=4, after=10)
+    page_wait(t)
+    t.shot(out, "29-stage-pan.png")
+    panned = pixels(out / "29-stage-pan.png")
+    edge = [panned[y][x] for y in range(0, 6) for x in range(258, 318)]
+    inner = [panned[y][x] for y in range(0, 6) for x in range(4, 60)]
+    check("the pan: the 320-wide picture moved 64 to the left, nothing past its right edge "
+          f"(the last columns at most {max(max(c) for c in edge)}, the first {max(max(c) for c in inner)})",
+          max(max(c) for c in edge) <= 16 and max(max(c) for c in inner) > 24)
+    g.load(state)
+    g.step(30)
+    t.shot(out, "30-stage-state-loaded.png")
+    count, box = differences(out / "28-stage-mod-scene.png", out / "30-stage-state-loaded.png")
+    check(f"a save state taken mid-story loads to the same stage and page (but the page arrow: {count} pixels, {box})",
+          box is None or (box[0] >= 280 and box[1] >= 200))
+    for page in range(3):
+        g.press("cross", hold=4, after=10)
+        page_wait(t)
+        if page == 1:
+            t.shot(out, "31-stage-portrait.png")
+            check("a campaign portrait beside the box (record 2 holds 0x44)", g.peek(RECORDS + 2 * 0x4C, 0x4C)[0x30] == 0x44)
+    g.press("cross", hold=4, after=10)
+    t.until_said("tower: status")
+    g.step(150)
+    t.shot(out, "32-stage-after-story.png")
+    stage = stage_of(g)
+    check(f"after the story the stage is down: the wall, no character left ({stage})",
+          stage["on"] == 0 and stage["left"] == 0xFF and stage["right"] == 0xFF)
+    t.quit()
+
+    # "dim": the one not speaking drawn darker; without it, as the campaign, only still.
+    def dimmed(tower):
+        staged(tower)
+        tower["dim"] = True
+    t = Tower(exe, out, "stage-dim", manifest_variant(dimmed), files=stage_files)
+    g = t.game
+    to_second_menu(g)
+    enter_tower(t)
+    page_wait(t)
+    g.press("cross", hold=4, after=10)
+    page_wait(t)
+    t.shot(out, "33-stage-dim.png")
+    lit, dark = pixels(out / "27-stage-mod-character.png"), pixels(out / "33-stage-dim.png")
+    lit_sum = sum(sum(lit[y][x]) for y in range(60, 150) for x in range(40, 140))
+    dark_sum = sum(sum(dark[y][x]) for y in range(60, 150) for x in range(40, 140))
+    check(f"\"dim\": the left, not speaking, drawn darker ({dark_sum} against {lit_sum})", dark_sum < lit_sum * 0.8)
+    t.quit()
 
 
 def manifest_variant(change) -> dict:
@@ -500,6 +764,7 @@ def phase_load(exe: Path, out: Path):
     flags = g.u8(0x801D0618 + ((0x6E0 + NITEMARE) >> 3))
     check("floor 3's reward: Nitemare's Free Duel flag (0x6E0 + 38) is set",
           bool(flags & (0x80 >> ((0x6E0 + NITEMARE) & 7))))
+    check("the ending was told on a stage (its scene and characters)", "tower: the ending on scene 0x" in log)
     t.quit()
 
 
@@ -567,6 +832,7 @@ def main():
               "load": lambda: phase_load(options.exe, options.out),
               "control": lambda: phase_control(options.exe, options.out),
               "after_ending": lambda: phase_after_ending(options.exe, options.out),
+              "stage": lambda: phase_stage(options.exe, options.out),
               "no_mod": lambda: phase_no_mod(options.exe, options.out, options.baseline)}
     for name, phase in phases.items():
         if options.only and name != options.only:

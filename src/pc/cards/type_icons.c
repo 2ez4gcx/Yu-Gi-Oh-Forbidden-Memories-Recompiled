@@ -18,7 +18,8 @@ static unsigned char made[TYPE_LIMIT];
  * request clock rather than wall time because this path has no clock source;
  * TypeIcons_Clear resets it on a mod reload, which retries immediately. */
 #define RETRY_INTERVAL 60
-static unsigned retry_clock, retry_at[TYPE_LIMIT];
+static unsigned retry_clock, failed_at[TYPE_LIMIT], hd_failed_at[TYPE_LIMIT];
+static unsigned char hd_made[TYPE_LIMIT], hd_tried[TYPE_LIMIT];
 static unsigned pending;
 
 /* func_80037DA4 marks the icon it is about to add with the card's real
@@ -50,7 +51,10 @@ int TypeIcons_IconCell(unsigned code, int *tpage, int *u, int *v, int *clut_x, i
 void TypeIcons_Clear(void)
 {
     memset(made, 0, sizeof(made));
-    memset(retry_at, 0, sizeof(retry_at));
+    memset(hd_made, 0, sizeof(hd_made));
+    memset(hd_tried, 0, sizeof(hd_tried));
+    memset(failed_at, 0, sizeof(failed_at));
+    memset(hd_failed_at, 0, sizeof(hd_failed_at));
     retry_clock = 0;
     pending = 0;
     TexturePack_BankSpritesClear(TEXTURE_BANK_OWNER_TYPE_ICONS);
@@ -64,6 +68,27 @@ static void store(uint16_t *bank, int type, const unsigned char *pixels)
                                                                    (pixels[y * SIDE / 2 + x * 2 + 1] << 8));
 }
 
+/* Unsigned subtraction deliberately handles retry_clock wrapping: it is the
+ * elapsed request count modulo UINT_MAX + 1, not an absolute deadline. */
+static int cooled_down(unsigned now, unsigned then)
+{
+    return now - then >= RETRY_INTERVAL;
+}
+
+static void register_hd_icon(int type, int slot, const char *path)
+{
+    if (hd_made[type] || (hd_tried[type] && !cooled_down(retry_clock, hd_failed_at[type]))) return;
+    hd_tried[type] = 1;
+    TexturePack_BankSpritesUseOwner(TEXTURE_BANK_OWNER_TYPE_ICONS);
+    if (TexturePack_AddBankSprite(BANK, PAGE * 64, 0, 0, 0, CLUT_Y + slot, (slot & 15) * SIDE, (slot >> 4) * SIDE,
+                                  SIDE, SIDE, path)) {
+        hd_made[type] = 1;
+    } else {
+        hd_failed_at[type] = retry_clock;
+        fprintf(stderr, "memories-pc: type %d: its icon has no HD replacement (the console-resolution one still applies)\n", type);
+    }
+}
+
 int TypeIcons_Cell(int type, int *tpage, int *u, int *v, int *clut)
 {
     uint16_t *bank;
@@ -74,7 +99,7 @@ int TypeIcons_Cell(int type, int *tpage, int *u, int *v, int *clut)
     int slot;
     if (!path || type < 24 || type >= TYPE_LIMIT || !(bank = SoftGpu_Bank(BANK))) return 0;
     retry_clock++;
-    if (made[type] == 2 && retry_clock < retry_at[type]) return 0;
+    if (made[type] == 2 && !cooled_down(retry_clock, failed_at[type])) return 0;
     if (made[type] == 2) made[type] = 0;
     if (!made[type]) {
         made[type] = 2;
@@ -83,16 +108,12 @@ int TypeIcons_Cell(int type, int *tpage, int *u, int *v, int *clut)
             /* A mod reload calls TypeIcons_Clear and retries at once.  Until
              * then, throttle a permanently bad file to one attempt per 60
              * requests, avoiding filesystem/PNG work every frame. */
-            retry_at[type] = retry_clock + RETRY_INTERVAL;
+            failed_at[type] = retry_clock;
             return 0;
         }
         memcpy(&bank[(CLUT_Y + type - 24) * SOFT_GPU_WIDTH], palette, sizeof(palette));
         store(bank, type, pixels);
-        TexturePack_BankSpritesUseOwner(TEXTURE_BANK_OWNER_TYPE_ICONS);
         slot = type - 24;
-        if (!TexturePack_AddBankSprite(BANK, PAGE * 64, 0, 0, 0, CLUT_Y + slot, (slot & 15) * SIDE, (slot >> 4) * SIDE,
-                                       SIDE, SIDE, path))
-            fprintf(stderr, "memories-pc: type %d: its icon has no HD replacement (the console-resolution one still applies)\n", type);
         made[type] = 1;
     }
     if (made[type] != 1) return 0;
@@ -101,5 +122,6 @@ int TypeIcons_Cell(int type, int *tpage, int *u, int *v, int *clut)
     *u = (slot & 15) * SIDE;
     *v = (slot >> 4) * SIDE;
     *clut = (CLUT_Y + slot) << 6;
+    register_hd_icon(type, slot, path);
     return 1;
 }

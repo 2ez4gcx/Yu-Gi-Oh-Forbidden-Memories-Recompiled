@@ -87,6 +87,11 @@ int TexturePack_AddBankSprite(int bank_, int page_x, int page_y, int depth, int 
 static void reset(void)
 {
     memset(made, 0, sizeof(made));
+    memset(hd_made, 0, sizeof(hd_made));
+    memset(hd_tried, 0, sizeof(hd_tried));
+    memset(failed_at, 0, sizeof(failed_at));
+    memset(hd_failed_at, 0, sizeof(hd_failed_at));
+    retry_clock = 0;
     pending = 0;
     memset(bank, 0, sizeof(bank));
     memset(icon_paths, 0, sizeof(icon_paths));
@@ -188,7 +193,7 @@ static void bank_missing(void)
  * (made[] 1, TypeIcons_Cell still succeeds) is unaffected, but it is
  * reported, where silently dropping it would leave an HD pack's player
  * with no sign why the icon never sharpens. */
-static void hd_registration_failure_logged(void)
+static void hd_registration_failure_retries_after_clear(void)
 {
     int tpage, u, v, clut;
     reset();
@@ -197,6 +202,13 @@ static void hd_registration_failure_logged(void)
     assert(TypeIcons_Cell(24, &tpage, &u, &v, &clut));
     assert(sprite_calls == 1);
     assert(strstr(logged, "type 24"));
+    logged[0] = 0;
+    assert(TypeIcons_Cell(24, &tpage, &u, &v, &clut));
+    assert(sprite_calls == 1 && !logged[0]);
+    sprite_fail = 0;
+    TypeIcons_Clear();
+    assert(TypeIcons_Cell(24, &tpage, &u, &v, &clut));
+    assert(sprite_calls == 2);
 }
 
 /* The mark a drawing entry carries (func_80037DA4's TypeIcons_MarkIcon,
@@ -259,7 +271,7 @@ int main(void)
     bounds_and_no_icon();
     failed_decode_retries_after_clear();
     bank_missing();
-    hd_registration_failure_logged();
+    hd_registration_failure_retries_after_clear();
     mark_and_cell_round_trip();
     clear_drops_pending_mark();
     return 0;

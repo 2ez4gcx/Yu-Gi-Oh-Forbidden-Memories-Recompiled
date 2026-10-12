@@ -145,6 +145,14 @@ static int compare(const void *a, const void *b)
     return x->position < y->position ? -1 : x->position > y->position;
 }
 
+/* At one disc offset, a later-loaded pack overrides an earlier one.  Leave
+ * equal ranks alone: the backwards lookup then retains the same entry that
+ * the old first-hit lookup chose. */
+static int higher_rank(const Entry *candidate, const Entry *current)
+{
+    return candidate->rank > current->rank;
+}
+
 /* The PNG, as the texture's own grid of 15-bit colors: each texel takes
  * the average of the image pixels that fall on it (a pack image is any
  * size), alpha below half is the transparent color. */
@@ -348,14 +356,13 @@ static int locate(uint32_t offset, int *row, int *word)
      * may cover it: the one starting closest to it is the more specific
      * reading and wins regardless of pack, as it always has; only between
      * two whose own offset is equally close (typically the same offset, two
-     * packs' different takes on one picture) does the later pack's rank,
-     * then its place in that pack's own manifest, decide -- the same order
-     * compare() sorts equal-shape entries by, so a later pack still wins a
-     * reading its own wider shape would otherwise have sorted ahead of. */
+     * packs' different takes on one picture) does the later pack's rank
+     * decide.  Equal ranks retain the old first-hit result. */
     for (i = low - 1; i >= 0 && i >= low - 64; i--) {
         const Entry *entry = &entries[i];
         uint32_t delta = offset - entry->offset;
         int found_row = -1, found_word = 0;
+        if (best >= 0 && delta > best_delta) break;
         if (entry->row_offsets) {
             int r;
             for (r = 0; r < entry->rows; r++) {
@@ -374,9 +381,7 @@ static int locate(uint32_t offset, int *row, int *word)
             }
         }
         if (found_row < 0) continue;
-        if (best < 0 || delta < best_delta ||
-            (delta == best_delta && (entry->rank > entries[best].rank ||
-                                      (entry->rank == entries[best].rank && entry->position > entries[best].position)))) {
+        if (best < 0 || (delta == best_delta && higher_rank(entry, &entries[best]))) {
             best = i;
             best_row = found_row;
             best_word = found_word;
@@ -406,11 +411,12 @@ static int locate_texel(uint32_t offset, int texel, int *row, int *word)
     }
     /* As locate(): more than one entry's crop can cover this texel. The one
      * starting closest to it wins, as always; only a tie at equal distance
-     * falls to compare()'s rank, then manifest position. */
+     * falls to the pack rank. */
     for (i = low - 1; i >= 0 && i >= low - 64; i--) {
         const Entry *entry = &entries[i];
         uint32_t delta = offset - entry->offset;
         int r = -1, c = 0, x;
+        if (best >= 0 && delta > best_delta) break;
         if (entry->row_offsets) {
             int at;
             for (at = 0; at < entry->rows; at++) {
@@ -431,9 +437,7 @@ static int locate_texel(uint32_t offset, int texel, int *row, int *word)
         if (r < 0) continue;
         x = c * per_word(entry->bpp) + texel;
         if (x < entry->crop_left || x >= entry->crop_left + entry->crop_width) continue;
-        if (best < 0 || delta < best_delta ||
-            (delta == best_delta && (entry->rank > entries[best].rank ||
-                                      (entry->rank == entries[best].rank && entry->position > entries[best].position)))) {
+        if (best < 0 || (delta == best_delta && higher_rank(entry, &entries[best]))) {
             best = i;
             best_delta = delta;
             best_row = r;

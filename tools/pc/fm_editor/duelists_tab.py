@@ -357,7 +357,8 @@ class DuelistsTab(Tab):
         """The Status words for what an entry's unlock, ai and ranks change."""
         if e is None:
             return []
-        return [word for key, word in (("unlock", "locked"), ("ai", "plays"), ("ranks", "ranks")) if key in e.extra]
+        return [word for key, word in (("unlock", "locked"), ("tower_only", "tower only"), ("ai", "plays"),
+                                       ("ranks", "ranks")) if key in e.extra]
 
     def select(self):
         selection = self.list.selection()
@@ -430,7 +431,9 @@ class DuelistsTab(Tab):
             lines.append("Plays: " + duelist_rules.ai_text(p, e))
         if "ranks" in e.extra:
             lines.append("Own rank scoring: " + (duelist_rules.ranks_text(e) or "none the game reads"))
-        rest = [key for key in e.extra if key not in ("unlock", "ai", "ranks")]
+        if e.extra.get("tower_only") is True:
+            lines.append("The tower's alone: in Free Duel once a won floor lets it out (the Tower tab)")
+        rest = [key for key in e.extra if key not in ("unlock", "ai", "ranks", "tower_only")]
         if rest:
             lines.append("Kept as written: " + ", ".join(rest))
         return "\n".join(lines)

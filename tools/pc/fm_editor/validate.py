@@ -15,7 +15,7 @@ from .gamedata import (CARD_COUNT, DECK_COPY_LIMIT, DECK_POOL_MIN_CARDS, DECK_SI
                        POOL_LABELS, POOL_TOTAL, RITUAL_ORIGINS, RITUAL_TRIBUTE_MAX, TAG_LENGTH_MAX, TAGS_MAX, TYPE_MAGIC, TYPE_EQUIP, TYPE_NAMES,
                        TYPE_RITUAL, exodia_piece)
 from . import art, board_art, campaign_map, card_text, fixed_decks, guardian_stars, packs as packmath, values
-from . import monster_effects, roster, starter_pools, ui_rules
+from . import monster_effects, roster, starter_pools, tower, ui_rules
 from .compat import HOST_API, external_packs
 from .model import KEY_RE, Project, duelist_named
 
@@ -27,7 +27,7 @@ MANIFEST_KEYS = ("id", "name", "version", "author", "description", "library", "e
                  "font",
                  "chest_overflow", "terrain_bonus", "trap_thresholds", "equip_bonus_default", "passwords",
                  "starter", "starter_pools", "limits", "guardian_stars", "packs", "pack_shop", "card_text_colors", "card_layout",
-                 "palette_ramps", "title", "menu", "ui")
+                 "palette_ramps", "title", "menu", "ui", "tower")
 
 
 @dataclass
@@ -467,6 +467,9 @@ def validate(project: Project) -> list:
                                                       card_stars=stars):
         out.append(Issue(level, "Guardian Stars", where, message))
     _check_packs(project, out)
+    for level, where, message in tower.check(project.other.get("tower"), lambda name: roster.named(project, name),
+                                             lambda name: project.resolve(name)):
+        out.append(Issue(level, "Tower", where, message))
     fixed_decks.check(project, out)
     roster.check(project, out)
     art.check(project, out)

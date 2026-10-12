@@ -19,11 +19,11 @@ from pathlib import Path
 from .gamedata import FRAME_COLOR_NAMES, TYPE_MAGIC
 from .model import type_named
 
-HOST_API = 12
+HOST_API = 13
 
 # The release each mod API first shipped in, for the hints. An API past the
 # last listed is newer than every release.
-RELEASES = {9: "v0.2.0", 10: "v0.2.1-preview.1"}
+RELEASES = {9: "v0.2.0", 10: "v0.2.1-preview.1", 11: "v0.3.0", 12: "v0.3.0"}
 
 # tables.c read_limits: what v0.2.1-preview.1 and older know.
 OLD_LIMITS = ("stats", "attack", "defense", "life_points", "two_player", "starchips", "chest", "free_duel_record",
@@ -100,6 +100,15 @@ def _has_key(value, key: str) -> bool:
         return key in value or any(_has_key(item, key) for item in value.values())
     if isinstance(value, list):
         return any(_has_key(item, key) for item in value)
+    return False
+
+
+def _has_action(value, action: str) -> bool:
+    """Whether any object in value, at any depth, has "action": action."""
+    if isinstance(value, dict):
+        return value.get("action") == action or any(_has_action(item, action) for item in value.values())
+    if isinstance(value, list):
+        return any(_has_action(item, action) for item in value)
     return False
 
 
@@ -189,6 +198,17 @@ def features(manifest: dict, project=None) -> list:
         newer = sorted(key for key in limits if key not in OLD_LIMITS)
         if newer:
             add(11, "the values " + ", ".join(newer))
+    # --- API 13 -------------------------------------------------------------
+    if "tower" in manifest:
+        add(13, "a tower (\"tower\")")
+    for entry in _entries(manifest.get("duelists")):
+        if "tower_only" in entry:
+            add(13, "a duelist of the tower's alone (\"tower_only\")")
+        if isinstance(entry.get("unlock"), dict) and "tower" in entry["unlock"]:
+            add(13, "a duelist's \"unlock\" \"tower\"")
+    for part in (title, menu):
+        if _has_action(part, "tower"):
+            add(13, "a menu item's action \"tower\"")
     return out
 
 

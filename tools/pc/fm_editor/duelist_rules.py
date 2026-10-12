@@ -1,7 +1,7 @@
 """What a duelist entry says beside its name, face and pools
 (notes/more-duelists.md; src/pc/free_duel/duelists.c read_one_duelist):
 
-    "unlock": {"beat": ..., "wins": n, "story": n, "card": ..., "copies": n}
+    "unlock": {"beat": ..., "wins": n, "story": n, "card": ..., "copies": n, "tower": true or n}
     "ai":     {"copy": ..., "search": n, "values": [...], "sight": true}  or [n, ...]
     "ranks":  {"turns": [[threshold, change], ...], ...}
 
@@ -88,12 +88,26 @@ def unlock_value(e, beat="", wins=0, story=None, card="", copies=0):
     return {**{k: out[k] for k in UNLOCK_KEYS if k in out}, **{k: v for k, v in out.items() if k not in UNLOCK_KEYS}}
 
 
+def tower_condition(e):
+    """The "unlock" "tower" (notes/tower-mode.md): 0 for the whole tower
+    won, a floor 1-99, or None for none (or one the game leaves out)."""
+    value = e.extra.get("unlock") if e is not None else None
+    tower = value.get("tower") if isinstance(value, dict) else None
+    if tower is True:
+        return 0
+    floor = _number(tower)
+    return floor if floor is not None and 1 <= floor <= 99 else None
+
+
 def unlock_text(e) -> str:
     """"beat Heishin 2 times, story flag 1762" -- or "" with no unlock."""
     if e is None or "unlock" not in e.extra:
         return ""
     u = unlock_of(e)
     said = []
+    tower = tower_condition(e)
+    if tower is not None:
+        said.append("the tower won" if tower == 0 else f"the tower's floor {tower} won")
     if u["beat"]:
         said.append(f"beat {u['beat']}" + (f" {u['wins']} times" if u["wins"] > 1 else ""))
     elif u["wins"]:
@@ -333,7 +347,10 @@ def check(project, e, add):
         for key in ("wins", "story", "copies"):
             if key in unlock and _number(unlock[key]) is None:
                 add("error", f"unlock {key} is a number")
-        if not (u["beat"] or u["card"] or u["wins"] > 0 or u["story"] is not None):
+        if "tower" in unlock and tower_condition(e) is None and unlock["tower"] is not False:
+            add("error", "unlock tower is true (the whole tower won) or a floor, 1 to 99")
+        if not (u["beat"] or u["card"] or u["wins"] > 0 or u["story"] is not None or
+                tower_condition(e) is not None):
             add("warning", "unlock names no condition, so it is shown from the start")
         if u["beat"]:
             found = roster.named(project, u["beat"])

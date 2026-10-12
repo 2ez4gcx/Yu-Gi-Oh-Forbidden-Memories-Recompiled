@@ -235,6 +235,7 @@ The tabs, left to right:
 | [Values](#values) | the game's numbers: LP, the ATK/DEF cap, magic cards' numbers, deck copies, rank score, starchips |
 | [Guardian Stars](#guardian-stars) | the stars' names and icons, new stars 11 to 15, every matchup |
 | [Packs](#packs) | card packs sold for starchips on the Password screen |
+| [Tower](#tower) | a run of duels in the title's second menu: floors, rules, rewards, story, when it opens, duelists of the tower's alone |
 | [Mod info](#mod-info) | the mod's id, name, version, author, description and settings |
 | [Conflicts](#conflicts) | what the game would refuse, and where other installed mods change the same things |
 
@@ -1057,6 +1058,36 @@ tab keeps it as written: a pack's fields and buttons are grey, and only
 The file is still inspected for the mod's required API on save. If it cannot
 be read, Conflicts reports an error and Mod info says compatibility is
 incomplete; fix the file before sharing the mod.
+
+### Tower
+
+A mod's `"tower"` ([Tower mode](../../../notes/tower-mode.md)): one more
+button in the title's second menu, a run of duels the save climbs. Check
+**This mod has a tower** to give the mod one (a floor against Simon Muran to
+start from); unchecked, the mod has none.
+
+- **The tower:** its name, the menu button's words (`TOWER` without),
+  its music, when it opens (**always**, **after_ending**, or **conditions**:
+  beat, wins, story, hold, copies, and **and the ending seen**) and what a
+  loss does (**checkpoint** or **restart**).
+- **Story:** what is told before the first climb, at the top and after a
+  loss. A line is one dialogue box; `@Seto: ...` is said by a duelist (an
+  id, a name, an identity: its portrait shows), `#8: ...` shows one of the
+  campaign's 25 portraits, `@none: ...` nobody's.
+- **The tower's own duelists:** the mod's added duelists (from the Duelists
+  tab); a checked one is kept off Free Duel until a won floor fights it or
+  names it in its reward (`"tower_only"`).
+- **Floors**, bottom first: **Add floor**, **Remove**, **Up**, **Down**. The
+  selected floor: its opponent, field, both sides' starting LP (empty: the
+  usual), **No fusions**, **No equips**, **Checkpoint**, the reward (cards,
+  starchips, duelists to unlock), its deck (a card a line, `Card x3`, forty in
+  all, or empty for the opponent's own) and its lines before the duel and
+  after a win.
+
+The line above the form lists what the game would leave out or read
+otherwise (the same as Conflicts' **Tower** area). A tower needs mod API 13,
+which Mod info then shows and the save writes as `min_api`. What the form
+cannot show (a key of a later game) is kept as written.
 
 ### Mod info
 

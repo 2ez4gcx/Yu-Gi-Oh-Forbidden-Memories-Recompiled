@@ -14,6 +14,7 @@ from .map_tab import MapTab
 from .values_tab import ValuesTab
 from .guardian_stars_tab import GuardianStarsTab
 from .packs_tab import PacksTab
+from .tower_tab import TowerTab
 from .duelists_tab import DuelistsTab
 from .rituals_tab import RitualsTab
 from .ui_tab import UiTab
@@ -90,10 +91,12 @@ class App(Editing, tk.Tk):
         self.values = ValuesTab(self.notebook, self)
         self.stars = GuardianStarsTab(self.notebook, self)
         self.packs = PacksTab(self.notebook, self)
+        self.tower = TowerTab(self.notebook, self)
         self.info = ModInfoTab(self.notebook, self)
         self.conflicts = ConflictsTab(self.notebook, self)
         self.tabs = [self.cards, self.art, self.fusions, self.equips, self.rituals, self.duelists, self.ui,
-                     self.starter, self.map, self.values, self.stars, self.packs, self.info, self.conflicts]
+                     self.starter, self.map, self.values, self.stars, self.packs, self.tower, self.info,
+                     self.conflicts]
         self.status = ttk.Label(self, relief="sunken", anchor="w", padding=(6, 2))
         self.status.pack(fill="x", side="bottom", before=self.notebook)
         self.install_editing()
@@ -598,6 +601,8 @@ class App(Editing, tk.Tk):
             self.notebook.select(self.values)
         elif issue.area == "Guardian Stars":
             self.notebook.select(self.stars)
+        elif issue.area == "Tower":
+            self.notebook.select(self.tower)
         elif issue.area == "Starter pools":
             self.open_starter_pool(target if isinstance(target, int) else 0)
         elif issue.area == "Other mods" and isinstance(target, tuple):

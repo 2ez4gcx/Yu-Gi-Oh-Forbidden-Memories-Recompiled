@@ -22,6 +22,7 @@
 #include "pc/debug/log.h"
 #include "pc/guest/state.h"
 #include "pc/mods/mods.h"
+#include "pc/cards/tables.h"
 #include "pc/render/texture_pack.h"
 #include "paths.h"
 #include "pc/sdk/display.h"
@@ -1560,6 +1561,9 @@ static int notice_event(const MenuEvent *event, int *quit)
 }
 
 
+static void update_card_drops_item(void);
+static int slider_value(const Item *item);
+
 void Menu_Draw(MenuCanvas *into)
 {
     int i, level;
@@ -1567,6 +1571,7 @@ void Menu_Draw(MenuCanvas *into)
     if (!ready) {
         return;
     }
+    update_card_drops_item();
     if (!visible) {
         if (notice.shown) draw_notice();
         return;
@@ -1647,14 +1652,17 @@ void Menu_Draw(MenuCanvas *into)
                 int sx, sm, knob, filled;
                 char value[8];
                 int minimum = Settings_Min(item->setting), maximum = Settings_Max(item->setting);
-                int setting = Settings_Get(item->setting);
+                int setting = slider_value(item);
                 slider_geometry(level, i, &sx, &sm);
                 knob = sx + KNOB_R + (setting - minimum) * (SLIDER_W - KNOB_R * 2) / (maximum - minimum);
                 filled = knob - sx;
                 fill(sx, sm - SLIDER_H / 2, SLIDER_W, SLIDER_H, C_TRACK, 255);
-                fill(sx, sm - SLIDER_H / 2, filled, SLIDER_H, hot ? C_TEXT_ON_ACCENT : C_ACCENT, 255);
+                /* A slider that is off (a mod's Card drops) is grey all
+                 * through, as its label is. */
+                fill(sx, sm - SLIDER_H / 2, filled, SLIDER_H,
+                     disabled ? C_TEXT_DIM : hot ? C_TEXT_ON_ACCENT : C_ACCENT, 255);
                 disc(knob, sm, KNOB_R, C_KNOB_EDGE);
-                disc(knob, sm, KNOB_R - 1, C_KNOB);
+                disc(knob, sm, KNOB_R - 1, disabled ? C_TEXT_DIM : C_KNOB);
                 snprintf(value, sizeof(value), "%d", setting);
                 draw_text(sx + SLIDER_W + 12 * ui, middle, value, setting ? ink : dim);
             }
@@ -1957,6 +1965,48 @@ static int item_action(const Item *item)
     default: return -1;
     }
 }
+/* Game > Card drops while a mod locks it ("limits": {"card_drops": n},
+ * notes/card-drops.md): the row is off, its slider stands at the mod's
+ * number and its label names the mod. The player's own value stays in the
+ * settings, untouched, for when the mod is gone. The lock is read at
+ * startup (tables.c), after the menu is made, so this is asked as the menu
+ * is drawn and used. */
+static int card_drops_lock;
+static void update_card_drops_item(void)
+{
+    static char label[96];
+    static Item *item;
+    static int shown = -1;
+    const char *id = NULL, *name = NULL;
+    int i;
+    card_drops_lock = Tables_CardDropsLock(&id);
+    if (!item) {
+        for (i = 0; i < menus[MENU_GAME].count && !item; i++)
+            if (menus[MENU_GAME].items[i].setting == SET_CARD_DROPS) item = &menus[MENU_GAME].items[i];
+        if (!item) return;
+    }
+    if (card_drops_lock == shown) return;
+    shown = card_drops_lock;
+    if (!card_drops_lock) {
+        item->label = "Card drops";
+        item->flags &= ~ITEM_DISABLED;
+        return;
+    }
+    for (i = 0; i < Mods_Count() && !name; i++)
+        if (id && !strcmp(Mods_Id(i), id)) name = Mods_Name(i);
+    snprintf(label, sizeof(label), "Card drops (set by %.48s)", name ? name : id ? id : "a mod");
+    item->label = label;
+    item->flags |= ITEM_DISABLED;
+}
+
+/* What a slider shows: Card drops shows a mod's lock in place of the
+ * player's own value. */
+static int slider_value(const Item *item)
+{
+    if (item->setting == SET_CARD_DROPS && card_drops_lock) return card_drops_lock;
+    return Settings_Get(item->setting);
+}
+
 static void update_shortcuts(void)
 {
     static char labels[CTRL_HOST_COUNT][32];
@@ -1976,6 +2026,7 @@ static void update_shortcuts(void)
 int Menu_Event(const MenuEvent *event, int *quit)
 {
     update_shortcuts();
+    update_card_drops_item();
     if (ready && notice.shown) {
         return notice_event(event, quit);
     }

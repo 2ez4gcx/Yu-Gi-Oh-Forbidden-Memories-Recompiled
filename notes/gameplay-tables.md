@@ -509,7 +509,8 @@ no mod sets it, so without one nothing changes:
     "swords_turns": 4, "crush_card": 2000, "spellbinding_circle": 700, "shadow_spell": 1200,
     "rank_score": {"start": 50, "exodia": 40, "deck_out": -40},
     "starchip_prize": {"S": 8, "A": 6, "B": 4, "C": 2, "D": 1},
-    "new_game_starchips": 500
+    "new_game_starchips": 500,
+    "card_drops": 5
 }
 ```
 
@@ -525,6 +526,7 @@ no mod sets it, so without one nothing changes:
 | `rank_score` `deck_out` | what a win by the opponent's empty deck adds | -40 | -99-99 |
 | `starchip_prize` `S` to `D` | the starchips a win against the CPU gives at that rank, POW or TEC; the results show a starchip each, or past 8 one starchip with "xN" beside it | 5, 4, 3, 2, 1 | 0-1000 |
 | `new_game_starchips` | the starchips a new game's save starts with (at most the `starchips` cap) | 0 | 0-99999999 |
+| `card_drops` | the cards every won duel deals, locked: the player's Game > Card drops shows this number, greyed and named after the mod, and comes back as it was when the mod is removed ([card drops](card-drops.md#a-mod-that-sets-it); `min_api` 14) | the player's (1 on the console) | 1-99 |
 
 **What holds them back.** Build Deck counts a card's copies up to the forty
 a deck holds. The field's card bar shows the Swords' turns as one digit.
@@ -540,7 +542,8 @@ rest of the page. The prize itself is kept in the record's byte and the pad
 after it as one halfword on the PC, and is added to the save's starchips up
 to the `starchips` cap (999999, or the mod's). A value past its
 range is noted in the Mods window and held at the most the game shows; a
-rank value past its range means nothing and is left out with a note.
+rank value past its range means nothing and is left out with a note, and so
+is a `card_drops` past 1 to 99 (Game > Card drops' own range).
 
 The rank's end tags stay the disc's (40 for Exodia and -40 for an empty
 deck in `DuelSideState.rank.result_adjustment`): the duel's end and the

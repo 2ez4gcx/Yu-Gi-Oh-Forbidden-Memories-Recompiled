@@ -3,7 +3,47 @@
 **Game > Card drops** sets how many cards a won duel deals: 1 (the console's)
 to 99. Drag the slider, or open the menu with the keyboard and step it one at
 a time with Left/Right. The setting is saved as `card_drops`;
-`MEMORIES_CARD_DROPS=N` sets it for one run.
+`MEMORIES_CARD_DROPS=N` sets it for one run. A mod may lock it
+([below](#a-mod-that-sets-it)).
+
+## A mod that sets it
+
+A mod's `mod.json` may fix how many cards every won duel deals, whatever the
+player chose:
+
+```json
+"limits": {"card_drops": 5}
+```
+
+Any whole number from 1 to 99, Game > Card drops' own range (the FM
+Editor's Values tab, Rewards, **Cards a win deals**). While the mod is
+applied, Game > Card drops reads `Card drops (set by <the mod's name>)`,
+greyed, with the slider at the mod's number, and cannot be changed. The
+player's own value is not touched: it stays saved as `card_drops`, and
+when the mod is removed (a restart, as for every `limits` key) the menu and
+the duels have it back.
+
+- **Several mods** that set it: the one applied later wins, as for every
+  `limits` key (the Mods window's order, then `after` and `priority`). The
+  earlier one gets a note in the Mods window naming the other,
+  `limits: "card_drops" 5 is not used: other-mod, applied later, locks it
+  at 7`, and the Mods window's overlaps and the FM Editor's Conflicts list
+  both.
+- **A wrong value** (0, 100, `"5"`) is a note in the Mods window
+  (`limits: "card_drops" is at most 99; left out`, `... is at least 1; left
+  out`, `... is a whole number, 1 to 99, without quotes; left out`) and the
+  key is left out: the player's setting decides.
+- **`MEMORIES_CARD_DROPS=N`** is the player's setting for one run, as
+  before, so a mod's lock wins over it too. Tests use that: the player at
+  99 and a mod's 5 deal 5.
+- **Code mods** read the lock with `host->limit(host, "card_drops")`: the
+  number, or 0 while no mod sets it and the player's setting decides.
+- A game older than mod API 14 would leave the key out and deal the
+  player's count, so a mod that sets it says `"min_api": 14` (the FM Editor
+  writes it).
+
+The cards themselves come as below, from the same rolls: only how many
+changes.
 
 ## On RESULTS OF DUEL
 
@@ -70,7 +110,12 @@ states from earlier builds fail to load ("game variable ... moved").
 ## Code
 
 - `src/pc/cards/drops.c`, `drops.h`: dealing, awarding, page order and the
-  page text.
+  page text; `CardDrops_Count`, a mod's lock or the player's setting.
+- `src/pc/cards/tables.c` (`read_values`, `Tables_CardDropsLock`): a mod's
+  `"limits"` `"card_drops"`, which mod set it, and the note when another
+  mod's replaces it.
+- `src/pc/platform/menu.c` (`update_card_drops_item`): Game > Card drops
+  greyed and named after the mod while it is locked.
 - `src/game/func_800218F0.c` (`DuelScene_UpdateResultRewards`): calls
   the roll, the award and the page turn, under `MEMORIES_PC`.
 - `src/game/duel_result_runtime.c` (`Duel_ShowResultPage`): an added page
@@ -98,7 +143,17 @@ opponent's life points zeroed in a saved state) and checks that:
 
 `tests/pc/card_drops_test.c` (CTest `pc_card_drops`) checks the rolls:
 1 + 7N draws for N cards, each from the pool, and one card the same as the
-game's own roll.
+game's own roll; and a mod's lock: 5 and 99 over the player's 1 and 99,
+the player's value back without the mod, the later of two mods, and the
+values left out with their notes.
+
+`python3 tools/pc/test_card_drops_mod.py` wins the same duel with mods in a
+test user directory: a mod's 5 over the player's 99 deals 5, a mod's 99
+over the player's 1 deals 99, the player's 99 is back without the mod, a
+mod's 0 is noted and left out, and of two mods the later one's count is
+dealt. It also saves the window with Game open on the locked row
+(`menu-locked.bmp`), and takes `--windows`, `--executable` and `--out` as
+above (`tmp/pc/card-drops-mod-smoke/`).
 
 `--windows` runs it on the Windows build under Wine; `--executable` names
 another build (a `.exe` runs directly on Windows) and `--out` another folder.

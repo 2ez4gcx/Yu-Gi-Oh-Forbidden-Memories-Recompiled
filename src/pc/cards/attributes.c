@@ -43,14 +43,21 @@ static int name_has_letters(const char *name)
     return 0;
 }
 
-/* Attributes_Find resolves a complete integer spelling before it attempts a
- * name. Do not admit names in that spelling space: they could not be found
- * reliably and could change meaning as another mod declares that id. */
+/* same_letters ignores punctuation. Do not admit a name whose normalized
+ * spelling is only ASCII digits: it would collide with an id lookup (for
+ * example, both "8" and "8-" normalize to the numeric id 8). */
 static int numeric_name(const char *name)
 {
-    char *end;
-    (void)strtol(name, &end, 10);
-    return *name && !*end;
+    int digit = 0;
+    for (; *name; name++) {
+        unsigned char c = (unsigned char)*name;
+        if (isdigit(c)) {
+            digit = 1;
+        } else if (isalnum(c) || (c & 0x80)) {
+            return 0;
+        }
+    }
+    return digit;
 }
 
 void Attributes_Clear(void)

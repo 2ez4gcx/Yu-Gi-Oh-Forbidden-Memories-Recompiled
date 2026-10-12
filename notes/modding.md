@@ -1316,7 +1316,8 @@ and a monster effect's attribute filter.
 Later mods replace a name for the same id. Attribute ids are deliberately
 fixed in a mod: cards and rule tables keep the nibble, so changing an id's
 meaning changes every card that uses it. Names need at least one letter or
-number and cannot be a numeric attribute id. Every declared attribute may
+number and cannot normalize to a numeric attribute id (so `8-` is not a
+valid name). Every declared attribute may
 also give `icon` a PNG to draw it from the attribute texture bank. Custom
 attribute icons always use the PNG's palette and scale through the texture
 pack at the game's internal resolution. Give it a numeric id in hand-written

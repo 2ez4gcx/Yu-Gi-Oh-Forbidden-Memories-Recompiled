@@ -79,7 +79,8 @@ static int make(int id, int cell, uint16_t *bank)
     unsigned short clut[16] = {0};
     char why[256];
     const char *icon = Attributes_Icon(id);
-    if (!icon || !CardArt_IconFromImage(icon, NULL, pixels, clut, why, sizeof(why))) {
+    int decoded = icon && CardArt_IconFromImage(icon, NULL, pixels, clut, why, sizeof(why));
+    if (!decoded) {
         if (icon) fprintf(stderr, "memories-pc: attribute %d: %s\n", id, why);
         /* A visible neutral fallback for a declared attribute without a PNG.
          * Unreachable for a retail id (0-5): Attributes_IconCell only calls
@@ -90,7 +91,10 @@ static int make(int id, int cell, uint16_t *bank)
     }
     store(bank, cell, pixels);
     memcpy(&bank[(CLUT_Y + cell) * SOFT_GPU_WIDTH], clut, sizeof(clut));
-    if (icon) {
+    /* The HD texture must describe the same picture written to the console
+     * bank. An undecodable PNG has the neutral fallback above, not an HD
+     * replacement that might decode differently in the texture pack. */
+    if (decoded) {
         TexturePack_BankSpritesUseOwner(TEXTURE_BANK_OWNER_ATTRIBUTE_ICONS);
         if (!TexturePack_AddBankSprite(ICON_BANK, 0, 0, 0, 0, CLUT_Y + cell,
                                        (cell % ICON_COLS) * CARD_ICON_SIDE,

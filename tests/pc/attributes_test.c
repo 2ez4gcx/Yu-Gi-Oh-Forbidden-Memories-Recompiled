@@ -54,12 +54,12 @@ int main(void)
     assert(second);
     Attributes_Add("second", Json_Root(second));
     assert(Attributes_Find("Metal") == -1 && Attributes_Find("Steel") == 8 && Attributes_Find("Void") == 255);
-    invalid = Json_Parse("{\"attributes\":{\"attributes\":[{\"id\":9,\"name\":\"Light\"},{\"id\":10,\"name\":\"8\"},{\"id\":11,\"name\":\"!!!\"},{\"id\":\"12\",\"name\":\"Nope\"}]}}",
+    invalid = Json_Parse("{\"attributes\":{\"attributes\":[{\"id\":9,\"name\":\"Light\"},{\"id\":10,\"name\":\"8\"},{\"id\":11,\"name\":\"8-\"},{\"id\":12,\"name\":\"!!!\"},{\"id\":\"13\",\"name\":\"Nope\"}]}}",
                          error, sizeof(error));
     assert(invalid);
     Attributes_Add("invalid", Json_Root(invalid));
-    assert(!Attributes_Declared(9) && !Attributes_Declared(10) && !Attributes_Declared(11));
-    assert(Attributes_Find("Nope") == -1 && notes == 5);
+    assert(!Attributes_Declared(9) && !Attributes_Declared(10) && !Attributes_Declared(11) && !Attributes_Declared(12));
+    assert(Attributes_Find("Nope") == -1 && notes == 6);
     numbers = Json_Parse("{\"huge\":4294967304,\"attribute\":8}", error, sizeof(error));
     assert(numbers);
     assert(Attributes_Value(Json_Member(Json_Root(numbers), "huge")) == -1);

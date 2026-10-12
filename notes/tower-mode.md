@@ -62,6 +62,44 @@ the title's two menus, the cursor walked through them).
 The FM Editor writes all of it from its **Tower** tab, and the tests' own
 tower is `tests/pc/tower/tower-test/mod.json`.
 
+## Tutorial: a tower in ten minutes
+
+The FM Editor's **Tower** tab does all of this without writing JSON: **How to
+build a tower...** there walks through the same steps, and **Start from an
+example** fills in a small working tower to change. By hand:
+
+1. **A mod with a tower.** In a mod's `mod.json`, add `"min_api": 13` and a
+   `"tower"` object with a `"name"` and a list of `"floors"`. One floor is
+   enough: `{"duelist": "Simon Muran"}`. Turn the mod on in the game's Mods
+   window: the title's second menu (CAMPAIGN to SAVE, after loading a game)
+   has a **TOWER** button.
+2. **Floors.** Each floor is a duel, bottom first. Give it a `field`,
+   `life_points` (`{"opponent": 4000}`), rules (`"no_fusions": true`,
+   `"no_equips": true`), or the opponent's own forty cards (`"deck"`). Mark
+   the floors a loss sends the player back to with `"checkpoint": true`: the
+   tower offers a save there.
+3. **Rewards and unlocks.** `"reward": {"cards": ["Kuriboh"], "starchips":
+   25}` is given the first time the floor is won. `"unlock_opponent": true`
+   puts the floor's opponent on the Free Duel grid once beaten, and
+   `"reward": {"unlock_duelist": "Nitemare"}` another duelist. A duelist your
+   mod adds (`"duelists"`) with `"tower_only": true` is hidden in Free Duel
+   until its floor is won (unless that floor says `"unlock_opponent":
+   false`).
+4. **When it opens.** `"unlock": "after_ending"` waits for the game's ending;
+   `{"beat": "Seto", "wins": 3}` waits for a duelist beaten; without it the
+   tower is open at once.
+5. **Stories.** `"intro"`, `"ending"`, `"lose"` and a floor's `"before"` and
+   `"after"` are lines of text, told on the campaign's stage: `{"scene":
+   "throne room", "characters": {"left": "Simon Muran", "right":
+   "opponent"}, "lines": [...]}` ([Story](#story)).
+6. **The rules of the run.** `"on_lose"` (where a loss sends the player),
+   `"on_leave"` (what leaving does to the climb), `"drops"` (the cards a won
+   duel gives), `"save_states"` and `"cheats"` ([The rules of the
+   run](#the-rules-of-the-run)).
+7. **Try it.** The Mods window lists anything the game reads otherwise than
+   meant (a misspelt key, a duelist it cannot find); the FM Editor's status
+   line above the Tower tab shows the same.
+
 ## What the player sees
 
 The second menu (CAMPAIGN to SAVE, once a game is loaded) has one more button,
@@ -93,7 +131,8 @@ The tower's screen is the game's own pieces, drawn by the game's own code:
 
 DUEL tells the floor's `before`, then the duel, armed as the Free Duel screen
 arms one (the deck screen first); the game comes back to the tower after it.
-A short deck gets the Free Duel screen's own answer. LEAVE goes back to the
+A short deck gets the Free Duel screen's own answer. LEAVE (which the tower's
+`on_leave` may make cost the climb) goes back to the
 second menu, the cursor on the tower's button.
 
 ## The tower
@@ -110,6 +149,10 @@ second menu, the cursor on the tower's button.
 | `intro` | told the first time the tower is entered on a save |
 | `ending` | told when the last floor is won |
 | `lose` | told after a loss, before where it goes back to |
+| `on_leave` | what leaving the tower does to the climb ([below](#the-rules-of-the-run)): `"resume"` (the default), `"checkpoint"` or `"restart"` |
+| `drops` | the cards a won tower duel gives: 1 to 99, or `"player"` (Game > Card drops); 1 without it |
+| `save_states` | `false`: no save state is saved or loaded while the player is in the tower |
+| `cheats` | `false`: the Cheats menu and the Debug jumps do nothing while the player is in the tower |
 | `floors` | the floors, bottom first, at most 99. At least one must be fought, else the mod has no tower |
 
 **Several towers.** One tower a run: the **last mod in load order** that has a
@@ -154,6 +197,7 @@ the ending" for the tower, as for the Japanese game.
 | `no_fusions`, `no_equips` | `true`: nothing fuses, nothing equips, below |
 | `reward` | `{"cards": [...], "starchips": n, "unlock_duelist": ...}`, given the **first** time the floor is won (`card` takes one card) |
 | `checkpoint` | `true`: won, a loss later comes back to the next floor, and the tower offers a save |
+| `unlock_opponent` | `true`: beaten, the opponent is on the Free Duel grid (a disc duelist gets its Free Duel flag, `0x6E0 + id`, on every win; an added duelist with conditions of its own is shown whatever they say); `false`: not, even a `tower_only` one. Without it, a `tower_only` opponent is let out and any other is not |
 | `before`, `after` | told before the duel, and after a win |
 
 A won duel moves the climb on; the top tells the `ending`, offers a save, and
@@ -328,14 +372,74 @@ tower's screen rather than from the event script (`Script_RunTick`):
 Without a tower story on the screen the two hooks find nothing to do: the
 ids they answer are none of the disc's.
 
+## The rules of the run
+
+All of them the tower's own, set in `mod.json` or on the Tower tab; each
+holds only while the player is in the tower (its screen, its stories, its
+floors' duels) and nowhere else in the game.
+
+**`on_leave`: leaving.** `"resume"` (the default) keeps the climb as it is:
+the player comes back to the floor they left from, as before. `"checkpoint"`
+sends the climb back to the floor after the last checkpoint won, and
+`"restart"` back to floor 1 (the checkpoints forgotten; floors won stay won,
+so rewards are not given twice). The default is `"resume"` because the
+tower's deck screen comes before every floor anyway, so leaving is no
+advantage of itself, and a player who leaves to rest should not lose the
+climb unless the mod asks for it. With `"checkpoint"` or `"restart"`
+nothing keeps a floor past the checkpoint:
+
+- **LEAVE** banks the climb as it leaves (`Tower_Bank`);
+- **any other way out** (a Debug jump, the title's own reset) is banked as
+  the tower is entered again from the title;
+- **a save** -- the tower's own at a checkpoint, the title's SAVE, the
+  game's memory card -- writes the banked climb to the save's file
+  (`tower/<slot token>.txt`), whatever the climb in memory is, and a
+  **load** reads it banked too. Quitting or resetting mid-run therefore
+  comes back to the checkpoint at most;
+- **a loss** follows `on_lose` as always.
+
+Only save states could keep more; `"save_states": false` closes that too.
+Under `"restart"` the tower still offers its save at a checkpoint: it keeps
+what was won (the cards, the starchips, the floors won for their rewards
+and unlocks), while the climb in the save's file starts at floor 1.
+
+**`drops`: cards a win.** A tower duel's results screen gives the cards the
+game's Free Duel does: the console's one card, or more with the player's
+Game > Card drops (up to 99). In a tower duel `drops` is the count instead:
+1 by default, so a player's 99 does not inflate a tower; `"player"` follows
+the setting. The floor's `reward` is given as well. Inside the tower the
+tower's value wins over any other count of drops, the game's or another
+mod's.
+
+**`save_states`: false.** No save state is saved or loaded while the player
+is in the tower, whichever way it is asked for (the hotkeys, the menu's
+Save state / Load state, `MEMORIES_AUTOSAVE`, the control channel): the
+game's state code refuses it (`src/pc/guest/state.c`, and the macOS ARM64
+build's `translated_state_backend.c`, ask `Tower_Guard`) and says why in a
+notice (the control channel gets the reason). Outside the tower they work
+as usual -- but a state saved there holds the climb as it was then, so with
+`"save_states": false` loading one keeps the climb as it is now
+(`Tower_Frame` puts it back after the load): no loss is undone and no
+checkpoint regained that way.
+
+**`cheats`: false.** While the player is in the tower: Game > Cheats >
+Starting LP and Show CPU's hand do not apply (the duel begins at the floor's
+LP or 8000, the CPU's hand stays face down), Give cards, Unlock all Free Duel
+CPU duelists and Set StarChips are refused with a notice, and so are, during
+a floor's duel, Debug > Jump to, back to the title and Game > Restart game
+(which would leave it without its loss; from the tower's own screen a jump is
+a way out as LEAVE is, and `on_leave` banks it the same). Free spending is the password shop's alone. The game's other rewinds
+are gone (the old Rewind setting is retired).
+
 ## Duelists of the tower's alone
 
 A duelist's `unlock` takes `"tower": true` (the tower won to its top) or a
 floor (`1` up) won on the save, in **this run's** tower (the last mod's; with
 no tower on, the condition does not hold); `"tower_only": true` on an added duelist keeps
-it off the Free Duel grid until a won floor fights it or names it in its
-reward's `unlock_duelist` ([More duelists](more-duelists.md)). The tower fights
-it whatever its unlock says.
+it off the Free Duel grid until a won floor fights it (unless that floor says
+`"unlock_opponent": false`) or names it in its reward's `unlock_duelist`
+([More duelists](more-duelists.md)). The tower fights it whatever its unlock
+says.
 
 ## A save's progress
 
@@ -409,6 +513,7 @@ mod without its tower.
 | `src/pc/tower/tower_art.c` | a story's PNGs made into the game's pictures (a scene record, a character's sheet and parts bank) |
 | `src/pc/game/zz_tower_storage.c` | `gTower`, and what only game code reaches: the box's layout reset, the title's wall, the stage up and down, a mod's scene put in VRAM, a mod's character in the cache |
 | `src/game/script_image_objects.c`, `display_effect_resource_setup.c` | the two hooks (`#ifdef MEMORIES_PC`): a mod's scene id, a mod's character |
+| `src/pc/guest/state.c`, `src/pc/platform/title_jump.c`, `menu.c`, `src/pc/debug/cheats.c`, `src/pc/cards/drops.c` | the rules of the run: save states, the Debug jumps, the Cheats menu and the cards a win asking the tower (`Tower_Guard`, `Tower_CheatsOff`, `Tower_CardDrops`) |
 | `src/game/main_loop.c` | mode 17, the tower's, run beside the game's seventeen rather than growing the table |
 | `src/game/main_apply_menu_selection.c` | the button's choice (12, none of the game's) |
 | `src/pc/platform/title_config.c`, `title_menu.c` | the button, the action, dimmed while locked |
@@ -452,6 +557,15 @@ what the end-to-end test follows.
   it --, a mod's character on the right, a mod's scene mid-story with that
   character out and back whole, a pan, a save state taken mid-story loading
   to the same page, a campaign portrait, the stage down after, and `"dim"`;
+  the rules of the run (screenshots in a `round3` folder): `on_leave`
+  `"checkpoint"` (a floor won past the checkpoint gone after LEAVE and after a
+  jump to the title) and `"restart"` (floor 1 after LEAVE, past a
+  checkpoint), `unlock_opponent` (`false` keeps the tower-only Ghost Simon
+  out of Free Duel once beaten, `true` gives Rex Raptor his Free Duel flag),
+  `drops` 5 with Game > Card drops at 99 (five cards), and `"save_states":
+  false` with `"cheats": false` (a state neither saved nor loaded on the
+  intro's stage, the status or in the duel, a duel at 8000 with Starting LP
+  at 9999, no jump out of it; a state saved outside the tower as usual);
   and, without the mod, the title's menus the same frames as a build without
   tower mode.
 

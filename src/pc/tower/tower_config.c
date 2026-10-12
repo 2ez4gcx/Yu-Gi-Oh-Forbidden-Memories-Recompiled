@@ -677,11 +677,25 @@ static int read_flag(const char *mod, const char *where, const JsonValue *object
     return Json_Bool(value, 0);
 }
 
+/* A flag of the rules of the run or a floor's unlock: written wrong, noted,
+ * and its default kept (rather than read as false, which would turn a
+ * protection on or hide a duelist the mod meant to show). */
+static int read_option(const char *mod, const char *where, const JsonValue *object, const char *key, int fallback)
+{
+    const JsonValue *value = Json_Member(object, key);
+    if (!value) return fallback;
+    if (Json_TypeOf(value) != JSON_BOOL) {
+        Mods_Note(mod, "%s: \"%s\" is true or false, without quotes; left as if not written", where, key);
+        return fallback;
+    }
+    return Json_Bool(value, 0);
+}
+
 /* One floor; 0 when it cannot be fought (no opponent), which leaves it out. */
 static int read_floor(const char *mod, int index, const JsonValue *value, TowerFloor *floor)
 {
     static const char *const known[] = {"duelist", "field", "deck", "life_points", "no_fusions", "no_equips",
-                                        "reward", "checkpoint", "before", "after"};
+                                        "reward", "checkpoint", "unlock_opponent", "before", "after"};
     char where[64], at[96];
     const JsonValue *part;
     memset(floor, 0, sizeof(*floor));
@@ -717,6 +731,7 @@ static int read_floor(const char *mod, int index, const JsonValue *value, TowerF
     if (read_flag(mod, where, value, "no_fusions")) floor->rules |= TOWER_RULE_NO_FUSIONS;
     if (read_flag(mod, where, value, "no_equips")) floor->rules |= TOWER_RULE_NO_EQUIPS;
     floor->checkpoint = read_flag(mod, where, value, "checkpoint");
+    floor->unlock_opponent = read_option(mod, where, value, "unlock_opponent", -1);
     if ((part = Json_Member(value, "reward"))) read_reward(mod, where, part, floor);
     snprintf(at, sizeof(at), "%s before", where);
     floor->before = read_story(mod, at, Json_Member(value, "before"), TOWER_SPEAKER_FLOOR);
@@ -783,8 +798,9 @@ static void read_unlock(const char *mod, const JsonValue *value)
 
 void Tower_Read(const char *mod, const char *directory, const JsonValue *manifest)
 {
-    static const char *const known[] = {"name", "label", "music", "unlock", "on_lose", "scene", "dim", "intro",
-                                        "ending", "lose", "floors"};
+    static const char *const known[] = {"name", "label", "music", "unlock", "on_lose", "on_leave", "drops",
+                                        "save_states", "cheats", "scene", "dim", "intro", "ending", "lose",
+                                        "floors"};
     const JsonValue *tower = Json_Member(manifest, "tower"), *part, *floor;
     char previous[64];
     int index = 0;
@@ -831,6 +847,24 @@ void Tower_Read(const char *mod, const char *directory, const JsonValue *manifes
         else if (same_word(word, "restart")) config.on_lose = TOWER_ON_LOSE_RESTART;
         else Mods_Note(mod, "tower: \"on_lose\" is \"checkpoint\" or \"restart\"; checkpoint it is");
     }
+    if ((part = Json_Member(tower, "on_leave"))) {
+        const char *word = Json_String(part, "");
+        if (same_word(word, "resume")) config.on_leave = TOWER_ON_LEAVE_RESUME;
+        else if (same_word(word, "checkpoint")) config.on_leave = TOWER_ON_LEAVE_CHECKPOINT;
+        else if (same_word(word, "restart")) config.on_leave = TOWER_ON_LEAVE_RESTART;
+        else Mods_Note(mod, "tower: \"on_leave\" is \"resume\", \"checkpoint\" or \"restart\"; resume it is");
+    }
+    config.drops = TOWER_DROPS_DEFAULT;
+    if ((part = Json_Member(tower, "drops"))) {
+        long number;
+        const char *word = Json_String(part, NULL);
+        if (word && same_word(word, "player")) config.drops = TOWER_DROPS_PLAYER;
+        else if (whole(part, 1, TOWER_DROPS_MAX, &number)) config.drops = (int)number;
+        else Mods_Note(mod, "tower: \"drops\" is 1 to %d cards a won duel, or \"player\" (Game > Card drops); "
+                            "%d it is", TOWER_DROPS_MAX, TOWER_DROPS_DEFAULT);
+    }
+    config.save_states = read_option(mod, "tower", tower, "save_states", 1);
+    config.cheats = read_option(mod, "tower", tower, "cheats", 1);
     config.scene = TOWER_SCENE_DEFAULT;
     if ((part = Json_Member(tower, "scene"))) {
         int scene = read_scene(mod, "tower", part);
@@ -891,6 +925,17 @@ void Tower_ClearProgress(TowerProgress *progress, uint32_t owner, uint32_t tower
     memset(progress, 0, sizeof(*progress));
     progress->owner = owner;
     progress->tower = tower;
+}
+
+void Tower_Bank(const TowerConfig *tower, TowerProgress *progress)
+{
+    if (!tower || !progress) return;
+    if (tower->on_leave == TOWER_ON_LEAVE_RESTART) {
+        progress->floor = 0;
+        progress->checkpoint = 0;
+    } else if (tower->on_leave == TOWER_ON_LEAVE_CHECKPOINT && progress->floor > progress->checkpoint) {
+        progress->floor = progress->checkpoint;
+    }
 }
 
 TowerOutcome Tower_ApplyResult(const TowerConfig *tower, TowerProgress *progress, int floor, int won)

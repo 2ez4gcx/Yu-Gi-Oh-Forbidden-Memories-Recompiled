@@ -74,6 +74,8 @@ int Tower_ConditionMet(int floor)
     return tower_floors_won < 0 || floor <= tower_floors_won;
 }
 int Tower_FreesDuelist(int duelist) { return duelist == tower_frees; }
+static int tower_opens;         /* the duelist a won floor unlocks outright, 0 none */
+int Tower_OpensDuelist(int duelist) { return duelist == tower_opens; }
 
 static int story_flag;          /* the one flag the cases test */
 static int cards_named;         /* what Cards_Named answers */
@@ -368,6 +370,14 @@ int main(void)
     wins(1, 1);
     assert(Duelists_Unlocked(save, 41));
     tower_frees = 0;
+    /* An added duelist with conditions of its own, not the tower's alone: a
+     * floor that unlocks it outright opens it whatever they say. */
+    build("{\"duelists\":[{\"id\":\"x\",\"copy\":\"Heishin\",\"unlock\":{\"beat\":\"Seto\",\"wins\":3}}]}", NULL);
+    memset(save, 0, sizeof save);
+    assert(!Duelists_Unlocked(save, 40));
+    tower_opens = 40;
+    assert(Duelists_Unlocked(save, 40));
+    tower_opens = 0;
     /* Written wrong: "tower" a word, tower_only in quotes, and on a stock
      * duelist, which keeps its campaign; each noted and left out. */
     build("{\"duelists\":[{\"id\":\"x\",\"copy\":\"Heishin\",\"unlock\":{\"tower\":\"top\"}},"

@@ -19,6 +19,7 @@
 #include "pc/audio/spu.h"
 #include "pc/audio/replace.h"
 #include "pc/debug/cheats.h"
+#include "pc/tower/tower.h"
 #include "pc/debug/log.h"
 #include "pc/guest/state.h"
 #include "pc/mods/mods.h"
@@ -1863,9 +1864,15 @@ static void activate(const Item *item, int *quit)
     case ACT_LOAD_STATE: Memories_StateRequest(2, Platform_StateSlot()); break;
     case ACT_SCREENSHOT: Platform_Screenshot(0); break;
     case ACT_EXIT: QuitPrompt_Request(quit); break;
-    case ACT_GIVE_CARDS: give_cards(item->value); break;
-    case ACT_UNLOCK_FREE_DUELISTS: need_save(Cheats_UnlockAllFreeDuelists()); break;
-    case ACT_SET_STARCHIPS: need_save(Cheats_SetStarchips((unsigned)item->value)); break;
+    /* A tower whose mod turns cheats off refuses them while the player is
+     * in it (tower.h, Tower_Guard), with a notice. */
+    case ACT_GIVE_CARDS: if (!Tower_Guard(TOWER_GUARD_CHEAT, 1, NULL, 0)) give_cards(item->value); break;
+    case ACT_UNLOCK_FREE_DUELISTS:
+        if (!Tower_Guard(TOWER_GUARD_CHEAT, 1, NULL, 0)) need_save(Cheats_UnlockAllFreeDuelists());
+        break;
+    case ACT_SET_STARCHIPS:
+        if (!Tower_Guard(TOWER_GUARD_CHEAT, 1, NULL, 0)) need_save(Cheats_SetStarchips((unsigned)item->value));
+        break;
     case ACT_RESET_COLOR:
         Settings_Set(SET_BRIGHTNESS, 100);
         Settings_Set(SET_CONTRAST, 100);
@@ -1879,6 +1886,7 @@ static void activate(const Item *item, int *quit)
     case MENU_ITEM_TITLE: TitleJump_Request(); break;
     case ACT_JUMP: {
         char why[120];
+        if (Tower_Guard(TOWER_GUARD_JUMP, 1, NULL, 0)) break;   /* a tower's duel: refused, with a notice */
         if (TitleJump_RequestTo(item->value, 0, NULL, why, sizeof(why))) fprintf(stderr, "memories-pc: jump: %s\n", why);
         break;
     }

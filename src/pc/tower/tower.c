@@ -13,6 +13,7 @@
 #include "pc/guest/state.h"
 #include "pc/debug/log.h"
 #include "pc/compat/fs.h"
+#include "pc/platform/menu.h"
 #include "types.h"
 #include "game/campaign_flags.h"
 #include <dirent.h>
@@ -98,6 +99,53 @@ int Tower_DuelRules(void)
     return fought() ? gTower.rules : 0;
 }
 
+int Tower_Active(void)
+{
+    return Tower_Config() && ((D_8009B26C & 0x1F) == TOWER_MODE || fought());
+}
+
+int Tower_CardDrops(int wanted)
+{
+    const TowerConfig *tower = Tower_Config();
+    if (!tower || !fought() || tower->drops == TOWER_DROPS_PLAYER) return wanted;
+    return tower->drops;
+}
+
+int Tower_CheatsOff(void)
+{
+    const TowerConfig *tower = Tower_Config();
+    return tower && !tower->cheats && Tower_Active();
+}
+
+int Tower_Guard(int what, int tell, char *why, size_t size)
+{
+    static const char *const ok[] = {"OK"};
+    static const char *const titles[] = {"No save states here", "No save states here", "No cheats here",
+                                         "Not in this duel"};
+    const TowerConfig *tower = Tower_Config();
+    const char *text;
+    if (!tower || !Tower_Active()) return 0;
+    if (what == TOWER_GUARD_SAVE_STATE || what == TOWER_GUARD_LOAD_STATE) {
+        if (tower->save_states) return 0;
+        text = "This tower's mod turns save states off while you are in it: no state is saved or loaded until "
+               "you leave the tower.";
+    } else {
+        if (tower->cheats) return 0;
+        /* A jump from the tower's screen is a way out as LEAVE is (and
+         * banked as it is, "on_leave"); only a floor's duel is kept from
+         * being left without its loss. */
+        if (what == TOWER_GUARD_JUMP && !fought()) return 0;
+        text = what == TOWER_GUARD_JUMP ? "This tower's mod lets no duel of its own be left by a jump or a restart: "
+                                          "finish the duel, then leave the tower from its own screen."
+                                        : "This tower's mod turns the Cheats menu off while you are in it.";
+    }
+    if (why && size) snprintf(why, size, "%s", text);
+    LOG(LOG_MODS, "tower: refused (%s)", titles[what]);
+    fprintf(stderr, "memories-pc: %s\n", text);
+    if (tell) Menu_ShowNotice(titles[what], text, ok, 1, 0, NULL);
+    return 1;
+}
+
 int Tower_Refuses(int rule, int a, int b, int result)
 {
     static int told;
@@ -149,7 +197,26 @@ int Tower_FreesDuelist(int duelist)
     for (floor = 0; floor < tower->floor_count; floor++) {
         const TowerFloor *one = &tower->floors[floor];
         if (!Tower_FloorCleared(done, floor)) continue;
-        if (one->duelist == duelist) return 1;
+        /* Its opponent, beaten, unless the floor says "unlock_opponent": false. */
+        if (one->duelist == duelist && one->unlock_opponent != 0) return 1;
+        for (i = 0; i < one->reward_duelist_count; i++) {
+            if (one->reward_duelists[i] == duelist) return 1;
+        }
+    }
+    return 0;
+}
+
+int Tower_OpensDuelist(int duelist)
+{
+    const TowerConfig *tower = Tower_Config();
+    const TowerProgress *done;
+    int floor, i;
+    if (!tower || duelist <= 0) return 0;
+    done = progress();
+    for (floor = 0; floor < tower->floor_count; floor++) {
+        const TowerFloor *one = &tower->floors[floor];
+        if (!Tower_FloorCleared(done, floor)) continue;
+        if (one->duelist == duelist && one->unlock_opponent == 1) return 1;
         for (i = 0; i < one->reward_duelist_count; i++) {
             if (one->reward_duelists[i] == duelist) return 1;
         }
@@ -160,8 +227,9 @@ int Tower_FreesDuelist(int duelist)
 void Tower_UnlockRetailDuelists(const TowerFloor *floor)
 {
     int i;
-    for (i = 0; i < floor->reward_duelist_count; i++) {
-        int id = floor->reward_duelists[i];
+    for (i = -1; i < floor->reward_duelist_count; i++) {
+        /* The floor's own opponent first, when it says "unlock_opponent": true. */
+        int id = i < 0 ? (floor->unlock_opponent == 1 ? floor->duelist : 0) : floor->reward_duelists[i];
         if (id <= 0 || id >= DUELISTS_RETAIL_COUNT - 1) continue;   /* 39, Duel Master K, is always there */
         /* The grid's own flag, which the campaign's "you won" text sets
          * (Text_UnlockDuelist). Not its other one, 0x1F + id, which the
@@ -221,6 +289,7 @@ void Tower_SaveLoaded(const void *state)
     if (!file) return;
     found = Tower_ReadProgress(file, tower->mod, identity, &gTower.progress, &foreign);
     fclose(file);
+    Tower_Bank(tower, &gTower.progress);   /* "on_leave": a file of another rule kept no further */
     if (!found) {
         gTower.progress.owner = code;   /* this tower not climbed yet; the others' sections kept */
     } else if (gTower.progress.owner != code) {
@@ -337,7 +406,12 @@ void Tower_SaveWritten(const void *state)
         fprintf(stderr, "memories-pc: cannot write %s\n", temporary);
         return;
     }
-    Tower_WriteProgress(file, tower->mod, &gTower.progress, foreign);
+    {   /* "on_leave": a save keeps the climb no further than the checkpoint
+         * (or the first floor), whatever is in memory now (Tower_Bank). */
+        TowerProgress banked = gTower.progress;
+        Tower_Bank(tower, &banked);
+        Tower_WriteProgress(file, tower->mod, &banked, foreign);
+    }
     failed = ferror(file);
     if (fclose(file)) failed = 1;
     if (failed || rename(temporary, path)) {
@@ -345,18 +419,39 @@ void Tower_SaveWritten(const void *state)
         fprintf(stderr, "memories-pc: cannot replace %s\n", path);
         return;
     }
-    LOG(LOG_MODS, "tower: progress written to %s (floor %u, checkpoint %u)", path, (unsigned)gTower.progress.floor,
-        (unsigned)gTower.progress.checkpoint);
+    {
+        TowerProgress banked = gTower.progress;
+        Tower_Bank(tower, &banked);
+        LOG(LOG_MODS, "tower: progress written to %s (floor %u, checkpoint %u)", path, (unsigned)banked.floor,
+            (unsigned)banked.checkpoint);
+    }
     loaded_token = token;
     loaded_code = code;
     forget_progress(token);
 }
+
+/* "save_states": false. The climb is in the game's memory, so a state saved
+ * outside the tower would bring an earlier climb back (a loss undone, a
+ * checkpoint regained): the climb as it was before a state is loaded is
+ * kept here and put back after it (Tower_State marks the load). */
+static TowerProgress shadow;
+static int shadow_kept, shadow_wanted;
 
 void Tower_Frame(void)
 {
     const TowerConfig *tower = Tower_Config();
     uint32_t code;
     if (!tower) return;
+    if (!tower->save_states) {
+        if (shadow_wanted && shadow_kept) {
+            gTower.progress = shadow;
+            LOG(LOG_MODS, "tower: a state was loaded; the climb kept (floor %u, checkpoint %u)",
+                (unsigned)gTower.progress.floor + 1, (unsigned)gTower.progress.checkpoint + 1);
+        }
+        shadow = gTower.progress;
+        shadow_kept = 1;
+    }
+    shadow_wanted = 0;
     code = state_code(gDuel_awPlayerDeck);
     if (gTower.progress.owner == code && gTower.progress.tower == Tower_Identity(tower)) return;
     /* NEW GAME (or the save's code otherwise changed): a save with no climb
@@ -384,6 +479,7 @@ void Tower_State(MemoriesState *state)
     MemoriesStateField count = {&length, sizeof(length)};
     MemoriesStateField loaded[] = {{&loaded_token, sizeof(loaded_token)}, {&loaded_code, sizeof(loaded_code)}};
     if (!Memories_StateChunk(state, "tower-loaded", loaded, 2) && Memories_StateLoading(state)) loaded_token = 0;
+    if (Memories_StateLoading(state)) shadow_wanted = 1;   /* Tower_Frame: the climb from before, "save_states" false */
     if (!Tower_Config()) return;
     if (!Memories_StateLoading(state)) {
         MemoriesStateField text = {foreign, length};

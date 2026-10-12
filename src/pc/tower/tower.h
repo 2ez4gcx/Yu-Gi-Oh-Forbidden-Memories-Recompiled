@@ -42,6 +42,12 @@ struct JsonValue;
 
 enum { TOWER_RULE_NO_FUSIONS = 1, TOWER_RULE_NO_EQUIPS = 2 };
 enum { TOWER_ON_LOSE_CHECKPOINT, TOWER_ON_LOSE_RESTART };
+/* "on_leave": what leaving the tower does to the climb (Tower_Bank). */
+enum { TOWER_ON_LEAVE_RESUME, TOWER_ON_LEAVE_CHECKPOINT, TOWER_ON_LEAVE_RESTART };
+/* "drops": TOWER_DROPS_PLAYER follows Game > Card drops; else 1-99 cards. */
+#define TOWER_DROPS_PLAYER 0
+#define TOWER_DROPS_DEFAULT 1
+#define TOWER_DROPS_MAX 99
 enum { TOWER_UNLOCK_ALWAYS, TOWER_UNLOCK_CONDITIONS, TOWER_UNLOCK_NEVER };
 /* A line's speaker: a duelist id (1 up), or one of these. */
 enum { TOWER_SPEAKER_NONE = 0, TOWER_SPEAKER_FLOOR = -1, TOWER_SPEAKER_LEFT = -2, TOWER_SPEAKER_RIGHT = -3 };
@@ -136,6 +142,8 @@ typedef struct {
     int reward_duelists[TOWER_REWARD_DUELISTS];
     int reward_duelist_count;
     int checkpoint;                   /* won, a loss after it comes back to the next floor */
+    int unlock_opponent;              /* beaten, the opponent is in Free Duel: 1, 0, or -1 the default
+                                       * (a "tower_only" one is, a retail one is not) */
     TowerStory before, after;
 } TowerFloor;
 
@@ -146,6 +154,10 @@ typedef struct {
     int music;                        /* the screen's song, -1 the game's (TOWER_DEFAULT_SONG) */
     TowerUnlock unlock;
     int on_lose;                      /* TOWER_ON_LOSE_* */
+    int on_leave;                     /* TOWER_ON_LEAVE_* */
+    int drops;                        /* a won floor's cards, or TOWER_DROPS_PLAYER */
+    int save_states;                  /* 0: no save state saved or loaded in the tower */
+    int cheats;                       /* 0: the Cheats menu does nothing in the tower */
     int scene;                        /* a story's scene when it names none (TOWER_SCENE_DEFAULT) */
     int dim;                          /* "dim": a character not speaking is drawn darker */
     TowerStory intro, ending, lose;
@@ -258,6 +270,32 @@ int Tower_ConditionMet(int floor);
 /* A duelist with "tower_only": whether the tower has let it out: a won
  * floor names it as its opponent or in its "reward" "unlock_duelist". */
 int Tower_FreesDuelist(int duelist);
+/* Whether a won floor unlocks `duelist` outright: it says "unlock_opponent":
+ * true against it, or names it in its reward's "unlock_duelist". An added
+ * duelist with conditions of its own is then on the grid whatever they say. */
+int Tower_OpensDuelist(int duelist);
+
+/* "on_leave": the climb as a save may keep it -- the next floor no further
+ * than the checkpoint ("checkpoint") or the first ("restart"). Applied as
+ * the tower is left or entered from the title, and to what the save's file
+ * is written and read with, so leaving, quitting or a save made outside
+ * the tower never keeps a floor past the checkpoint. */
+void Tower_Bank(const TowerConfig *config, TowerProgress *progress);
+
+/* In the tower: its screen, a story, or one of its floors' duels. */
+int Tower_Active(void);
+/* Game > Card drops in a tower duel: the tower's "drops", else `wanted`. */
+int Tower_CardDrops(int wanted);
+/* What the tower's mod refuses while the player is in it: a save state
+ * saved or loaded ("save_states": false), or a cheat of the Cheats menu or
+ * a Debug jump ("cheats": false). 1 refused, with why; with `tell` the
+ * player is told so in a notice. */
+enum { TOWER_GUARD_SAVE_STATE, TOWER_GUARD_LOAD_STATE, TOWER_GUARD_CHEAT, TOWER_GUARD_JUMP };
+int Tower_Guard(int what, int tell, char *why, size_t size);
+/* Quietly, for the cheats' values read every frame: the tower's mod turns
+ * cheats off and the player is in the tower (Starting LP, Show CPU's hand
+ * read as the console's). */
+int Tower_CheatsOff(void);
 
 /* A won floor's reward: the duelists of the disc it names appear on the
  * Free Duel grid (their 0x6E0 + id flag); an added one is let out by

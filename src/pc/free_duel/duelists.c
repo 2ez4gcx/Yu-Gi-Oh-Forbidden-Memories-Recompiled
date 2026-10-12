@@ -393,6 +393,9 @@ int Duelists_Unlocked(const void *state, int duelist)
      * which the save's own records do not hold -- a tower duel is not a
      * Free Duel and is never counted on the grid. */
     if (one->tower_only && !Tower_FreesDuelist(duelist)) return 0;
+    /* Any other with conditions: a tower floor that unlocks it opens it too
+     * ("unlock_opponent": true, or its reward's "unlock_duelist"). */
+    if (!one->tower_only && Tower_OpensDuelist(duelist)) return 1;
     if (one->tower >= 0 && !Tower_ConditionMet(one->tower)) return 0;
     return Duelists_ConditionsMet(state, one->beat, one->wins, one->story, one->card, one->copies);
 }

@@ -19,6 +19,7 @@
 #include <sys/mman.h>
 #include <signal.h>
 #include <unistd.h>
+#include "pc/tower/tower.h"
 #include <errno.h>
 #include <stdlib.h>
 #include <string.h>
@@ -185,6 +186,8 @@ void Memories_NativeStateRequest(int what, int slot)
 int Memories_NativeStateSave(const char *path)
 {
     NativeEntry entry = {0};
+    /* A tower whose mod turns save states off (tower.h, Tower_Guard). */
+    if (Tower_Guard(TOWER_GUARD_SAVE_STATE, 0, NULL, 0)) return -1;
     uint32_t header[2] = {STATE_VERSION, Memories_StateBuildId()};
     char partial[1024];
     MemoriesState state = {0, NULL, NULL, 0};
@@ -241,6 +244,7 @@ int Memories_NativeStateSave(const char *path)
 }
 int Memories_NativeStateLoad(const char *path, char *why, size_t size)
 {
+    if (Tower_Guard(TOWER_GUARD_LOAD_STATE, 0, why, size)) return -1;   /* the caller tells */
     FILE *file;
     long length;
     uint8_t *image = NULL;
@@ -301,6 +305,7 @@ refused:
 }
 static int save_requested(const char *path, int tell)
 {
+    if (Tower_Guard(TOWER_GUARD_SAVE_STATE, tell, NULL, 0)) return -1;
     Paths_WriteBegin();
     if (Memories_NativeStateSave(path)) return Memories_StateSaveFailure(path, tell);
     Paths_WriteDone(path);

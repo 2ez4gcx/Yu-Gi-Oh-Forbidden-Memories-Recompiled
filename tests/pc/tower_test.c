@@ -52,6 +52,7 @@ int Duelists_Named(const char *text)
     if (*text && !*end) return id >= 0 && id <= 40 ? (int)id : -1;
     if (!strcmp(text, "Seto")) return 7;
     if (!strcmp(text, "Simon Muran")) return 1;
+    if (!strcmp(text, "Teana")) return 2;
     if (!strcmp(text, "Ghost") || !strcmp(text, "tower-mod:ghost")) return 40;
     return -1;
 }
@@ -516,6 +517,79 @@ static void stage(void)
     CHECK(Tower_Config()->intro.count == 21 && Tower_Config()->line_count == 21);
 }
 
+/* --- leaving, drops, save states, cheats, a floor's opponent ---------------- */
+
+static void guards_read(void)
+{
+    const TowerConfig *tower;
+    TowerProgress climb;
+    Tower_Reset();
+    forget();
+    read_as("g", "{\"tower\": {\"floors\": [{\"duelist\": \"Seto\"}]}}");
+    tower = Tower_Config();
+    CHECK(tower && notes == 0);
+    CHECK(tower->on_leave == TOWER_ON_LEAVE_RESUME && tower->drops == TOWER_DROPS_DEFAULT && tower->drops == 1);
+    CHECK(tower->save_states == 1 && tower->cheats == 1 && tower->floors[0].unlock_opponent == -1);
+    Tower_Reset();
+    read_as("g", "{\"tower\": {\"on_leave\": \"checkpoint\", \"drops\": \"player\", \"save_states\": false,"
+                 " \"cheats\": false, \"floors\": [{\"duelist\": \"Seto\", \"unlock_opponent\": true},"
+                 " {\"duelist\": 1, \"unlock_opponent\": false}]}}");
+    tower = Tower_Config();
+    CHECK(tower && notes == 0 && tower->on_leave == TOWER_ON_LEAVE_CHECKPOINT && tower->drops == TOWER_DROPS_PLAYER);
+    CHECK(!tower->save_states && !tower->cheats);
+    CHECK(tower->floors[0].unlock_opponent == 1 && tower->floors[1].unlock_opponent == 0);
+    /* "checkpoint": a climb past it banked back to it; one behind it kept. */
+    memset(&climb, 0, sizeof(climb));
+    climb.floor = 3;
+    climb.checkpoint = 1;
+    Tower_Bank(tower, &climb);
+    CHECK(climb.floor == 1 && climb.checkpoint == 1);
+    Tower_Reset();
+    read_as("g", "{\"tower\": {\"on_leave\": \"restart\", \"drops\": 12, \"floors\": [{\"duelist\": 1}]}}");
+    tower = Tower_Config();
+    CHECK(tower->on_leave == TOWER_ON_LEAVE_RESTART && tower->drops == 12);
+    climb.floor = 3;
+    climb.checkpoint = 2;
+    climb.cleared[0] = 7;
+    Tower_Bank(tower, &climb);
+    CHECK(climb.floor == 0 && climb.checkpoint == 0 && climb.cleared[0] == 7);   /* rewards stay given */
+    Tower_Reset();
+    read_as("g", "{\"tower\": {\"floors\": [{\"duelist\": 1}]}}");
+    climb.floor = 3;
+    Tower_Bank(Tower_Config(), &climb);   /* "resume": as it was */
+    CHECK(climb.floor == 3);
+    Tower_Bank(NULL, &climb);
+    CHECK(climb.floor == 3);
+    /* The FM Editor's example tower (tower.py, example_tower): read without a note. */
+    Tower_Reset();
+    forget();
+    read_as("g",
+                 "{\"tower\": {\"name\": \"The Example Tower\", \"label\": \"TOWER\", \"unlock\": \"always\", \"on_los"
+                 "e\": \"checkpoint\", \"intro\": {\"scene\": \"seal shrine\", \"characters\": {\"left\": \"Simon Mura"
+                 "n\"}, \"lines\": [{\"text\": \"Three floors stand between you and the top, my prince.\", \"speaker\""
+                 ": \"left\"}, {\"text\": \"Win them all.\", \"speaker\": \"left\"}]}, \"ending\": {\"scene\": \"thron"
+                 "e room\", \"lines\": [\"The tower is yours.\"]}, \"lose\": \"Down you go. Try again.\", \"floors\": "
+                 "[{\"duelist\": \"Simon Muran\", \"checkpoint\": true, \"life_points\": {\"opponent\": 4000}, \"rewar"
+                 "d\": {\"cards\": [\"Kuriboh\"], \"starchips\": 25}, \"before\": \"Show me what you have learned.\", "
+                 "\"after\": \"Well fought. Climb on.\"}, {\"duelist\": \"Teana\", \"field\": \"Forest\", \"no_fusions"
+                 "\": true, \"unlock_opponent\": true, \"before\": \"Nobody fuses on this floor.\"}, {\"duelist\": \"S"
+                 "eto\", \"no_equips\": true, \"reward\": {\"starchips\": 100}, \"before\": \"No equips here. Only you"
+                 "r monsters.\"}]}}");
+    CHECK(Tower_Config() && Tower_Config()->floor_count == 3 && notes == 0);
+    /* Wrong: noted, the default kept. */
+    Tower_Reset();
+    forget();
+    read_as("g", "{\"tower\": {\"on_leave\": \"never\", \"drops\": 100, \"save_states\": \"no\","
+                 " \"floors\": [{\"duelist\": 1, \"unlock_opponent\": 1}]}}");
+    tower = Tower_Config();
+    CHECK(heard("\"on_leave\" is \"resume\", \"checkpoint\" or \"restart\"; resume it is"));
+    CHECK(heard("\"drops\" is 1 to 99 cards a won duel, or \"player\""));
+    CHECK(heard("\"save_states\" is true or false, without quotes; left as if not written"));
+    CHECK(heard("\"unlock_opponent\" is true or false, without quotes; left as if not written"));
+    CHECK(tower->on_leave == TOWER_ON_LEAVE_RESUME && tower->drops == 1 && tower->save_states == 1);
+    CHECK(tower->floors[0].unlock_opponent == -1);
+}
+
 int main(void)
 {
     int i;
@@ -524,6 +598,7 @@ int main(void)
     last_wins();
     mistakes();
     stage();
+    guards_read();
     results();
     progress_file();
     Tower_Reset();

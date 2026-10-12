@@ -61,6 +61,13 @@ void Library_UpdateCardUsedFlag(int flag) { flags[(flag & 0x7FF) >> 3] |= (unsig
 
 int Log_Wanted(int channel) { (void)channel; return 0; }
 void Log_Printf(int channel, const char *format, ...) { (void)channel; (void)format; }
+static int notices;
+void Menu_ShowNotice(const char *title, const char *text, const char *const *buttons, int count, int focus,
+                     void (*done)(int, int *))
+{
+    (void)title; (void)text; (void)buttons; (void)count; (void)focus; (void)done;
+    notices++;
+}
 
 static char user[SCRATCH_MAX];  /* scratch_dir(): removed again at exit */
 static int slot = 0;
@@ -107,7 +114,7 @@ int Memories_StateChunk(MemoriesState *state, const char *tag, const MemoriesSta
 
 /* --- the cases ------------------------------------------------------------------ */
 
-static JsonDocument *documents[8];
+static JsonDocument *documents[32];
 static int document_count;
 
 static void tower_of(const char *text)
@@ -115,6 +122,7 @@ static void tower_of(const char *text)
     char error[256];
     JsonDocument *document = Json_Parse(text, error, sizeof(error));
     assert(document);
+    assert(document_count < 32);
     documents[document_count++] = document;
     Tower_Reset();
     Tower_Read("t", NULL, Json_Root(document));
@@ -207,6 +215,82 @@ static void duelists(void)
     /* No tower (its mod off): nothing is met. */
     Tower_Reset();
     assert(!Tower_ConditionMet(1) && !Tower_FreesDuelist(40));
+}
+
+/* "unlock_opponent", "drops", "save_states" and "cheats" in the game. */
+static void guards(void)
+{
+    char why[256];
+    /* A tower-only opponent (40) beaten on a floor that says false stays
+     * hidden; a disc opponent (9) on one that says true gets its flag. */
+    tower_of("{\"tower\": {\"floors\": [{\"duelist\": 40, \"unlock_opponent\": false},"
+             " {\"duelist\": 9, \"unlock_opponent\": true}, {\"duelist\": 3}]}}");
+    memset(&gTower, 0, sizeof(gTower));
+    memset(save, 0, sizeof(gDuel_awPlayerDeck));
+    Tower_Frame();
+    Tower_ApplyResult(Tower_Config(), &gTower.progress, 0, 1);
+    assert(!Tower_FreesDuelist(40));
+    memset(flags, 0, sizeof(flags));
+    Tower_UnlockRetailDuelists(&Tower_Config()->floors[1]);
+    assert(flags[(0x6E0 + 9) >> 3] & (0x80 >> ((0x6E0 + 9) & 7)));
+    memset(flags, 0, sizeof(flags));
+    Tower_UnlockRetailDuelists(&Tower_Config()->floors[2]);   /* by default a disc opponent is not */
+    assert(!(flags[(0x6E0 + 3) >> 3] & (0x80 >> ((0x6E0 + 3) & 7))));
+
+    /* The defaults: drops 1, states and cheats as the player has them. */
+    tower_of("{\"tower\": {\"floors\": [{\"duelist\": 2}]}}");
+    memset(&gTower, 0, sizeof(gTower));
+    D_8009B26C = 17 | 0xC0;
+    D_8009B368 = 0;
+    assert(Tower_Active() && !Tower_Guard(TOWER_GUARD_SAVE_STATE, 1, why, sizeof(why)) &&
+           !Tower_Guard(TOWER_GUARD_CHEAT, 1, why, sizeof(why)) && !Tower_CheatsOff());
+    assert(Tower_CardDrops(99) == 99);   /* the tower's screen is no duel */
+    D_8009B26C = 3 | 0xC0;
+    D_8009B368 = TOWER_MODE;
+    gTower.armed = 1;
+    gDuel_bOpponentID = 2;
+    assert(Tower_CardDrops(99) == 1);
+    tower_of("{\"tower\": {\"drops\": \"player\", \"floors\": [{\"duelist\": 2}]}}");
+    assert(Tower_CardDrops(99) == 99);
+    tower_of("{\"tower\": {\"drops\": 7, \"floors\": [{\"duelist\": 2}]}}");
+    assert(Tower_CardDrops(99) == 7);
+
+    /* Turned off: refused in the tower's duel and on its screen, told once
+     * a call; not outside it. */
+    tower_of("{\"tower\": {\"save_states\": false, \"cheats\": false, \"floors\": [{\"duelist\": 2}]}}");
+    notices = 0;
+    assert(Tower_Guard(TOWER_GUARD_SAVE_STATE, 1, why, sizeof(why)) && strstr(why, "save states off"));
+    assert(Tower_Guard(TOWER_GUARD_LOAD_STATE, 0, why, sizeof(why)) && notices == 1);
+    assert(Tower_Guard(TOWER_GUARD_CHEAT, 1, why, sizeof(why)) && Tower_CheatsOff());
+    assert(Tower_Guard(TOWER_GUARD_JUMP, 1, why, sizeof(why)) && strstr(why, "jump or a restart") && notices == 3);
+    gTower.armed = 0;
+    D_8009B26C = 17 | 0xC0;   /* the tower's screen, its stories */
+    assert(Tower_Guard(TOWER_GUARD_SAVE_STATE, 0, why, sizeof(why)) && Tower_CheatsOff());
+    assert(!Tower_Guard(TOWER_GUARD_JUMP, 0, why, sizeof(why)));   /* a jump from the screen is banked as LEAVE is */
+    D_8009B26C = 8 | 0xC0;    /* the title's menus: none of it */
+    assert(!Tower_Guard(TOWER_GUARD_SAVE_STATE, 1, why, sizeof(why)) && !Tower_Guard(TOWER_GUARD_JUMP, 1, why, sizeof(why)));
+    assert(!Tower_Active() && !Tower_CheatsOff() && notices == 3);
+    /* "save_states": false: a state loaded outside the tower brings no other
+     * climb back (Tower_Frame keeps it across the load). */
+    memset(&gTower, 0, sizeof(gTower));
+    Tower_Frame();                    /* this save's climb */
+    gTower.progress.floor = 2;
+    Tower_Frame();
+    {
+        MemoriesState state;
+        memset(&state, 0, sizeof(state));
+        state.loading = 1;
+        gTower.progress.floor = 0;    /* the state's older climb */
+        Tower_State(&state);
+        Tower_Frame();
+        assert(gTower.progress.floor == 2);
+    }
+    Tower_Reset();
+    D_8009B26C = 17 | 0xC0;
+    assert(!Tower_Active() && !Tower_Guard(TOWER_GUARD_SAVE_STATE, 1, why, sizeof(why)));   /* no tower: no mod */
+    D_8009B26C = 0;
+    D_8009B368 = 0;
+    gDuel_bOpponentID = 0;
 }
 
 static int exists(const char *relative)
@@ -316,6 +400,23 @@ static void beside_the_save(void)
     tokens[0] = 0x77777777;
     Tower_SaveWritten(save);
     assert(!exists("tower/77777777.txt"));
+    /* "on_leave": "checkpoint": a save written mid-climb (the title's SAVE
+     * after a jump out, say) keeps the climb at the checkpoint, while the
+     * climb in memory goes on; loaded, that is where it is. */
+    tower_of("{\"tower\": {\"on_leave\": \"checkpoint\", \"floors\": [{\"duelist\": 1, \"checkpoint\": true},"
+             " {\"duelist\": 2}, {\"duelist\": 3}, {\"duelist\": 4}]}}");
+    memset(&gTower, 0, sizeof(gTower));
+    set_code(0xF00D);
+    Tower_Frame();
+    Tower_ApplyResult(Tower_Config(), &gTower.progress, 0, 1);
+    Tower_ApplyResult(Tower_Config(), &gTower.progress, 1, 1);
+    Tower_ApplyResult(Tower_Config(), &gTower.progress, 2, 1);
+    assert(gTower.progress.floor == 3 && gTower.progress.checkpoint == 1);
+    tokens[0] = 0x88888888;
+    Tower_SaveWritten(save);
+    assert(gTower.progress.floor == 3);
+    Tower_SaveLoaded(save);
+    assert(gTower.progress.floor == 1 && gTower.progress.checkpoint == 1 && Tower_FloorCleared(&gTower.progress, 2));
 }
 
 int main(void)
@@ -328,6 +429,7 @@ int main(void)
     unlocks();
     rules();
     duelists();
+    guards();
     beside_the_save();
     Tower_Reset();
     for (i = 0; i < document_count; i++) Json_Free(documents[i]);

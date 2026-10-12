@@ -15,6 +15,7 @@
 #include "pc/text/glyphs.h"
 #include "pc/text/text.h"
 #include "pc/debug/log.h"
+#include "pc/tower/tower.h"
 #include "game/card_constants.h"
 #include "game/duel_rewards.h"
 #include "game/save_data.h"
@@ -45,7 +46,8 @@ static int owned(int id)
  * card a roll gives (notes/card-drops.md, "Mods"). */
 int CardDrops_Roll(int pool)
 {
-    int wanted = Settings_Get(SET_CARD_DROPS), i;
+    /* In a tower's duel, the tower's "drops" (tower.h) over the setting. */
+    int wanted = Tower_CardDrops(Settings_Get(SET_CARD_DROPS)), i;
     CardDrops_Begin();
     if (wanted <= 1) return Duel_SelectCardDrop(pool);
     if (wanted > CARD_DROPS_MAX) wanted = CARD_DROPS_MAX;

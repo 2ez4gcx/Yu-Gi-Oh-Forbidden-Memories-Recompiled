@@ -916,6 +916,14 @@ static void step_duel(void)
 
 static void step_leave(void)
 {
+    const TowerConfig *config = tower();
+    if (config && config->on_leave != TOWER_ON_LEAVE_RESUME) {
+        /* "on_leave": the climb goes back to the checkpoint (or floor 1)
+         * as the tower is left, so no save made outside keeps more. */
+        Tower_Bank(config, &gTower.progress);
+        LOG(LOG_MODS, "tower: left; next floor %u, checkpoint %u", (unsigned)gTower.progress.floor + 1,
+            (unsigned)gTower.progress.checkpoint + 1);
+    }
     Tower_Background(0);
     close_box();
     SD_SEPlayFull(8);
@@ -953,22 +961,32 @@ static void take_result(void)
             unsigned cap = Tables_StarchipCap(), now = save->starchips;
             save->starchips = now + one->reward_starchips > cap ? cap : now + one->reward_starchips;
         }
-        Tower_UnlockRetailDuelists(one);
         LOG(LOG_MODS, "tower: floor %d's reward: %d cards, %u starchips (now %u), %d duelists", floor + 1,
             one->reward_card_count, one->reward_starchips, (unsigned)save->starchips, one->reward_duelist_count);
     }
+    /* The disc's duelists the floor unlocks, on every win: a flag set again
+     * changes nothing, and a floor won before the mod named them still
+     * gives them. */
+    Tower_UnlockRetailDuelists(&config->floors[floor]);
     gTower.outcome = outcome.completed ? OUTCOME_COMPLETED : outcome.checkpoint ? OUTCOME_CHECKPOINT : OUTCOME_WON;
     tell(STORY_AFTER, floor, STEP_NOTICE);
 }
 
 void Tower_Enter(void)
 {
+    /* From the title: a climb left any other way than LEAVE (a jump, the
+     * title's own reset) is banked as LEAVE banks it ("on_leave"). */
+    Tower_Bank(tower(), &gTower.progress);
     gTower.step = STEP_BEGIN;
     gTower.phase = 0;
     gTower.armed = 0;
     gTower.outcome = OUTCOME_NONE;
     D_8009B26C = TOWER_MODE;
 }
+
+/* The step the log said last (the tests follow it): said again each time
+ * the screen is entered, however it was left. */
+static int logged_step = -1;
 
 void Tower_RunMode(void)
 {
@@ -981,6 +999,7 @@ void Tower_RunMode(void)
     if ((D_8009B26C & 0x40) == 0) {
         int song = config->music >= 0 ? config->music : TOWER_DEFAULT_SONG;
         D_8009B26C |= 0x40;
+        logged_step = -1;
         Tower_Frame();   /* the save's progress is of this tower (tower.c) */
         SD_BGMPlay(0x7000 + (u32)song);
         gTower.step = STEP_BEGIN;
@@ -1006,10 +1025,9 @@ void Tower_RunMode(void)
     {   /* For the log (MEMORIES_TRACE=mods), which the tests follow. */
         static const char *const names[] = {"begin", "story", "notice", "status", "save?", "save", "duel", "leave",
                                             "no deck"};
-        static int told = -1;
         int line = gTower.step == STEP_STORY ? gTower.story * 100 + gTower.line : 0;
-        if (gTower.step * 10000 + line != told && gTower.step >= 0 && gTower.step <= STEP_NO_DECK) {
-            told = gTower.step * 10000 + line;
+        if (gTower.step * 10000 + line != logged_step && gTower.step >= 0 && gTower.step <= STEP_NO_DECK) {
+            logged_step = gTower.step * 10000 + line;
             LOG(LOG_MODS, "tower: %s (floor %u, checkpoint %u%s)", names[gTower.step],
                 (unsigned)gTower.progress.floor + 1, (unsigned)gTower.progress.checkpoint + 1,
                 gTower.step == STEP_STORY ? ", a line" : "");

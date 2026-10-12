@@ -73,12 +73,29 @@ enum {
     TEXT_OWN_PACK_PITY = 0xFE37,
     TEXT_OWN_PACK_CARD = 0xFE38,    /* one card */
     TEXT_OWN_PACK_ALL_OWNED = 0xFE39, /* why BUY is refused: every card held "max_copies" times */
-    TEXT_OWN_OPPONENT = 0xFE40      /* + duelist id (1-39, FE41-FE67): the name in place of COM */
+    TEXT_OWN_OPPONENT = 0xFE40,     /* + duelist id (1-39, FE41-FE67): the name in place of COM */
+    /* The tower's screen (pc/tower/tower.h). */
+    TEXT_OWN_TOWER_FLOOR = 0xFE70,  /* FLOOR %d OF %d: %s (the opponent) */
+    TEXT_OWN_TOWER_DUEL = 0xFE71,
+    TEXT_OWN_TOWER_LEAVE = 0xFE72,
+    TEXT_OWN_TOWER_NO_FUSIONS = 0xFE73,
+    TEXT_OWN_TOWER_NO_EQUIPS = 0xFE74,
+    TEXT_OWN_TOWER_LIFE_POINTS = 0xFE75, /* LP YOU %d COM %d: the player's, the opponent's */
+    TEXT_OWN_TOWER_CLEARED = 0xFE76, /* CLEARED x%d: times the tower was won */
+    TEXT_OWN_TOWER_FLOOR_WON = 0xFE77,
+    TEXT_OWN_TOWER_STARCHIPS = 0xFE78,
+    TEXT_OWN_TOWER_UNLOCKED = 0xFE79, /* %s UNLOCKED: a duelist */
+    TEXT_OWN_TOWER_CHECKPOINT = 0xFE7A,
+    TEXT_OWN_TOWER_COMPLETE = 0xFE7B,
+    TEXT_OWN_TOWER_LOST = 0xFE7C,   /* YOU LOST. BACK TO FLOOR %d. */
+    TEXT_OWN_TOWER_SAVE = 0xFE7D,
+    TEXT_OWN_TOWER_YES = 0xFE7E,
+    TEXT_OWN_TOWER_NO = 0xFE7F
 };
 /* Ids above the block, which the port composes rather than a translation
  * writing them: FF00-FF57 the name of a duelist a mod added, one each
  * (free_duel/duelists.h), FFF0-FFF2 the card packs' name, message and
- * question (cards/pack_shop.h), and FFFD-FFFF one line apiece for the Free Duel
+ * question (cards/pack_shop.h), FFF8 the tower's box (tower/tower.h), and FFFD-FFFF one line apiece for the Free Duel
  * grid's page, the Password screen's label and the results screen's added
  * pages (free_duel/page_box.h, cards/passwords.h, cards/drops.h). */
 /* The compiled text an applied mod gives string `id` (glyph codes and

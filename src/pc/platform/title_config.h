@@ -30,7 +30,8 @@ enum {
     TITLE_ACTION_QUIT,       /* asks, then quits the game */
     TITLE_ACTION_DEBUG_MENU, /* the game's own debug menu */
     TITLE_ACTION_EVENT,      /* only a code mod's MEMORIES_EVENT_MENU */
-    TITLE_ACTION_NONE        /* nothing: a buzz */
+    TITLE_ACTION_NONE,       /* nothing: a buzz */
+    TITLE_ACTION_TOWER       /* the tower a mod's "tower" made (pc/tower/tower.h); the second menu's */
 };
 extern const char *const TitleConfig_LayerNames[TITLE_LAYERS];
 extern const char *const TitleConfig_EntryNames[TITLE_ENTRIES];
@@ -138,7 +139,9 @@ typedef struct {
 } TitleConfig;
 
 /* The retail title, then each applied mod's "title" and "menu" over it,
- * then the menus laid out (TitleConfig_Finish). */
+ * then the menus laid out (TitleConfig_Finish). The mod whose "tower" the
+ * run has (Tower_Mod) gets a button of its own first, "<mod>:tower" in the
+ * second menu, which its "menu" may change like any of its buttons. */
 const TitleConfig *TitleConfig_Load(void);
 /* The last one loaded (the retail one before any). */
 const TitleConfig *TitleConfig_Get(void);

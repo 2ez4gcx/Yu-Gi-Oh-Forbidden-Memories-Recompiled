@@ -23,10 +23,11 @@ const char *Mods_Id(int mod) { (void)mod; return ""; }
 const char *Mods_Directory(int mod) { (void)mod; return "."; }
 const JsonValue *Mods_Manifest(int mod) { return mod == 7 ? loaded_manifest : NULL; }
 int Paths_Contained(const char *path) { return path && path[0] != '/'; }
+void Attributes_IconsClear(void) {}
 
 int main(void)
 {
-    JsonDocument *first, *second, *loaded;
+    JsonDocument *first, *second, *invalid, *loaded;
     char error[128];
     Attributes_Clear();
     assert(Attributes_Find("light") == 0);
@@ -53,8 +54,14 @@ int main(void)
     assert(second);
     Attributes_Add("second", Json_Root(second));
     assert(Attributes_Find("Metal") == -1 && Attributes_Find("Steel") == 8 && Attributes_Find("Void") == 255);
+    invalid = Json_Parse("{\"attributes\":{\"attributes\":[{\"id\":9,\"name\":\"Light\"},{\"id\":\"10\",\"name\":\"Nope\"}]}}",
+                         error, sizeof(error));
+    assert(invalid);
+    Attributes_Add("invalid", Json_Root(invalid));
+    assert(!Attributes_Declared(9) && Attributes_Find("Nope") == -1 && notes == 3);
     Json_Free(first);
     Json_Free(second);
+    Json_Free(invalid);
     Attributes_Clear();
     return 0;
 }

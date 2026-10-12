@@ -1,5 +1,6 @@
 /* Monster effects: reading a card's "monster_effects" (monster_effects.h). */
 #include "monster_effects.h"
+#include "attributes.h"
 #include "cards.h"
 #include "pc/mods/json.h"
 #include "pc/mods/mods.h"
@@ -112,9 +113,8 @@ static int filter(const char *mod, int index, int n, const char *where, const Js
     }
     value = Json_Member(object, "attribute");
     if (value) {
-        v = Json_TypeOf(value) == JSON_NUMBER ? (int)Json_Number(value, -1)
-                                              : Cards_AttributeNamed(Json_String(value, ""));
-        if (v < 0 || v > 15 || v == 6 || v == 7) {
+        v = Attributes_Value(value);
+        if (v < 0) {
             Mods_Note(mod, "cards[%d]: monster_effects[%d]: %s\"attribute\" must be a retail or declared attribute",
                       index, n, where);
             return 0;

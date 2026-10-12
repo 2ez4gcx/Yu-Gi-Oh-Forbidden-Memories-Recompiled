@@ -33,6 +33,15 @@ static unsigned char has_cell[ATTRIBUTES_MAX + 1];
 static short cell_for[ATTRIBUTES_MAX + 1];
 static int cells_used;
 
+void Attributes_IconsClear(void)
+{
+    memset(made, 0, sizeof(made));
+    memset(has_cell, 0, sizeof(has_cell));
+    memset(cell_for, 0, sizeof(cell_for));
+    cells_used = 0;
+    TexturePack_BankSpritesClear(TEXTURE_BANK_OWNER_ATTRIBUTE_ICONS);
+}
+
 /* The cell already handed to this id, or a freshly handed-out one, -1 past
  * CELL_LIMIT. Every caller must check for -1 before touching the bank with
  * it: unlike `made`, this does not remember a first failure, so a mod that

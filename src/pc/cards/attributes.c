@@ -39,6 +39,7 @@ static char *copy(const char *text)
 
 void Attributes_Clear(void)
 {
+    Attributes_IconsClear();
     for (int i = 0; i <= ATTRIBUTES_MAX; i++) {
         free(names[i]);
         free(icons[i]);
@@ -48,6 +49,17 @@ void Attributes_Clear(void)
         declared[i] = 0;
     }
     built = 0;
+}
+
+/* Declarations use names as keys throughout a manifest, so a new name must
+ * never shadow one that lookup would otherwise resolve to another id. */
+static int name_taken(const char *name, int except)
+{
+    for (int i = 0; i < ATTRIBUTES_RETAIL; i++)
+        if (i != except && (same_letters(name, retail_names[i]) || same_letters(name, Attributes_Name(i)))) return 1;
+    for (int i = ATTRIBUTES_RETAIL; i <= ATTRIBUTES_MAX; i++)
+        if (i != except && names[i] && same_letters(name, names[i])) return 1;
+    return 0;
 }
 
 int Attributes_Valid(int attribute)
@@ -119,21 +131,32 @@ static void add(const char *mod, const char *directory, const JsonValue *manifes
         const JsonValue *id_value = Json_Member(entry, "id");
         const char *name = Json_String(Json_Member(entry, "name"), NULL);
         const char *icon = Json_String(Json_Member(entry, "icon"), NULL);
-        int id = (int)Json_Number(id_value, -1);
+        long raw_id = Json_Number(id_value, -1);
+        int id;
         if (Json_TypeOf(entry) != JSON_OBJECT || !id_value) {
             Mods_Note(mod, "attributes: attributes[%d]: an object with an \"id\"", index);
-        } else if (id == 6 || id == 7) {
-            Mods_Note(mod, "attributes: attributes[%d]: 6 and 7 are reserved for the game's magic and trap cards", index);
-        } else if (!Attributes_Valid(id)) {
+        } else if (Json_TypeOf(id_value) != JSON_NUMBER) {
+            Mods_Note(mod, "attributes: attributes[%d]: \"id\" is a number", index);
+        } else if (raw_id < 0 || raw_id > ATTRIBUTES_MAX) {
             Mods_Note(mod, "attributes: attributes[%d]: an attribute id is 0-5 or 8-255", index);
+        } else if ((id = (int)raw_id) == 6 || id == 7) {
+            Mods_Note(mod, "attributes: attributes[%d]: 6 and 7 are reserved for the game's magic and trap cards", index);
         } else if (!name || !*name) {
             Mods_Note(mod, "attributes: attributes[%d]: \"name\" is a non-empty string", index);
+        } else if (name_taken(name, id)) {
+            Mods_Note(mod, "attributes: attributes[%d]: \"name\" duplicates another attribute", index);
         } else {
             char *new_name = copy(name);
             if (!new_name) continue;
             free(names[id]);
             names[id] = new_name;
             declared[id] = 1;
+            /* A declaration is a complete visual override. It may opt into a
+             * new icon below; omitting one deliberately removes an older
+             * mod's icon instead of inheriting it under a new name. */
+            free(icons[id]);
+            icons[id] = NULL;
+            own_palettes[id] = 0;
             if (icon) {
                 char path[1200];
                 FILE *probe;

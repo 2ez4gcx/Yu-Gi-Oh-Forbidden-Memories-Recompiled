@@ -17,6 +17,9 @@ struct JsonValue;
 void Attributes_Build(void);
 void Attributes_Add(const char *mod, const struct JsonValue *manifest);
 void Attributes_Clear(void);
+/* Drop decoded icon cells and their HD sprite registrations after a registry
+ * reset, before a new set of declarations can reuse the same ids. */
+void Attributes_IconsClear(void);
 
 /* A number 0-15, a retail or declared name, or -1 when it is not one. */
 int Attributes_Value(const struct JsonValue *value);

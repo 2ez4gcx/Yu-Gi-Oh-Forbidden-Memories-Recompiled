@@ -5,6 +5,7 @@
  * mistake leaves of the tower), the last mod's tower winning, a duel's
  * result moving the progress on (checkpoints, restarts, the top), and the
  * progress file keeping the sections of towers that are not this run's. */
+#define _POSIX_C_SOURCE 200809L /* scratch.h: mkdtemp, lstat, kill */
 #include "scratch.h"
 #include "../../src/pc/tower/tower_config.c"
 #include <stdarg.h>

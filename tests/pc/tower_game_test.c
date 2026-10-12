@@ -6,6 +6,7 @@
  * progress beside the save: written, read back by a new save's load, kept
  * apart by duelist code, the other towers' sections kept, and carried by a
  * save state. */
+#define _POSIX_C_SOURCE 200809L /* scratch.h: mkdtemp, lstat, kill */
 #include "scratch.h"
 #include "pc/tower/tower.h"
 #include "pc/mods/json.h"

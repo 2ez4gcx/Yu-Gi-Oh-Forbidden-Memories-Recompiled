@@ -31,6 +31,7 @@ import test_card_drops as drops
 OUT = drops.ROOT / "tmp/pc/card-drops-mod-smoke"
 MENU_AT = 700          # the title: Game opened by a click, the window saved
 GAME_MENU = (200, 13)  # the bar's Game at the menu's scale 1 (menu.c layout_bar)
+CARD_DROPS_ROW = (280, 157)  # its Card drops row, open
 
 
 def mods(folder, manifests):
@@ -82,17 +83,22 @@ def won(executable, label, player, manifests, env=None):
 
 
 def menu_shot(executable, label, manifests):
-    """The window with Game open at the title, as a player sees it."""
+    """The window with Game open at the title, as a player sees it, and the
+    player's saved Card drops after Left on its row (the pointer resting
+    there): 98 from 99, or 99 still while a mod locks it."""
     folder = drops.OUT / label
     folder.mkdir(parents=True, exist_ok=True)
     more = mods(folder, manifests)
     x, y = GAME_MENU
+    row_x, row_y = CARD_DROPS_ROW
     drops.run(executable, label, MENU_AT + 40, drops=99, settings_more=more + "menu_scale=1\n",
-              env_more={"MEMORIES_SDL_SCRIPT": f"{MENU_AT}:click:{x}:{y},{MENU_AT + 20}:shot",
+              env_more={"MEMORIES_SDL_SCRIPT": f"{MENU_AT}:click:{x}:{y},{MENU_AT + 5}:move:{row_x}:{row_y},"
+                                               f"{MENU_AT + 10}:key:left,{MENU_AT + 20}:shot",
                         "MEMORIES_WINDOW_SHOT": "0"})
     shots = sorted(folder.glob("*.bmp"))
     assert shots, f"{label}: no window shot"
-    return shots[-1]
+    saved = [line for line in (folder / "settings.txt").read_text().splitlines() if line.startswith("card_drops=")]
+    return shots[-1], saved
 
 
 def main():
@@ -107,8 +113,10 @@ def main():
         executable = arguments.executable.resolve()
     drops.OUT = (arguments.out or OUT).resolve()
 
-    locked = menu_shot(executable, "menu-locked", {"lock-five": 5})
-    player = menu_shot(executable, "menu-player", {})
+    locked, saved = menu_shot(executable, "menu-locked", {"lock-five": 5})
+    assert saved == ["card_drops=99"], f"Left on the locked row should keep the player's 99: {saved}"
+    player, saved = menu_shot(executable, "menu-player", {})
+    assert saved == ["card_drops=98"], f"Left on the player's row should make 99 98: {saved}"
     shutil.copy(locked, drops.OUT / "menu-locked.bmp")
     shutil.copy(player, drops.OUT / "menu-player.bmp")
     assert locked.read_bytes() != player.read_bytes(), "the locked menu should look other than the player's"

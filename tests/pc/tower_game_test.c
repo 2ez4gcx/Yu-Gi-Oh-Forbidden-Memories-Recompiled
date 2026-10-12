@@ -25,7 +25,7 @@
 /* --- the game's bytes and the port's services, as tower.c reaches them --- */
 
 TowerState gTower;
-unsigned char D_8009B26C, D_8009B368;
+unsigned char D_8009B26C, D_8009B368, gDuel_bOpponentID;
 unsigned short gDuel_awPlayerDeck[0x340];     /* the running save, SaveDataState */
 static unsigned char *save = (unsigned char *)gDuel_awPlayerDeck;
 
@@ -149,6 +149,9 @@ static void rules(void)
     assert(!Tower_DuelRules() && Tower_StartingLifePoints(1, 8000) == 8000 && !Tower_OpponentDeck(deck));
     gTower.armed = 2;
     gTower.rules = TOWER_RULE_NO_FUSIONS | TOWER_RULE_NO_EQUIPS;
+    gDuel_bOpponentID = 9;                /* another opponent: another duel (a 2P one, say) */
+    assert(!Tower_DuelRules());
+    gDuel_bOpponentID = 2;
     assert(Tower_DuelRules() == (TOWER_RULE_NO_FUSIONS | TOWER_RULE_NO_EQUIPS));
     assert(Tower_Refuses(TOWER_RULE_NO_FUSIONS, 1, 2, 3) && Tower_Refuses(TOWER_RULE_NO_EQUIPS, 4, 5, 5));
     assert(Tower_StartingLifePoints(0, 8000) == 8000 && Tower_StartingLifePoints(1, 8000) == 300);
@@ -167,6 +170,7 @@ static void rules(void)
     /* Floor 1 has no rules, LP or deck of its own. */
     D_8009B26C = 3 | 0xC0;
     gTower.armed = 1;
+    gDuel_bOpponentID = 1;
     gTower.rules = 0;
     assert(!Tower_DuelRules() && Tower_StartingLifePoints(0, 7000) == 7000 && !Tower_OpponentDeck(deck));
     gTower.armed = 0;

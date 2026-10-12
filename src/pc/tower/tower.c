@@ -24,7 +24,7 @@
 /* The game's bytes this module reads, declared plainly: this unit is
  * native, so the codegen spellings the game's headers select do not matter
  * (as title_jump.c does). */
-extern u8 D_8009B26C, D_8009B368;
+extern u8 D_8009B26C, D_8009B368, gDuel_bOpponentID;
 extern u16 gDuel_awPlayerDeck[];
 
 #define MODE_ANIMATED_BATTLE 1      /* main_modes.h: the duel's 3D battle */
@@ -78,16 +78,19 @@ int Tower_Unlocked(void)
 /* --- the floor being fought ------------------------------------------------------- */
 
 /* The floor whose duel is on: armed by the screen, and the game in that
- * duel (or its 3D battle, mode 1) on its way back to the tower. A jump out
- * of the duel leaves `armed` set, but the next duel is armed by somebody
- * else, who sets its own way back (D_8009B368). */
+ * duel (or its 3D battle, mode 1) against the floor's opponent, on its way
+ * back to the tower. A jump out of the duel leaves `armed` set, but the
+ * next duel is armed by somebody else, who sets its own way back
+ * (D_8009B368) and opponent. */
 static const TowerFloor *fought(void)
 {
     const TowerConfig *tower = Tower_Config();
+    const TowerFloor *floor;
     int mode = D_8009B26C & 0x1F;
     if (!tower || gTower.armed <= 0 || gTower.armed > tower->floor_count) return NULL;
     if (D_8009B368 != TOWER_MODE || (mode != MODE_DUEL && mode != MODE_ANIMATED_BATTLE)) return NULL;
-    return &tower->floors[gTower.armed - 1];
+    floor = &tower->floors[gTower.armed - 1];
+    return gDuel_bOpponentID == (u8)floor->duelist ? floor : NULL;
 }
 
 int Tower_DuelRules(void)

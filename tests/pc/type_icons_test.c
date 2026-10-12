@@ -144,10 +144,10 @@ static void bounds_and_no_icon(void)
     assert(art_calls == 0);
 }
 
-/* A missing or corrupt PNG: logged once, the icon unavailable, and never
- * retried on the next duel frame that asks for the same type (star_icons.c
- * caches a guardian star's failure the identical way). */
-static void failed_decode_cached_and_logged(void)
+/* A missing or corrupt PNG is throttled rather than decoded and logged on
+ * every frame.  A type-bank rebuild drops the cooldown so a newly supplied
+ * replacement is available immediately. */
+static void failed_decode_retries_after_clear(void)
 {
     int tpage, u, v, clut;
     reset();
@@ -157,12 +157,15 @@ static void failed_decode_cached_and_logged(void)
     assert(!TypeIcons_Cell(24, &tpage, &u, &v, &clut));
     assert(strstr(logged, "type 24") && strstr(logged, "missing.png"));
     assert(art_calls == 1);
-    /* Asked again: no second decode attempt, and no crash reading the
-     * half-built bank rows. */
+    /* Asked again: the cooldown suppresses a second decode and log. */
     logged[0] = 0;
     assert(!TypeIcons_Cell(24, &tpage, &u, &v, &clut));
     assert(art_calls == 1);
     assert(!logged[0]); /* the failure is not re-logged every call */
+    art_fail = 0;
+    TypeIcons_Clear();
+    assert(TypeIcons_Cell(24, &tpage, &u, &v, &clut));
+    assert(art_calls == 2);
 }
 
 /* The software-GPU bank itself unavailable (not yet started, or the
@@ -254,7 +257,7 @@ int main(void)
 {
     loaded_cells();
     bounds_and_no_icon();
-    failed_decode_cached_and_logged();
+    failed_decode_retries_after_clear();
     bank_missing();
     hd_registration_failure_logged();
     mark_and_cell_round_trip();

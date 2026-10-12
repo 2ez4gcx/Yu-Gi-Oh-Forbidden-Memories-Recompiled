@@ -305,10 +305,8 @@ static void monster_to_trap(void)
     printf("card_types monster to trap: ok\n");
 }
 
-/* A custom type named the same as an earlier one (here, the disc's own
- * Dragon): Cards_TypeNamed still finds the first registered, so the new
- * type is unreachable by name -- a mod author's mistake the registration
- * now warns about rather than silently shadowing. */
+/* A custom type cannot reuse an earlier normalized name (here the disc's
+ * Dragon): registering it would make a textual type reference ambiguous. */
 static void name_collision(void)
 {
     setup();
@@ -320,9 +318,9 @@ static void name_collision(void)
         static const char *const mods[] = {"collide"};
         load_and_build(mods, 1);
     }
-    assert(Cards_TypeNamed("Dragon") == CARD_TYPE_DRAGON); /* the earlier (retail) type wins */
-    assert(!strcmp(Cards_TypeName(24), "Dragon")); /* 24 still has the name itself */
-    assert(strstr(Mods_Status(Mods_Loaded(0)), "also type"));
+    assert(Cards_TypeNamed("Dragon") == CARD_TYPE_DRAGON);
+    assert(!Cards_TypeName(24)[0]);
+    assert(strstr(Mods_Status(Mods_Loaded(0)), "already type"));
     printf("card_types name collision: ok\n");
 }
 

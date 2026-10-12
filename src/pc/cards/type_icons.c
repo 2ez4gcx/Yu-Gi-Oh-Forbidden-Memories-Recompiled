@@ -14,6 +14,11 @@
 #define CLUT_Y 256
 
 static unsigned char made[TYPE_LIMIT];
+/* A bad PNG must not be decoded and logged on every icon draw.  This is a
+ * request clock rather than wall time because this path has no clock source;
+ * TypeIcons_Clear resets it on a mod reload, which retries immediately. */
+#define RETRY_INTERVAL 60
+static unsigned retry_clock, retry_at[TYPE_LIMIT];
 static unsigned pending;
 
 /* func_80037DA4 marks the icon it is about to add with the card's real
@@ -45,6 +50,8 @@ int TypeIcons_IconCell(unsigned code, int *tpage, int *u, int *v, int *clut_x, i
 void TypeIcons_Clear(void)
 {
     memset(made, 0, sizeof(made));
+    memset(retry_at, 0, sizeof(retry_at));
+    retry_clock = 0;
     pending = 0;
     TexturePack_BankSpritesClear(TEXTURE_BANK_OWNER_TYPE_ICONS);
 }
@@ -66,14 +73,17 @@ int TypeIcons_Cell(int type, int *tpage, int *u, int *v, int *clut)
     const char *path = Cards_TypeIcon(type);
     int slot;
     if (!path || type < 24 || type >= TYPE_LIMIT || !(bank = SoftGpu_Bank(BANK))) return 0;
+    retry_clock++;
+    if (made[type] == 2 && retry_clock < retry_at[type]) return 0;
+    if (made[type] == 2) made[type] = 0;
     if (!made[type]) {
         made[type] = 2;
         if (!CardArt_IconFromImage(path, NULL, pixels, palette, why, sizeof(why))) {
             fprintf(stderr, "memories-pc: type %d: %s\n", type, why);
-            /* A mod file may arrive after startup (or a temporary I/O error
-             * may clear).  Do not turn one failed read into a session-long
-             * negative cache: the next draw is allowed to try again. */
-            made[type] = 0;
+            /* A mod reload calls TypeIcons_Clear and retries at once.  Until
+             * then, throttle a permanently bad file to one attempt per 60
+             * requests, avoiding filesystem/PNG work every frame. */
+            retry_at[type] = retry_clock + RETRY_INTERVAL;
             return 0;
         }
         memcpy(&bank[(CLUT_Y + type - 24) * SOFT_GPU_WIDTH], palette, sizeof(palette));

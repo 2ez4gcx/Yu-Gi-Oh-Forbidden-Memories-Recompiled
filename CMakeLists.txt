@@ -566,7 +566,7 @@ if(BUILD_TESTING)
     add_test(NAME pc_card_types_multi_mod COMMAND memories_card_types_test multi-mod)
     add_test(NAME pc_card_types_bad_glyphs COMMAND memories_card_types_test bad-glyphs)
     # Custom monster type icons (type_icons.c): a successful load's slot
-    # math, a missing/corrupt PNG's diagnostic and cached failure, a lost HD
+    # math, a missing/corrupt PNG's throttled retry, a lost HD
     # registration's diagnostic, and the mark/cell round trip the duel's and
     # the card view's drawing use to find a type's icon.
     add_executable(memories_type_icons_test tests/pc/type_icons_test.c)

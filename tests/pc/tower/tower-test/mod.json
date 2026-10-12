@@ -24,7 +24,7 @@
                 "duelist": "Simon Muran",
                 "checkpoint": true,
                 "life_points": {"opponent": 100},
-                "reward": {"cards": ["Kuriboh"], "starchips": 25},
+                "reward": {"cards": ["Kuriboh", 2, 3, 4, 5], "starchips": 25},
                 "before": "Show me what you have learned.",
                 "after": "Well fought. Climb on."
             },

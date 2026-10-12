@@ -76,8 +76,9 @@ The tower's screen is the game's own pieces, drawn by the game's own code:
   and sounds): the tower's name, `FLOOR 2 OF 3: Ghost Simon`, the floor's rules
   (`NO FUSIONS  LP YOU 100 COM 8000`, `CLEARED x1` once the top is reached),
   over **DUEL** and **LEAVE**; after a duel, `FLOOR 1 CLEARED!` with the reward
-  and `CHECKPOINT`, or `YOU LOST. BACK TO FLOOR 2.`; at a checkpoint, `SAVE
-  YOUR PROGRESS?` and then the game's own save (the port's slot menu);
+  and `CHECKPOINT` (four lines a page, a button between), or `YOU LOST. BACK
+  TO FLOOR 2.`; at a checkpoint and after the top, `SAVE YOUR PROGRESS?` and
+  then the game's own save (the port's slot menu);
 - the story in the campaign's dialogue box at the foot of the screen, page by
   page, with the speaker's portrait sliding in above it as a scene's does.
 
@@ -236,9 +237,11 @@ intro was told.
   tower begins again. `owner` is the save's duelist code; NEW GAME is a save
   with no climb. A section of a tower whose mod is off this run is kept as it
   was and written back, and a save state carries those lines too (chunk
-  `tower-foreign`). A slot saved over leaves no file behind. Saved in a run
-  with no tower at all (its mod turned off), the save's file follows it to
-  the slot it is saved to, untouched.
+  `tower-foreign`). Saved in a run with no tower at all (its mod turned
+  off), the save's file follows it to the slot it is saved to, untouched (a
+  save state knows which save was loaded last, chunk `tower-loaded`). The
+  file of a slot saved over goes when a save is written with a tower on or
+  carried over; until then it is only left behind, read by no save.
 - The climb counts when the game is **saved**, as everything else does: the
   tower offers a save at each checkpoint and after its top. A loss sends the climb in memory
   back at once; LOAD gives the save's.

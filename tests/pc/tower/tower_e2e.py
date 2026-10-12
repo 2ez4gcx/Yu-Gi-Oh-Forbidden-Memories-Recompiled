@@ -250,9 +250,16 @@ def phase_climb(exe: Path, out: Path) -> Tower:
     t.until_said("tower: notice")
     g.step(120)
     t.shot(out, "06-floor-1-cleared.png")
+    # Eight lines (the floor, five cards, the starchips, CHECKPOINT): a page
+    # wait after the fourth, inside the box that stays up.
+    paged = g.u8(0x800EB0F8 + 0x51) == 0x84 and g.u16(0x800EB0F8 + 0x34) & 0x8000
+    g.press("cross", hold=4, after=300)   # the letters settled
+    t.shot(out, "06b-floor-1-cleared-page-2.png")
+    check("floor 1's notice of eight lines waits for a button after four, then shows the rest in the same box",
+          bool(paged) and g.u16(0x800EB0F8 + 0x34) & 0x8000 and "tower: save?" not in t.log())
     check("floor 1 is won in the tower's log", "tower: floor 1 won; next 1, checkpoint 1" in t.log())
     check("floor 1's reward: Kuriboh in the chest", chest(g, KURIBOH) >= kuriboh + 1)
-    check("floor 1's reward: 25 starchips", "floor 1's reward: 1 cards, 25 starchips" in t.log() and
+    check("floor 1's reward: 25 starchips", "floor 1's reward: 5 cards, 25 starchips" in t.log() and
           g.u32(SAVE_STARCHIPS) >= chips + 25)
     t.until_said("tower: save?")
     g.step(120)

@@ -176,3 +176,19 @@ round trip. The in-game end-to-end run is `tests/pc/tower/tower_e2e.py`, with
 the tests' tower mod (`tests/pc/tower/tower-test`), written by hand in the
 form the tab writes.
 
+Since 2026-10-12 the tab also edits a story's **stage** (notes/tower-mode.md,
+Story): the tower's default `scene` and `dim`, and a Stage box that writes a
+story's bracketed lines (`[scene: torch corridor]`, `[left: 1 expression 2]`,
+`[right: opponent]`, `[right: tower/hero.png flip]`, `[pan: 64 0 30 wait]`)
+into the story last clicked, before the cursor's line, with pictures of the
+chosen scene and character made from the player's disc in memory
+(`tower_art.py`; nothing of the disc's is written). A PNG picked from outside
+the mod's folder is copied into its `tower/` when it is saved.
+`tests/test_tower.py` adds the stage's text form and its round trip (a scene
+by name, number or `"none"` read as the same; a mod's own spelling of its
+stage kept through the tab), its checks, the scene names and the stage's
+keys against `tower_config.c`, and the pictures from an archive's bytes. The
+packaged `self-test` sets the tower's scene and puts a campaign character and
+a PNG on a story's stage, and checks the export carries both, the PNG in the
+mod's folder.
+

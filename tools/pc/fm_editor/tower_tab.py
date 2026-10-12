@@ -6,16 +6,22 @@ the right, each with its opponent, field, LP, rules, deck, reward and lines.
 Written to the manifest as "tower", and "tower_only" on the duelists."""
 from __future__ import annotations
 
+import base64
 import tkinter as tk
-from tkinter import ttk
+from pathlib import Path
+from tkinter import messagebox, ttk
 
-from . import duelist_rules, roster, tower
+from . import duelist_rules, file_dialogs, pngio, roster, tower, tower_art
 from .tabs import Tab
 from .widgets import ScrolledForm
 
-STORY_HINT = ("A line a box. @Name: said by a duelist, #N: a campaign portrait (0-24), #N @Name: both, "
-              "@none: nobody's. \\n breaks a line inside the box; a backslash keeps the next letter as it is "
-              "(\\@ for words that start with @).")
+STORY_HINT = ("A line is a page or more of the campaign's stone box, over a scene with up to two of its characters. "
+              "On the line before one, what changes from it on: [scene: torch corridor] [left: 1] [right: opponent] "
+              "[pan: 64 0 30 wait] (the Stage box writes them). @left: / @right: said by that side, @Name: by a "
+              "duelist, @none: nobody's; #N: a campaign portrait (0-24) beside the box, #speaker: the speaker's "
+              "own face. \\n breaks a line inside the box; a backslash keeps the next letter as it is.")
+THUMB_SCENE = (160, 80)
+THUMB_CHARACTER = (96, 96)
 
 
 class TowerTab(Tab):
@@ -55,7 +61,7 @@ class TowerTab(Tab):
                     "reward.cards", "reward.starchips", "reward.unlock_duelist")
     FLOOR_TEXTS = ("deck", "before", "after")
     TOP_FIELDS = ("name", "label", "music", "unlock", "unlock.beat", "unlock.wins", "unlock.story", "unlock.card",
-                  "unlock.copies", "unlock.after_ending", "on_lose")
+                  "unlock.copies", "unlock.after_ending", "on_lose", "scene", "dim")
     TOP_TEXTS = ("intro", "ending", "lose")
 
     def _form(self, fields, texts) -> tuple:
@@ -77,6 +83,8 @@ class TowerTab(Tab):
     def _text(self, parent, key, height=3, width=52):
         text = tk.Text(parent, height=height, width=width, wrap="none", undo=True)
         text.bind("<FocusOut>", lambda e: self.commit())
+        if key != "deck":
+            text.bind("<FocusIn>", lambda e, key=key: setattr(self, "last_story", key))
         self.texts[key] = text
         return text
 
@@ -113,6 +121,18 @@ class TowerTab(Tab):
         lose.bind("<<ComboboxSelected>>", lambda e: self.commit())
         ttk.Label(frame, style="Hint.TLabel", text="back to the last checkpoint, or to floor 1").grid(
             row=5, column=2, sticky="w", padx=(4, 0))
+        ttk.Label(frame, text="Scene").grid(row=6, column=0, sticky="w")
+        self.vars["scene"] = tk.StringVar()
+        scene = ttk.Combobox(frame, textvariable=self.vars["scene"], values=tower.SCENE_NAMES, width=22)
+        scene.grid(row=6, column=1, sticky="w", padx=(4, 0))
+        scene.bind("<<ComboboxSelected>>", lambda e: self.commit())
+        scene.bind("<FocusOut>", lambda e: self.commit())
+        ttk.Label(frame, style="Hint.TLabel", text="a story's when it names none; torch corridor without").grid(
+            row=6, column=2, sticky="w", padx=(4, 0))
+        self.vars["dim"] = tk.BooleanVar()
+        ttk.Checkbutton(frame, text="Draw the character not speaking darker (the campaign only keeps it still)",
+                        variable=self.vars["dim"], command=self.commit).grid(row=7, column=0, columnspan=3, sticky="w")
+        self._stage_form(parent)
         story = ttk.LabelFrame(parent, text="Story", padding=(6, 2))
         story.pack(fill="x", pady=(4, 0))
         ttk.Label(story, style="Hint.TLabel", text=STORY_HINT, wraplength=420, justify="left").pack(anchor="w")
@@ -128,6 +148,131 @@ class TowerTab(Tab):
         self.only.pack(anchor="w", fill="x")
         self.only.bind("<<ListboxSelect>>", lambda e: self.commit())
         self.only_keys = []
+
+    # --- the stage: pickers that write a story's bracketed lines ----------------------
+
+    def _stage_form(self, parent):
+        frame = ttk.LabelFrame(parent, text="Stage (into the story last clicked, before its line)", padding=(6, 2))
+        frame.pack(fill="x", pady=(4, 0))
+        self.last_story = "intro"
+        scenes = list(tower.SCENE_NAMES) + [str(m * 100 + i) for m, count in ((1, 42), (2, 13)) for i in range(count)]
+        self.stage_scene = tk.StringVar(value=tower.SCENE_NAMES[tower.SCENE_DEFAULT])
+        box = ttk.Combobox(frame, textvariable=self.stage_scene, values=scenes, state="readonly", width=22)
+        box.grid(row=0, column=0, sticky="w")
+        box.bind("<<ComboboxSelected>>", lambda e: self._preview())
+        ttk.Button(frame, text="Scene", command=lambda: self._insert(f"[scene: {self.stage_scene.get()}]")).grid(
+            row=0, column=1, sticky="w", padx=4)
+        ttk.Button(frame, text="Scene PNG...", command=self._scene_png).grid(row=0, column=2, sticky="w")
+        self.stage_character = tk.StringVar(value="1")
+        characters = [str(n) for n in range(1, tower.CHARACTERS + 1) if n not in tower.EMPTY_CHARACTERS]
+        box = ttk.Combobox(frame, textvariable=self.stage_character, values=characters, state="readonly", width=6)
+        box.grid(row=1, column=0, sticky="w", pady=(2, 0))
+        box.bind("<<ComboboxSelected>>", lambda e: self._preview())
+        self.stage_side = tk.StringVar(value="left")
+        sides = ttk.Frame(frame)
+        sides.grid(row=1, column=1, columnspan=2, sticky="w", pady=(2, 0))
+        for side in tower.SIDES:
+            ttk.Radiobutton(sides, text=side, value=side, variable=self.stage_side).pack(side="left")
+        self.stage_expression = tk.StringVar(value="0")
+        ttk.Label(sides, text="expression").pack(side="left", padx=(6, 2))
+        ttk.Spinbox(sides, from_=0, to=3, width=2, textvariable=self.stage_expression).pack(side="left")
+        buttons = ttk.Frame(frame)
+        buttons.grid(row=2, column=0, columnspan=3, sticky="w", pady=(2, 0))
+        ttk.Button(buttons, text="Character", command=self._character).pack(side="left")
+        ttk.Button(buttons, text="The opponent",
+                   command=lambda: self._insert(f"[{self.stage_side.get()}: opponent]")).pack(side="left", padx=4)
+        ttk.Button(buttons, text="Nobody", command=lambda: self._insert(f"[{self.stage_side.get()}: none]")).pack(
+            side="left")
+        ttk.Button(buttons, text="Character PNG...", command=self._character_png).pack(side="left", padx=4)
+        self.stage_flip = tk.BooleanVar()
+        ttk.Checkbutton(buttons, text="flip", variable=self.stage_flip).pack(side="left")
+        pictures = ttk.Frame(frame)
+        pictures.grid(row=3, column=0, columnspan=3, sticky="w", pady=(2, 0))
+        self.scene_picture = ttk.Label(pictures, text="(the scenes and characters show with the game's files)")
+        self.scene_picture.pack(side="left")
+        self.character_picture = ttk.Label(pictures)
+        self.character_picture.pack(side="left", padx=(6, 0))
+        self._photos = {}
+
+    def _photo(self, key, image, size):
+        if image is None:
+            return None
+        if key not in self._photos:
+            scale = min(size[0] / image.width, size[1] / image.height)
+            image = pngio.scale_to(image, max(1, round(image.width * scale)), max(1, round(image.height * scale)))
+            self._photos[key] = tk.PhotoImage(master=self.winfo_toplevel(),
+                                              data=base64.b64encode(pngio.encode(image)), format="png")
+        return self._photos[key]
+
+    def _preview(self):
+        """The chosen scene and character, made from the player's disc now
+        (tower_art.py) and kept in memory; nothing of the disc's is written."""
+        files = getattr(self.app, "files", None)
+        wa = getattr(files, "wa", None) if files is not None else None
+        if wa is None:
+            return
+        number = tower.scene_number(self.stage_scene.get())
+        if isinstance(number, int):
+            scene = (number // 100) << 8 | (number % 100 // 10) << 4 | number % 10
+            photo = self._photo(("scene", number), tower_art.scene_image(wa, scene), THUMB_SCENE)
+            self.scene_picture.configure(image=photo or "", text="" if photo else "(none)")
+        character = int(self.stage_character.get() or 0)
+        photo = self._photo(("character", character), tower_art.character_image(wa, character), THUMB_CHARACTER)
+        self.character_picture.configure(image=photo or "")
+
+    def _insert(self, directive: str):
+        """A bracketed line before the line the cursor is on, in the story
+        last clicked."""
+        text = self.texts.get(self.last_story)
+        if text is None:
+            return
+        text.insert(text.index("insert linestart"), directive + "\n")
+        self.commit()
+
+    def _character(self):
+        expression = self.stage_expression.get().strip()
+        words = self.stage_character.get() + (f" expression {expression}" if expression not in ("", "0") else "")
+        self._insert(f"[{self.stage_side.get()}: {words}]")
+
+    def _mod_png(self, title: str):
+        """A PNG for the mod: its path inside the mod's folder, or, from
+        elsewhere, copied into the mod's tower/ when it is saved."""
+        path = file_dialogs.askopenfilename(parent=self, title=title,
+                                            filetypes=[("PNG pictures", "*.png"), ("All files", "*")])
+        if not path or self.project is None:
+            return None
+        return self.use_png(path)
+
+    def use_png(self, path):
+        try:
+            data = Path(path).read_bytes()
+            pngio.decode(data)
+        except (OSError, pngio.PngError) as problem:
+            messagebox.showerror("Picture", f"{path} cannot be used: {problem}", parent=self)
+            return None
+        source = getattr(self.project, "source_dir", None)
+        if source:
+            try:
+                return Path(path).resolve().relative_to(Path(source).resolve()).as_posix()
+            except ValueError:
+                pass
+        stem, n = Path(path).stem, 1
+        name = f"tower/{stem}.png"
+        while name in self.project.files and self.project.files[name] != data:   # another picture's name
+            n += 1
+            name = f"tower/{stem}-{n}.png"
+        self.project.files[name] = data
+        return name
+
+    def _scene_png(self):
+        name = self._mod_png("A scene for the story (drawn at 320 x 160)")
+        if name:
+            self._insert(f"[scene: {name}]")
+
+    def _character_png(self):
+        name = self._mod_png("A character for the story (up to 256 x 256, standing on the box)")
+        if name:
+            self._insert(f"[{self.stage_side.get()}: {name}{' flip' if self.stage_flip.get() else ''}]")
 
     def _floors_form(self, parent):
         frame = ttk.LabelFrame(parent, text="Floors", padding=(6, 2))
@@ -397,6 +542,11 @@ class TowerTab(Tab):
         self.vars["unlock.after_ending"].set(conditions.get("after_ending") is True)
         self.vars["on_lose"].set(written.get("on_lose") if written.get("on_lose") in ("checkpoint", "restart")
                                  else "checkpoint")
+        scene = written.get("scene")
+        number = tower.scene_number(scene) if scene is not None else None
+        self.vars["scene"].set("" if scene is None else tower.scene_label(number) if number is not None else str(scene))
+        self.vars["dim"].set(written.get("dim") is True)
+        self._preview()
         for key in ("intro", "ending", "lose"):
             self._set_text(key, tower.story_text(written.get(key)))
         floors = written.get("floors")
@@ -449,6 +599,14 @@ class TowerTab(Tab):
             out["unlock"] = conditions
         if self.vars["on_lose"].get() == "restart":
             out["on_lose"] = "restart"
+        scene = self.vars["scene"].get().strip()
+        if scene:
+            old = written.get("scene") if written is not None else None
+            number = tower.scene_number(scene)
+            out["scene"] = old if old is not None and tower.scene_number(old) == number else \
+                number if isinstance(number, int) and scene.isdigit() else scene
+        if self.vars["dim"].get():
+            out["dim"] = True
         for key in ("intro", "ending", "lose"):
             value = tower.story_value(self._get_text(key))
             if value is not None:

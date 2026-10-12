@@ -139,6 +139,128 @@ class TowerTest(unittest.TestCase):
         for keys in (tower.TOWER_KEYS, tower.FLOOR_KEYS, tower.REWARD_KEYS, tower.UNLOCK_KEYS, tower.LINE_KEYS):
             self.assertIn(tuple(keys), arrays)
 
+    def test_stage_text(self):
+        """A story's stage as the tab writes it: brackets on the line
+        before, and back to what the manifest says, every key."""
+        value = {"scene": "seal shrine", "characters": {"left": 1, "right": "opponent"},
+                 "lines": [{"text": "My prince.", "speaker": "left"},
+                           {"text": "Look.", "speaker": "right", "scene": "scenes/sky.png", "portrait": "speaker",
+                            "characters": {"right": {"image": "art/hero.png", "flip": True, "duelist": "Seto"}}},
+                           {"text": "Panned.", "pan": {"x": 64, "y": 0, "frames": 30, "wait": True}, "scene": 139,
+                            "characters": {"left": {"character": 4, "expression": 2}, "right": "none"}},
+                           {"text": "Plain.", "portrait": 3, "speaker": "Seto"}]}
+        text = tower.story_text(value)
+        self.assertEqual(text.splitlines(), [
+            "[scene: seal shrine] [left: 1] [right: opponent]",
+            "@left: My prince.",
+            "[scene: scenes/sky.png] [right: art/hero.png flip as Seto]",
+            "#speaker @right: Look.",
+            "[scene: 139] [left: 4 expression 2] [right: none] [pan: 64 0 30 wait]",
+            "Panned.",
+            "#3 @Seto: Plain."])
+        self.assertEqual(tower.canon_story(tower.story_value(text)), tower.canon_story(value))
+        self.assertTrue(tower.same_story(value, text))
+        # Words that read as a stage are words, behind a backslash.
+        self.assertEqual(tower.story_text(["[scene: x]"]), "\\[scene: x]")
+        self.assertEqual(tower.story_value("\\[scene: x]"), "[scene: x]")
+        # A scene by number, by name or "none": the same scene.
+        self.assertTrue(tower.same_story({"text": "A.", "scene": 22}, "[scene: torch corridor]\nA."))
+        self.assertTrue(tower.same_story({"text": "A.", "scene": "none"}, "[scene: black]\nA."))
+        self.assertFalse(tower.same_story({"text": "A.", "scene": 22}, "[scene: 23]\nA."))
+        # A duelist by number stays a duelist; "as" keeps its expression;
+        # names and paths with spaces; a pan however briefly written.
+        for value in ({"text": "A.", "characters": {"left": {"duelist": 7}}},
+                      {"text": "A.", "characters": {"right": {"image": "my art.png", "duelist": "Seto",
+                                                              "expression": 2, "flip": True}}},
+                      {"text": "A.", "characters": {"left": "Flip Master", "right": "a b.png"}},
+                      {"text": "A.", "pan": {"x": 64}}):
+            text = tower.story_text([value])
+            self.assertEqual(tower.canon_story(tower.story_value(text)), tower.canon_story([value]), text)
+            self.assertTrue(tower.same_story([value], text), text)
+        self.assertEqual(tower.story_text([{"text": "A.", "characters": {"left": {"duelist": 7}}}]),
+                         "[left: duelist 7]\nA.")
+        # As the game reads a scene: a digit string is none of its (only the tab types numbers).
+        self.assertIsNone(tower.scene_number("22"))
+        self.assertEqual(tower.scene_number("22", typed=True), 22)
+        self.assertIsNone(tower.scene_number(".png"))
+
+    def test_stage_checks(self):
+        p = project()
+        bad = {"scene": 150, "dim": "yes", "intro": {"scene": "../out.png", "characters": {"middle": 1, "left": 39},
+                                                    "lines": [{"text": "A.", "pan": {"x": 9999, "speed": 1},
+                                                               "characters": {"right": {"character": 2,
+                                                                                        "expression": 9}}},
+                                                              {"text": "B.", "portrait": "face",
+                                                               "characters": {"left": {"duelist": 7, "flip": True}}}],
+                                                    "speed": 1},
+               "floors": [{"duelist": 1}]}
+        found = {(where, message.split(";")[0]) for _, where, message in problems(p, bad)}
+        for where, start in (("tower.scene", "is a scene's name"), ("tower.dim", "is true or false"),
+                             ("tower.intro", "unknown key \"speed\""), ("tower.intro.scene", "../out.png is not a path"),
+                             ("tower.intro.characters", "unknown key \"middle\""),
+                             ("tower.intro.characters.left.character", "is one of the campaign's"),
+                             ("tower.intro[0].pan", "unknown key \"speed\""), ("tower.intro[0].pan.x", "is 0 to 576"),
+                             ("tower.intro[0].characters.right.expression", "is 0 to 3"),
+                             ("tower.intro[1]", "\"portrait\" is one of the campaign's portraits"),
+                             ("tower.intro[1].characters.left.flip", "turns a PNG")):
+            self.assertTrue(any(w == where and m.startswith(start) for w, m in found), (where, start, found))
+        # The game's limits: five pictures of the mod's a story, "opponent" in a story of no floor,
+        # a line without words but with a stage.
+        many = {"intro": [{"text": "A.", "characters": {"left": f"c{n}.png"}} for n in range(6)] +
+                [{"text": "", "scene": 1}, {"text": "B.", "characters": {"right": "opponent"}}],
+                "floors": [{"duelist": 1, "before": {"text": "Hi.", "characters": {"right": "opponent"}}}]}
+        found = [(where, message) for _, where, message in problems(p, many)]
+        self.assertIn(("tower.intro", "a story shows at most 5 characters of the mod's; the rest are left out"), found)
+        self.assertTrue(any(w == "tower.intro" and m.startswith("\"opponent\" is a floor's") for w, m in found))
+        self.assertTrue(any(w == "tower.intro[6]" and m.startswith("a line without words") for w, m in found))
+        self.assertFalse(any(w.startswith("tower.floors[0]") for w, m in found))
+        self.assertEqual(problems(p, {"scene": "torch corridor", "intro": {"text": "A.", "scene": 205},
+                                      "floors": [{"duelist": 1}]}), [])
+
+    def test_scenes_same_as_the_game(self):
+        """The scene names and the stage's keys are tower_config.c's."""
+        import re
+        from pathlib import Path
+        source = (Path(__file__).resolve().parents[4] / "src/pc/tower/tower_config.c").read_text(encoding="utf-8")
+        names = re.search(r"scene_names\[TOWER_SCENE_NAMES\] = \{(.*?)\};", source, re.S).group(1)
+        self.assertEqual(tuple(re.findall(r'"([^"]*)"', names)), tower.SCENE_NAMES)
+        arrays = [tuple(re.findall(r'"(\w+)"', body)) for body in re.findall(r"known\[\] = \{(.*?)\};", source, re.S)]
+        for keys in (tower.STORY_KEYS, tower.CAST_KEYS, tower.PAN_KEYS, tower.SIDES):
+            self.assertIn(tuple(keys), arrays)
+        header = (Path(__file__).resolve().parents[4] / "src/pc/tower/tower.h").read_text(encoding="utf-8")
+        self.assertIn(f"#define TOWER_STORY_TEXT {tower.STORY_LETTERS} ", header)
+
+    def test_stage_pictures(self):
+        """The pickers' pictures, made from a disc's bytes as the game
+        reads them (a made-up archive here: nothing of the disc's)."""
+        from fm_editor import tower_art
+        wa = bytearray((tower_art.CHARACTER_BASE + 2 * 50) * tower_art.SECTOR)
+        base = tower_art.SCENE_BASE * tower_art.SECTOR      # scene 0x000
+        palette = base + 32 * tower_art.SECTOR
+        wa[palette + 2:palette + 4] = (31).to_bytes(2, "little")        # color 1: red
+        wa[palette + 4:palette + 6] = (31 << 10).to_bytes(2, "little")  # color 2: blue
+        wa[base + 5 * 128 + 7] = 1                                      # picture (7, 5)
+        wa[base + 16 * tower_art.SECTOR + 170 * 128 + 3] = 2            # column 1 (128 + 3), row 170: (259, 10)
+        image = tower_art.scene_image(bytes(wa), 0x000)
+        self.assertEqual(image.size, (320, 160))
+        self.assertEqual(image.pixel(7, 5), (248, 0, 0, 255))
+        self.assertEqual(image.pixel(259, 10), (0, 0, 248, 255))
+        self.assertEqual(image.pixel(0, 0)[3], 0)
+        # Character 1: one part of 16 x 8 at (-8, -8), texels 1 at its corner.
+        record = (tower_art.CHARACTER_BASE + 50) * tower_art.SECTOR
+        wa[record + 48 * tower_art.SECTOR + 2:record + 48 * tower_art.SECTOR + 4] = (31 << 5).to_bytes(2, "little")
+        wa[record] = 1
+        bank = record + 49 * tower_art.SECTOR
+        for at, value in ((0, 8), (8, 14), (14, 16)):
+            wa[bank + at:bank + at + 2] = value.to_bytes(2, "little")
+        wa[bank + 16:bank + 19] = bytes((0, 20, 0))
+        wa[bank + 20:bank + 24] = bytes((1, 0, 0, 0))
+        wa[bank + 24:bank + 30] = bytes((0xF8, 0xF8)) + (0).to_bytes(2, "little") + ((1 << 5) | (0 << 9)).to_bytes(2, "little")
+        image = tower_art.character_image(bytes(wa), 1)
+        self.assertEqual(image.size, (16, 8))
+        self.assertEqual(image.pixel(0, 0), (0, 248, 0, 255))
+        self.assertIsNone(tower_art.character_image(bytes(wa), 5))      # one the disc keeps empty
+
     def test_tower_only(self):
         p = project()
         self.assertEqual(tower.tower_only(p), ["ghost"])
@@ -297,6 +419,36 @@ class TowerTabTest(unittest.TestCase):
         self.assertTrue(tab.commit())
         self.assertEqual(p.other["tower"], {"name": "Mine", "music": 0x2C0, "floors": [{"duelist": 1}]})
         self.assertEqual(compat.required(manifest.build(p))[0], 13)
+
+    def test_stage_keeps_spelling(self):
+        """A mod that wrote its stage its own way keeps it through the tab."""
+        p = project()
+        odd = {"scene": 18, "dim": True, "intro": {"scene": 22, "characters": {"left": {"character": 1}},
+                                                   "lines": ["One.", {"text": "Two.", "speaker": "left"}]},
+               "floors": [{"duelist": 1, "before": [{"text": "Hi.", "scene": "TORCH_CORRIDOR"}]}]}
+        p.other["tower"] = json.loads(json.dumps(odd))
+        app, tab = self.make(p)
+        self.assertEqual(tab.vars["scene"].get(), "seal shrine")
+        self.assertTrue(tab.vars["dim"].get())
+        self.assertTrue(tab.commit())
+        self.assertEqual(json.dumps(p.other["tower"]), json.dumps(odd))
+        self.assertEqual(app.changes, 0)
+        tab.vars["name"].set("Named")
+        self.assertTrue(tab.commit())
+        self.assertEqual(p.other["tower"]["intro"], odd["intro"])
+        self.assertEqual(p.other["tower"]["scene"], 18)
+        self.assertEqual(p.other["tower"]["dim"], True)
+        # The stage box writes a line before the cursor's.
+        tab.last_story = "ending"
+        tab._set_text("ending", "The top.")
+        tab.stage_scene.set("burning pyramid")
+        tab._insert("[scene: burning pyramid]")
+        tab.stage_character.set("4")
+        tab.stage_side.set("right")
+        tab.stage_expression.set("1")
+        tab._character()
+        self.assertEqual(tower.canon_story(p.other["tower"]["ending"]),
+                         [{"scene": 41, "characters": {"right": {"character": 4, "expression": 1}}, "text": "The top."}])
 
 
 if __name__ == "__main__":

@@ -17,6 +17,7 @@
 #include "pc/cards/stars.h"
 #include "pc/cards/card_text_colors.h"
 #include "pc/cards/duel_ui.h"
+#include "pc/cards/type_icons.h"
 
 /* A star's second name, left out: an empty string in the names bank. */
 static const u8 no_star_name[] = {0xFF};
@@ -52,6 +53,7 @@ void func_80037DA4(DuelEffectChannel *object)
 #ifdef MEMORIES_PC
     s32 star = 0;   /* the guardian star an icon stands for (stars.h) */
     s32 naming = 0; /* the card's name: its letters are the card bar's "name" (duel_ui.h) */
+    s32 full_type = 0; /* kind 0's real type (cards.h), past the Dragon stats keep for it */
 #endif
 
     text = (u8 *G32)(s32)object->stream_58;
@@ -113,6 +115,12 @@ void func_80037DA4(DuelEffectChannel *object)
         case 0:
             id = (gDuel_adwCardStats[gDuel_wSelectedCardID - 1] >>
                   CARD_STAT_TYPE_SHIFT) & CARD_STAT_TYPE_MASK;
+#ifdef MEMORIES_PC
+            /* Past the retail word's 24 types (cards.h): the stats word
+               itself keeps the Dragon compatibility value id just read, so
+               the name and icon come from the card's real, banked type. */
+            full_type = Cards_Type(gDuel_wSelectedCardID);
+#endif
             break;
         case 1:
             stats = gDuel_adwCardStats[gDuel_wSelectedCardID - 1];
@@ -167,6 +175,13 @@ void func_80037DA4(DuelEffectChannel *object)
 #ifdef MEMORIES_PC
         if (kind == 1 || kind == 2)
             CardTextColors_Apply(object, CARD_TEXT_COLOR_GUARDIAN_STAR, star);
+        /* A type past the disc's 24 (cards.h): its name, not the retail
+           bank's string for the Dragon compatibility value id holds. */
+        if (kind == 0 && full_type > CARD_TYPE_EQUIP && Cards_TypeNameText(full_type) != 0) {
+            object->stream_58++;
+            text = (u8 *)Cards_TypeNameText(full_type);
+            goto store;
+        }
 #endif
         id += 0x8300;
     }
@@ -203,6 +218,11 @@ plain:
         /* Stars 11-15 are past the disc's icons, and a mod may give any
            star its own: the entry says which star it is (stars.h). */
         Stars_MarkIcon(star);
+        /* A type past the disc's 24 with an icon of its own: the entry says
+           which (type_icons.h); id itself stays the Dragon compatibility
+           value, same as the stats word, so func_80035E20's own math for it
+           stays in range where no mark is taken. */
+        if (kind == 0) TypeIcons_MarkIcon(full_type);
 #endif
         func_80036C14(object, id);
     }

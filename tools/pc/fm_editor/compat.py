@@ -189,6 +189,9 @@ def features(manifest: dict, project=None) -> list:
         newer = sorted(key for key in limits if key not in OLD_LIMITS)
         if newer:
             add(11, "the values " + ", ".join(newer))
+    # --- API 12 -------------------------------------------------------------
+    if "card_types" in manifest or "monster_types" in manifest:
+        add(12, "custom card types (\"card_types\")")
     return out
 
 

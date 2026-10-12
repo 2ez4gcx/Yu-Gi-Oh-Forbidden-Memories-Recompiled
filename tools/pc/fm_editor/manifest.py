@@ -23,7 +23,7 @@ import shutil
 from pathlib import Path
 
 from .gamedata import (FUSION_GROUPS, RITUAL_ORIGINS, RITUAL_REQUIREMENT_KEYS, RITUAL_TRIBUTE_MAX, fusion_group_named, ATTRIBUTE_NAMES, CARD_COUNT, DECK_SIZE, DUELIST_NAMES, FRAME_COLOR_NAMES, FRAME_NAMES, POOLS, STAR_NAMES,
-                       EQUIP_BONUS_MAX, STARTER_WEIGHT_LIMIT, TYPE_NAMES, TYPE_MAGIC, GameData)
+                       EQUIP_BONUS_MAX, STARTER_WEIGHT_LIMIT, TYPE_NAMES, TYPE_MAGIC, TYPE_LIMIT, GameData, is_monster_type)
 from .model import AddedCard, ModInfo, Project, StarterDeck, duelist_named, type_named, KEY_RE
 from . import art, board_art, campaign_map, compat, fixed_decks, guardian_stars, packs as packmath, pools as poolmath, roster
 
@@ -85,7 +85,7 @@ def _card_fields(card, base, everything=False) -> dict:
     # A card made a monster without "stars" gets default ones in the game
     # (cards.c default_stars): written, even as none, they stay as shown.
     if everything or (card.star1, card.star2) != (base.star1, base.star2) or \
-            card.type < TYPE_MAGIC <= base.type:
+            is_monster_type(card.type) and not is_monster_type(base.type):
         out["stars"] = [_star_value(card.star1), _star_value(card.star2)]
     if card.frame != base.frame:
         out["frame"] = FRAME_NAMES[card.frame] if 0 <= card.frame < len(FRAME_NAMES) else "Type"
@@ -655,8 +655,8 @@ def _apply_fields(card, entry: dict, is_replace: bool, messages: list, where: st
     if "type" in entry:
         value = _choice(entry["type"], TYPE_NAMES)
         if value >= 0:
-            value = _clamp(value, 0, 23)
-            if (not is_replace and value >= TYPE_MAGIC and value != card.type and value != effect_type and
+            value = _clamp(value, 0, TYPE_LIMIT - 1)
+            if (not is_replace and not is_monster_type(value) and value != card.type and value != effect_type and
                     value != 23):     # cards.c
                 messages.append(f"{where}: a copy becomes a non-monster only with a matching retail effect; "
                                 f"\"type\" left out")
@@ -721,11 +721,11 @@ def _read_notes(entry: dict, messages: list, where: str):
 def _default_stars(project: Project, card, entry: dict, was_monster: bool, model_default: int):
     """As cards.c default_stars: a card made a monster with no "stars" and
     none of its own takes its model's, or the Sun and the Moon."""
-    if card.type >= TYPE_MAGIC or was_monster or "stars" in entry or card.star1 or card.star2:
+    if not is_monster_type(card.type) or was_monster or "stars" in entry or card.star1 or card.star2:
         return
     model = project.resolve(entry.get("model")) if "model" in entry else model_default
     source = project.retail.cards.get(model) if 1 <= model <= CARD_COUNT else None
-    if source is not None and source.type < TYPE_MAGIC:
+    if source is not None and is_monster_type(source.type):
         card.star1, card.star2 = source.star1, source.star2
     else:
         card.star1, card.star2 = STAR_NAMES.index("Sun"), STAR_NAMES.index("Moon")
@@ -749,7 +749,7 @@ def read_cards(project: Project, entries, messages: list):
             continue
         notes = _read_notes(entry, messages, where)
         if is_replace:
-            was_monster = project.cards[base].type < TYPE_MAGIC
+            was_monster = is_monster_type(project.cards[base].type)
             _apply_fields(project.cards[base], entry, True, messages, where, project.other.get("guardian_stars"))
             _default_stars(project, project.cards[base], entry, was_monster, base)
             if notes:
@@ -781,7 +781,7 @@ def read_cards(project: Project, entries, messages: list):
         if not effect_id or effect_id > CARD_COUNT:
             effect_id = project.effect_of(base)
         effect = project.retail.cards.get(effect_id)
-        was_monster = project.cards[cid].type < TYPE_MAGIC
+        was_monster = is_monster_type(project.cards[cid].type)
         _apply_fields(project.cards[cid], entry, False, messages, where, project.other.get("guardian_stars"),
                       effect.type if effect else None)
         _default_stars(project, project.cards[cid], entry, was_monster, base)

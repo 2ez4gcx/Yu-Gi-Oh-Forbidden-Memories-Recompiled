@@ -9,6 +9,7 @@
 #include "../psyq/libgs.h"
 #ifdef MEMORIES_PC
 #include "pc/cards/cards.h"
+#include "pc/cards/type_icons.h"
 #endif
 
 #include "duel_card_stat_display.h"
@@ -61,6 +62,13 @@ DisplayObject *func_80031574(s32 index, s32 arg1, s32 arg2, s32 arg3, s32 arg4)
         break;
     }
 #ifdef MEMORIES_PC
+    {
+        int tpage, u, v, clut;
+        if (TypeIcons_Cell(Cards_Type(index), &tpage, &u, &v, &clut)) {
+            DisplayObject_ConfigureScreenSprite(DISPLAY_OBJECT_VIEW(object), x, y, 0x10, 0x10,
+                                                u, v, tpage, clut, 0);
+        }
+    }
     /* A mod's frame color (Cards_FrameColor): the icon's palettes follow
      * the frames' order, with orange next after ritual; this package has no
      * purple, so a purple frame keeps its type's icon. */

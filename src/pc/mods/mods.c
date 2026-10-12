@@ -1273,7 +1273,7 @@ static const char *const manifest_keys[] = {
     "settings", "fusions", "equips", "rituals", "drops", "decks", "duelists", "text", "font",
     "chest_overflow", "terrain_bonus", "trap_thresholds", "equip_bonus_default", "passwords", "starter",
     "starter_pools", "title", "menu", "limits", "guardian_stars", "packs", "pack_shop",
-    "card_text_colors", "card_layout", "palette_ramps", "ui",
+    "card_text_colors", "card_layout", "palette_ramps", "ui", "card_types", "monster_types",
 };
 
 /* How many letters to add, remove or change to turn one word into the
@@ -2096,6 +2096,16 @@ void Mods_VisitCards(void (*visit)(const char *id, const char *directory, const 
     for (i = 0; i < loaded_count; i++) {
         const Mod *mod = &mods[loaded[i]];
         if (mod->active && Json_Count(mod->cards)) visit(mod->id, mod->directory, mod->cards, context);
+    }
+}
+
+void Mods_VisitManifests(void (*visit)(const char *id, const char *directory,
+                                       const struct JsonValue *manifest, void *context), void *context)
+{
+    int i;
+    for (i = 0; i < loaded_count; i++) {
+        const Mod *mod = &mods[loaded[i]];
+        if (mod->active) visit(mod->id, mod->directory, Json_Root(mod->manifest), context);
     }
 }
 

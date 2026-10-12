@@ -232,8 +232,11 @@ static int fixed_count, fixed_room;
 static long overflow_starchips;          /* per card the chest has no room for */
 static int chest_limit;                  /* copies the chest keeps; 0: the disc's 250 */
 #define TERRAINS 6                        /* DUEL_TERRAIN_COUNT: Forest to Yami, 1-6 */
-static short terrain_bonus[TERRAINS][CARD_TYPE_MAGIC];
-static unsigned char terrain_listed[TERRAINS][CARD_TYPE_MAGIC];
+/* Types live in the card record's five-bit field.  The retail terrain table
+ * has only 20 rows, but a mod may provide a bonus for any declared type. */
+#define TABLE_TYPE_LIMIT 256
+static short terrain_bonus[TERRAINS][TABLE_TYPE_LIMIT];
+static unsigned char terrain_listed[TERRAINS][TABLE_TYPE_LIMIT];
 static long trap_threshold[DUEL_ATTACK_TRAP_COUNT];   /* House of Adhesive Tape to Widespread Ruin */
 static unsigned char trap_listed[DUEL_ATTACK_TRAP_COUNT];
 static const char *trap_from[DUEL_ATTACK_TRAP_COUNT];      /* the mod that set it */
@@ -537,12 +540,12 @@ static void read_equip_bonus(const char *mod, int index, int equip, const JsonVa
         const char *name = Json_Name(member);
         int type = Cards_TypeNamed(name), attribute = Cards_AttributeNamed(name);
         snprintf(where, sizeof(where), "equips[%d].bonus_if \"%s\"", index, name);
-        if ((type < 0 || type >= CARD_TYPE_MAGIC) && attribute < 0) {
+        if ((type < 0 || !Cards_IsMonsterType(type)) && attribute < 0) {
             Mods_Note(mod, "%s: not a monster type or an attribute", where);
             continue;
         }
         if (!bonus_points(mod, where, member, &points)) continue;
-        if (type >= 0 && type < CARD_TYPE_MAGIC)
+        if (type >= 0 && Cards_IsMonsterType(type))
             add_bonus(equip, BONUS_TYPE, type, BONUS_ATTACK | BONUS_DEFENSE, points, points, order, (unsigned)j + 1);
         else
             add_bonus(equip, BONUS_ATTRIBUTE, attribute, BONUS_ATTACK | BONUS_DEFENSE, points, points, order,
@@ -704,7 +707,7 @@ static int ritual_requirement(const char *mod, const char *where, const JsonValu
     v = Json_Member(value, "type");
     if (v) {
         if (Json_TypeOf(v) != JSON_STRING || (type = Cards_TypeNamed(Json_String(v, ""))) < 0 ||
-            type >= CARD_TYPE_MAGIC) {
+            !Cards_IsMonsterType(type)) {
             Mods_Note(mod, "%s: ritual tribute \"type\" is a monster type", where);
             return 0;
         }
@@ -1576,7 +1579,7 @@ static void read_terrain_bonus(const char *mod, const JsonValue *table)
             const JsonValue *member = Json_At(entry, j);
             int type = Cards_TypeNamed(Json_Name(member));
             long points = Json_Number(member, 0);
-            if (type < 0 || type >= CARD_TYPE_MAGIC) {
+            if (type < 0 || !Cards_IsMonsterType(type)) {
                 Mods_Note(mod, "%s \"%s\": not a monster type", where, Json_Name(member));
                 continue;
             }
@@ -1595,7 +1598,7 @@ static void read_terrain_bonus(const char *mod, const JsonValue *table)
 
 int Tables_TerrainBonus(int terrain, int type, int *bonus)
 {
-    if (terrain < 1 || terrain > TERRAINS || type < 0 || type >= CARD_TYPE_MAGIC) return 0;
+    if (terrain < 1 || terrain > TERRAINS || type < 0 || type >= TABLE_TYPE_LIMIT || !Cards_IsMonsterType(type)) return 0;
     if (!terrain_listed[terrain - 1][type]) return 0;
     *bonus = terrain_bonus[terrain - 1][type];
     return 1;

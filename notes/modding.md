@@ -115,6 +115,7 @@ checked as well, when it starts.
 | 9 or less | v0.2.0 | everything not listed below; added cards, duelists, starter pools, packs, the title's menus |
 | 10 | v0.2.1-preview.1 | `card_text_colors`; a card's `monster_effects` or `trap_threshold`; an equip's `bonus_attack`/`bonus_defense`; a pack's `image_style`; an added card (`copy`) of another kind than its base (a monster made a magic card, a magic card a monster or a trap), or whose `model` or `effect` is a card's name; the `MEMORIES_EVENT_MONSTER` event |
 | 11 | the release after v0.2.1-preview.1 | `assets`, `ui`, `card_layout`, `palette_ramps`; a card's `tags`, or a `frame` of `Gold`, `Green`, `Pink` or `Blue`; a monster effect's `for_each`; `{"remove": "all"}` in `fusions`; a ritual of other than three tributes, or with `tributes_from` `hand` or `both`; the title's `images`, a `scale` in `title` or `menu`; the `limits` `deck_copies`, `swords_turns`, `crush_card`, `spellbinding_circle`, `shadow_spell`, `rank_score`, `starchip_prize` and `new_game_starchips` |
+| 12 | the release after API 11 | `card_types`: renamed retail types and new monster types |
 
 The FM Editor writes `min_api` on save as the lowest one of these that has
 everything the mod uses, never lowering one written higher, and its Mod
@@ -1288,6 +1289,43 @@ opponents' names, and how the rules combine. Like cards, they need a restart.
 The [FM Editor](../tools/pc/fm_editor/README.md) (`python tools/pc/fm_editor`)
 reads these tables and the cards out of the player's own game files and
 writes a mod folder whose `mod.json` holds only what was changed.
+
+## Card Types: names and new monster types
+
+`card_types` is the type registry. It works like Guardian Stars: it gives a
+stable numeric field a human name, so cards and rule tables may use the name.
+Existing IDs retain their game behaviour; a mod may rename any of them. The
+type bank has IDs `24` through `255` for new monster types. Values through
+`31` fit in the disc's five-bit word; later values are stored beside the card
+and use the ordinary monster encoding only for untouched disc routines.
+
+```json
+"card_types": {
+    "types": [
+        {"id": 0, "name": "Wyrm"},
+        {"id": 20, "name": "Spell"},
+        {"id": 24, "name": "Cyberse"}
+    ]
+},
+"cards": [
+    {"copy": "Blue-Eyes White Dragon", "id": "codec-dragon", "name": "Codec Dragon", "type": "Cyberse"}
+],
+"terrain_bonus": {"Forest": {"Cyberse": 300}}
+```
+
+`id` is `0` through `23` to rename a retail type, or `24` through `255` to
+declare a new one. IDs `20` Magic, `21` Trap, `22` Ritual and `23` Equip keep
+their mechanics even when renamed. A new ID is always a monster: it can be
+used for a card's `type`, terrain bonuses, equip targets and bonuses, ritual
+requirements, and monster-effect filters just like the twenty retail monster
+types. It gets the ordinary monster frame and icon until a card layout or
+texture pack changes its presentation.
+
+Type IDs are stored in the loaded card tables, so changing an existing ID's name does
+not convert cards. Later active mods replace an earlier name for the same ID.
+A card or rule may use either its numeric ID or its currently declared name.
+An old preview manifest spelling, `monster_types`, is accepted as an alias;
+new mods should use `card_types` and set `"min_api": 12`.
 
 ## Guardian Stars: names, icons, new stars and matchups
 

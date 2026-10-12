@@ -26,6 +26,7 @@ int Cards_Type(int id)
 }
 int Cards_RetailType(int id) { return id >= 1 && id <= CARD_COUNT ? Cards_Type(id) : -1; }
 int Cards_TypeNamed(const char *text) { return same_letters(text, "Dragon") ? 0 : same_letters(text, "Warrior") ? 3 : -1; }
+int Cards_IsMonsterType(int type) { return type >= 0 && (type < CARD_TYPE_MAGIC || type > CARD_TYPE_EQUIP); }
 int Cards_FusionGroupNamed(const char *text)
 {
     return same_letters(text, "Female") ? CARD_FUSION_GROUP_FEMALE

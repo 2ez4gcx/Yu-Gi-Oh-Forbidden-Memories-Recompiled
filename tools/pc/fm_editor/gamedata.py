@@ -55,6 +55,17 @@ TYPE_NAMES = ["Dragon", "Spellcaster", "Zombie", "Warrior", "Beast-Warrior", "Be
               "Fairy", "Insect", "Dinosaur", "Reptile", "Fish", "Sea Serpent", "Machine", "Thunder", "Aqua",
               "Pyro", "Rock", "Plant", "Magic", "Trap", "Ritual", "Equip"]
 TYPE_MAGIC, TYPE_TRAP, TYPE_RITUAL, TYPE_EQUIP = 20, 21, 22, 23
+TYPE_LIMIT = 256
+
+
+def is_monster_type(type_: int) -> bool:
+    """Whether the five-bit card type is a monster kind.
+
+    24-255 are reserved for a mod's declared card
+    types.  The runtime treats every declared value in that range as a
+    monster; the editor uses the same classification while reading a mod.
+    """
+    return 0 <= type_ < TYPE_MAGIC or TYPE_EQUIP < type_ < TYPE_LIMIT
 ATTACK_TRAP_FIRST = 681
 # What an equip adds on the disc: +500, Megamorph +1000 (duel_scene_card_
 # placement.c); a mod's "bonus" goes from -32767 to 32767 (tables.c).
@@ -211,7 +222,7 @@ class Card:
         return dc_replace(self, **changes)
 
     def is_monster(self) -> bool:
-        return self.type < TYPE_MAGIC
+        return is_monster_type(self.type)
 
     def shown_frame(self) -> int:
         """The frame the game draws it in."""

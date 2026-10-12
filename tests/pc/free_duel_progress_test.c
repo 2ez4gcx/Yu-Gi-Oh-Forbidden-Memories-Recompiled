@@ -19,6 +19,7 @@ int Cards_Type(int id) { (void)id; return 3; }
 int Cards_EffectId(int id) { return Cards_BaseId(id); }
 int Cards_RetailType(int id) { (void)id; return -1; }
 int Cards_TypeNamed(const char *text) { (void)text; return -1; }
+int Cards_IsMonsterType(int type) { return type >= 0 && (type < CARD_TYPE_MAGIC || type > CARD_TYPE_EQUIP); }
 int Cards_FusionGroupNamed(const char *text) { (void)text; return 0; }
 int Cards_Attribute(int id) { (void)id; return 0; }
 int Cards_AttributeNamed(const char *text) { (void)text; return -1; }

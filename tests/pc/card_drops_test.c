@@ -64,6 +64,7 @@ void Duel_AwardCard(s32 id) { chest[id]++; }
 /* What tables.c asks of the cards and the mods: no mod edits a pool. */
 int Cards_Type(int id) { (void)id; return 0; }
 int Cards_TypeNamed(const char *text) { (void)text; return -1; }
+int Cards_IsMonsterType(int type) { return type >= 0 && (type < CARD_TYPE_MAGIC || type > CARD_TYPE_EQUIP); }
 int Cards_FusionGroupNamed(const char *text) { (void)text; return 0; }
 int Cards_Attribute(int id) { (void)id; return 0; }
 int Cards_AttributeNamed(const char *text) { (void)text; return -1; }

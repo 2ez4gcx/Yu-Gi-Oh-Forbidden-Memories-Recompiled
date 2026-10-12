@@ -33,6 +33,7 @@
 #include "pc/text/hd_text.h"
 #include "pc/cards/stars.h"
 #include "pc/cards/duel_ui.h"
+#include "pc/cards/type_icons.h"
 
 /* A glyph past the retail font's is in a texture bank (glyphs.h), which a
    sprite packet names in bits the sprite's own tpage cannot carry through
@@ -199,7 +200,9 @@ void func_80035E20(DisplayObject *obj, GsOT *ot)
                 }
 #ifdef MEMORIES_PC
                 /* A guardian star's icon the disc has not got (11-15) or a
-                   mod redrew: the entry's code says which (stars.h). */
+                   mod redrew, or a monster type past the disc's 24 with an
+                   icon of its own: the entry's code says which (stars.h,
+                   type_icons.h). An entry marks at most one of the two. */
                 {
                     int tpage;
                     int u;
@@ -207,7 +210,8 @@ void func_80035E20(DisplayObject *obj, GsOT *ot)
                     int cx;
                     int cy;
 
-                    if (Stars_IconCell((u16)c, &tpage, &u, &v, &cx, &cy)) {
+                    if (Stars_IconCell((u16)c, &tpage, &u, &v, &cx, &cy) ||
+                        TypeIcons_IconCell((u16)c, &tpage, &u, &v, &cx, &cy)) {
                         spr->tpage = tpage;
                         spr->u = u;
                         spr->v = v;

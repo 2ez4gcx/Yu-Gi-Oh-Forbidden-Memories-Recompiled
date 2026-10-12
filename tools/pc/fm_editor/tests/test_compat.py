@@ -92,6 +92,13 @@ class FeatureTest(unittest.TestCase):
             with self.subTest(value=value):
                 self.assertEqual(self.needs(value), 11)
 
+    def test_api_12_card_types(self):
+        value = {"card_types": {"types": [{"id": 0, "name": "Wyrm"}, {"id": 24, "name": "Cyberse"}]}}
+        self.assertEqual(self.needs(value), 12)
+        p = Project(fixture().game())
+        p.other.update(value)
+        self.assertFalse([issue for issue in validate.validate(p) if issue.level == "error"])
+
     def test_reasons_are_the_highest_apis(self):
         api, reasons = compat.required({"card_text_colors": {}, "ui": {}, "limits": {"swords_turns": 5}})
         self.assertEqual(api, 11)

@@ -56,6 +56,15 @@ class TowerTest(unittest.TestCase):
         self.assertEqual(tower.story_text("Alone"), "Alone")
         # A colon in plain words is words: only "@who:" and "#number:" speak.
         self.assertEqual(tower.story_value("Note: it is late.\n#x: no"), ["Note: it is late.", "#x: no"])
+        # Nothing a mod writes is lost on the way through the tab: a line
+        # break in a box, plain words that look like a speaker's, a
+        # portrait with a speaker, a backslash.
+        kept = ["One\nTwo", {"text": "A\nB", "speaker": "Seto"}, "@Seto: plain words", "#3: plain too",
+                {"text": "x", "portrait": 3, "speaker": "Seto"}, "back\\slash", "\\lead"]
+        text = tower.story_text(kept)
+        self.assertEqual(len(text.splitlines()), len(kept))
+        self.assertEqual(tower.story_value(text), kept)
+        self.assertIn("#3 @Seto: x", text)
 
     def test_deck_text(self):
         self.assertEqual(tower.deck_text({"Mystic Elf": 20, "Kuriboh": 1}), "Mystic Elf x20\nKuriboh")
@@ -104,6 +113,19 @@ class TowerTest(unittest.TestCase):
         unlock = {(lvl, w) for lvl, w, _ in problems(p, {"unlock": {"wins": "many", "beat": "Nobody"},
                                                          "floors": [{"duelist": 1}]})}
         self.assertEqual(unlock, {("error", "tower.unlock.wins"), ("warning", "tower.unlock.beat")})
+        # after_ending in quotes keeps the tower locked in the game: an error.
+        self.assertIn(("error", "tower.unlock.after_ending"),
+                      {(lvl, w) for lvl, w, _ in problems(p, {"unlock": {"after_ending": "yes"},
+                                                              "floors": [{"duelist": 1}]})})
+
+    def test_tower_condition_kept(self):
+        """A duelist whose only condition is "tower" keeps it through the
+        Duelists tab's unlock form, which does not show it."""
+        from fm_editor import duelist_rules
+        e = roster.find(project(), "ghost")
+        e.extra["unlock"] = {"tower": 2}
+        self.assertEqual(duelist_rules.unlock_value(e), {"tower": 2})
+        self.assertEqual(duelist_rules.unlock_value(e, beat="Seto"), {"beat": "Seto", "tower": 2})
 
     def test_same_as_the_game(self):
         """The keys tower_config.c knows are the editor's."""
@@ -194,6 +216,33 @@ class TowerTabTest(unittest.TestCase):
         self.assertEqual(tab._get_text("deck"), "Mystic Elf x20\nKuriboh x20")
         self.assertTrue(tab.commit())
         self.assertEqual(p.other["tower"], TOWER)
+
+    def test_tab_keeps_spelling(self):
+        """Floors and fields nobody touched stay as the mod wrote them, key
+        order and spelling, even when another part of the tower changed."""
+        p = project()
+        odd = {"floors": [{"before": [{"text": "Hi."}], "duelist": "Simon Muran",
+                           "life_points": {"player": 8000, "opponent": 8000}, "reward": {"card": "Mystic Elf"}},
+                          {"duelist": 7, "field": "yami"}],
+               "intro": [{"text": "One\nTwo"}], "name": "Odd"}
+        p.other["tower"] = json.loads(json.dumps(odd))
+        app, tab = self.make(p)
+        tab.list.selection_set("1")
+        tab.pick()
+        tab.list.selection_set("0")
+        tab.pick()
+        self.assertTrue(tab.commit())
+        self.assertEqual(json.dumps(p.other["tower"]), json.dumps(odd))
+        self.assertEqual(app.changes, 0)
+        # The name changed: the untouched intro and floors keep their spelling.
+        tab.vars["name"].set("Even")
+        self.assertTrue(tab.commit())
+        self.assertEqual(p.other["tower"]["name"], "Even")
+        self.assertEqual(p.other["tower"]["intro"], odd["intro"])
+        self.assertEqual(json.dumps(p.other["tower"]["floors"]), json.dumps(odd["floors"]))
+        # A floor moved stays as written too.
+        tab.move(1)
+        self.assertEqual(json.dumps(p.other["tower"]["floors"]), json.dumps(odd["floors"][::-1]))
 
     def test_tab_edits(self):
         p = project()

@@ -83,7 +83,8 @@ def unlock_value(e, beat="", wins=0, story=None, card="", copies=0):
         out["card"] = int(card) if card.isdigit() else card
     if copies and card:
         out["copies"] = copies
-    if not any(k in out for k in ("beat", "wins", "story", "card")):
+    # A "tower" condition (kept from the mod) is a condition too.
+    if not any(k in out for k in ("beat", "wins", "story", "card", "tower")):
         return None
     return {**{k: out[k] for k in UNLOCK_KEYS if k in out}, **{k: v for k, v in out.items() if k not in UNLOCK_KEYS}}
 

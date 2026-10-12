@@ -1,4 +1,4 @@
-"""A mod's "tower" (notes/tower-mode.md; src/pc/tower/tower_config.c): the
+r"""A mod's "tower" (notes/tower-mode.md; src/pc/tower/tower_config.c): the
 checks the game makes when it reads one, and the text forms the Tower tab
 edits it in.
 
@@ -8,7 +8,10 @@ story as lines of text, one dialogue box a line:
     Welcome to the tower.
     @Seto: You will not pass.        said by a duelist (an id, a name, an identity)
     #8: The prince steps in.         with one of the campaign's 25 portraits
+    #8 @Seto: Both.                  a portrait, and who says it
     @none: The wind howls.           nobody's (no portrait)
+    \@ plain words                   a backslash: words that would read as a speaker's
+    One\nTwo                         \n: a line break inside the box
 
 and a deck as a card a line, "Blue-eyes White Dragon x3" (x1 when left out).
 """
@@ -56,27 +59,37 @@ def terrain_of(value) -> int | None:
 
 # --- story lines ----------------------------------------------------------------------
 
-LINE_RE = re.compile(r"^(@|#)([^:]*):\s?(.*)$")
+# "#8 @Seto: words": a campaign portrait, a speaker, or both, then the words.
+LINE_RE = re.compile(r"^(?:#(\d+)\s*)?(?:@([^:]*))?:\s?(.*)$")
+NEWLINE = r"\n"        # a line break inside a box's words, as the tab shows it: a backslash and n
+
+
+def _speaks(line: str) -> bool:
+    found = LINE_RE.match(line)
+    return bool(found) and (found.group(1) is not None or found.group(2) is not None)
 
 
 def story_text(value) -> str:
-    """A story as the tab shows it: a line of text per line."""
+    """A story as the tab shows it: a line of text per line. A plain line
+    that would read as a speaker's starts with a backslash."""
     if value is None:
         return ""
     items = value if isinstance(value, list) else [value]
     out = []
     for item in items:
         if isinstance(item, str):
-            out.append(item.replace("\n", " "))
+            text = item.replace("\n", NEWLINE)
+            out.append("\\" + text if _speaks(text) or text.startswith("\\") else text)
         elif isinstance(item, dict):
-            text = str(item.get("text", "")).replace("\n", " ")
-            if "portrait" in item:
-                out.append(f"#{item['portrait']}: {text}")
-            elif "speaker" in item:
+            text = str(item.get("text", "")).replace("\n", NEWLINE)
+            head = f"#{item['portrait']}" if "portrait" in item else ""
+            if "speaker" in item:
                 speaker = item["speaker"]
-                out.append(f"@{'none' if speaker in (None, '') else speaker}: {text}")
+                head += (" " if head else "") + f"@{'none' if speaker in (None, '') else speaker}"
+            if head:
+                out.append(f"{head}: {text}")
             else:
-                out.append(text)
+                out.append("\\" + text if _speaks(text) or text.startswith("\\") else text)
     return "\n".join(out)
 
 
@@ -88,16 +101,20 @@ def story_value(text: str):
         line = line.strip()
         if not line:
             continue
+        if line.startswith("\\"):
+            out.append(line[1:].replace(NEWLINE, "\n"))
+            continue
         found = LINE_RE.match(line)
-        if found and (found.group(1) == "@" or found.group(2).strip().isdigit()):
-            who, rest = found.group(2).strip(), found.group(3).strip()
-            if found.group(1) == "#":
-                out.append({"text": rest, "portrait": int(who)})
-            else:
-                speaker = int(who) if who.isdigit() else who
-                out.append({"text": rest, "speaker": "none" if who.lower() in ("", "none") else speaker})
+        if found and (found.group(1) is not None or found.group(2) is not None):
+            entry = {"text": found.group(3).strip().replace(NEWLINE, "\n")}
+            if found.group(1) is not None:
+                entry["portrait"] = int(found.group(1))
+            if found.group(2) is not None:
+                who = found.group(2).strip()
+                entry["speaker"] = "none" if who.lower() in ("", "none") else int(who) if who.isdigit() else who
+            out.append(entry)
         else:
-            out.append(line)
+            out.append(line.replace(NEWLINE, "\n"))
     if not out:
         return None
     if len(out) == 1 and isinstance(out[0], str):
@@ -227,7 +244,7 @@ def check(tower, duelist_named, card_named) -> list:
             if key not in UNLOCK_KEYS:
                 add("warning", "tower.unlock", f"unknown key \"{key}\"")
         if "after_ending" in unlock and not isinstance(unlock["after_ending"], bool):
-            add("warning", "tower.unlock.after_ending", "is true or false, without quotes")
+            add("error", "tower.unlock.after_ending", "is true or false, without quotes; the game keeps the tower locked")
         for key, high in (("wins", 65535), ("copies", 250), ("story", 0x7FF)):
             if key in unlock and (_number(unlock[key]) is None or not 0 <= _number(unlock[key]) <= high):
                 add("error", f"tower.unlock.{key}", f"is 0 to {high}; the tower stays locked")

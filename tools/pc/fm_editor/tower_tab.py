@@ -42,6 +42,22 @@ class TowerTab(Tab):
         self.floors = []          # the floors as the form edits them
         self.current = None       # the floor in the form
         self.kept = {}            # the tower's keys the form does not show, as written
+        self.written = None       # the tower as the project had it when the form was filled
+        self.shown = None         # (floor, form) as _show_floor filled it
+        self.top_shown = None     # the tower's own form as refresh filled it
+
+    # The fields of a floor and of the tower itself, in the form.  A form
+    # nobody touched writes nothing back: the mod keeps its own spelling
+    # ("Yami", {"text": ...} lines, key order) instead of the tab's.
+    FLOOR_FIELDS = ("duelist", "field", "lp.player", "lp.opponent", "no_fusions", "no_equips", "checkpoint",
+                    "reward.cards", "reward.starchips", "reward.unlock_duelist")
+    FLOOR_TEXTS = ("deck", "before", "after")
+    TOP_FIELDS = ("name", "label", "music", "unlock", "unlock.beat", "unlock.wins", "unlock.story", "unlock.card",
+                  "unlock.copies", "unlock.after_ending", "on_lose")
+    TOP_TEXTS = ("intro", "ending", "lose")
+
+    def _form(self, fields, texts) -> tuple:
+        return tuple(self.vars[k].get() for k in fields) + tuple(self._get_text(k) for k in texts)
 
     # --- the form -------------------------------------------------------------------
 
@@ -235,6 +251,7 @@ class TowerTab(Tab):
         self._set_text("deck", tower.deck_text(floor.get("deck")))
         self._set_text("before", tower.story_text(floor.get("before")))
         self._set_text("after", tower.story_text(floor.get("after")))
+        self.shown = (self.current, self._form(self.FLOOR_FIELDS, self.FLOOR_TEXTS))
 
     def _set_text(self, key, value):
         text = self.texts[key]
@@ -297,7 +314,10 @@ class TowerTab(Tab):
 
     def _store_floor(self):
         if self.current is not None and self.current < len(self.floors):
+            if self.shown == (self.current, self._form(self.FLOOR_FIELDS, self.FLOOR_TEXTS)):
+                return
             self.floors[self.current] = self._read_floor()
+            self.shown = (self.current, self._form(self.FLOOR_FIELDS, self.FLOOR_TEXTS))
 
     def pick(self):
         chosen = self.list.selection()
@@ -339,6 +359,8 @@ class TowerTab(Tab):
             return
         self.floors[self.current], self.floors[to] = self.floors[to], self.floors[self.current]
         self.current = to
+        if self.shown is not None:
+            self.shown = (to, self.shown[1])   # the same floor, still in the form
         self._fill_list()
         self.commit(stored=True)
 
@@ -360,7 +382,8 @@ class TowerTab(Tab):
         value = self.project.other.get("tower")
         written = value if isinstance(value, dict) else {}
         self.has.set(value is not None)
-        self.kept = {k: tower.copy(v) for k, v in written.items() if k not in tower.TOWER_KEYS}
+        self.written = value
+        self.kept ={k: tower.copy(v) for k, v in written.items() if k not in tower.TOWER_KEYS}
         self.vars["name"].set(str(written.get("name", "")))
         self.vars["label"].set(str(written.get("label", "")))
         self.vars["music"].set("" if written.get("music") is None else str(written["music"]))
@@ -380,6 +403,7 @@ class TowerTab(Tab):
         self.current = 0 if self.floors else None
         self._fill_list()
         self._show_floor()
+        self.top_shown = self._form(self.TOP_FIELDS, self.TOP_TEXTS)
         self.only_keys = [e.key for e in roster.copies(self.project)]
         self.only.delete(0, "end")
         marked = set(tower.tower_only(self.project))
@@ -392,6 +416,13 @@ class TowerTab(Tab):
     def _build(self) -> dict | None:
         if not self.has.get():
             return None
+        written = self.written if isinstance(self.written, dict) else None
+        if written is not None and self.top_shown == self._form(self.TOP_FIELDS, self.TOP_TEXTS):
+            # The tower's own fields untouched: only the floors can change.
+            out = tower.copy(written)
+            if "floors" in out or self.floors:
+                out["floors"] = [tower.copy(f) for f in self.floors]
+            return out
         out = {}
         for key in ("name", "label"):
             text = self.vars[key].get().strip()
@@ -420,7 +451,9 @@ class TowerTab(Tab):
         for key in ("intro", "ending", "lose"):
             value = tower.story_value(self._get_text(key))
             if value is not None:
-                out[key] = value
+                old = written.get(key) if written is not None else None
+                same = old is not None and tower.story_text(old) == self._get_text(key).strip()
+                out[key] = old if same else value
         out["floors"] = [tower.copy(f) for f in self.floors]
         out.update(self.kept)
         return out

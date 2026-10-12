@@ -1,0 +1,305 @@
+/* What the game asks of the tower (src/pc/tower/tower.c), with the game's
+ * bytes as plain variables: whether the tower is open ("unlock": always,
+ * after_ending by the save's byte 0x3DE, the duelists' conditions), the
+ * floor's rules only while its duel is the one being fought, its LP and
+ * deck, the duelists' "tower" conditions and tower-only duelists, and the
+ * progress beside the save: written, read back by a new save's load, kept
+ * apart by duelist code, the other towers' sections kept, and carried by a
+ * save state. */
+#include "pc/tower/tower.h"
+#include "pc/mods/json.h"
+#include "pc/guest/state.h"
+#include "pc/saves/save_slots.h"
+#include <assert.h>
+#include <stdarg.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/stat.h>
+#include <time.h>
+#ifndef _WIN32
+#include <unistd.h>
+#endif
+#include "pc/compat/fs.h"
+
+/* --- the game's bytes and the port's services, as tower.c reaches them --- */
+
+TowerState gTower;
+unsigned char D_8009B26C, D_8009B368;
+unsigned short gDuel_awPlayerDeck[0x340];     /* the running save, SaveDataState */
+static unsigned char *save = (unsigned char *)gDuel_awPlayerDeck;
+
+static int notes;
+void Mods_Note(const char *id, const char *format, ...) { (void)id; (void)format; notes++; }
+int Mods_LoadedCount(void) { return 0; }
+int Mods_Loaded(int index) { return index; }
+int Mods_Active(int mod) { (void)mod; return 1; }
+const char *Mods_Id(int mod) { (void)mod; return "t"; }
+const JsonValue *Mods_Manifest(int mod) { (void)mod; return NULL; }
+
+int Duelists_Valid(int duelist) { return duelist >= 1 && duelist <= 41; }
+int Duelists_Named(const char *text) { return atoi(text) > 0 ? atoi(text) : -1; }
+int Cards_Valid(int id) { return id >= 1 && id <= 722; }
+int Cards_Named(const char *text) { return atoi(text); }
+int Tables_TerrainNamed(const char *text) { return atoi(text) >= 1 && atoi(text) <= 6 ? atoi(text) : -1; }
+/* The duelists' conditions: "beat" is met by the save's first byte. */
+int Duelists_ConditionsMet(const void *state, const char *beat, int wins, int story, const char *card, int copies)
+{
+    (void)wins; (void)story; (void)card; (void)copies;
+    return !beat[0] || ((const unsigned char *)state)[0] != 0;
+}
+static unsigned char flags[256];
+void Library_UpdateCardUsedFlag(int flag) { flags[(flag & 0x7FF) >> 3] |= (unsigned char)(0x80 >> (flag & 7)); }
+
+int Log_Wanted(int channel) { (void)channel; return 0; }
+void Log_Printf(int channel, const char *format, ...) { (void)channel; (void)format; }
+
+static char user[512];
+static int slot = 0;
+static unsigned tokens[SAVE_SLOT_COUNT] = {0x11111111, 0x22222222, 0x33333333};
+int SaveMenu_CurrentSlot(void) { return slot; }
+unsigned SaveSlots_Token(int at) { return at >= 0 && at < SAVE_SLOT_COUNT ? tokens[at] : 0; }
+int SaveSlots_ReadToken(int at, unsigned *token) { *token = SaveSlots_Token(at); return 0; }
+int Paths_User(char *out, size_t size, const char *relative)
+{
+    return snprintf(out, size, "%s/%s", user, relative) >= (int)size;
+}
+int Paths_MakeDirs(const char *path)
+{
+    return mkdir(path, 0755);
+}
+
+/* A save state's chunks, kept in memory: one at a time is enough here. */
+struct MemoriesState { int loading; char tag[2][32]; unsigned char data[2][4096]; size_t size[2]; int count; };
+int Memories_StateLoading(const MemoriesState *state) { return state->loading; }
+int Memories_StateChunk(MemoriesState *state, const char *tag, const MemoriesStateField *fields, size_t count)
+{
+    int i;
+    size_t at = 0, k;
+    if (!state->loading) {
+        i = state->count++;
+        snprintf(state->tag[i], sizeof(state->tag[i]), "%s", tag);
+        for (k = 0; k < count; k++) {
+            memcpy(state->data[i] + at, fields[k].data, fields[k].size);
+            at += fields[k].size;
+        }
+        state->size[i] = at;
+        return 1;
+    }
+    for (i = 0; i < state->count; i++) {
+        if (strcmp(state->tag[i], tag)) continue;
+        for (k = 0; k < count; k++) {
+            memcpy(fields[k].data, state->data[i] + at, fields[k].size);
+            at += fields[k].size;
+        }
+        return 1;
+    }
+    return 0;
+}
+
+/* --- the cases ------------------------------------------------------------------ */
+
+static JsonDocument *documents[8];
+static int document_count;
+
+static void tower_of(const char *text)
+{
+    char error[256];
+    JsonDocument *document = Json_Parse(text, error, sizeof(error));
+    assert(document);
+    documents[document_count++] = document;
+    Tower_Reset();
+    Tower_Read("t", Json_Root(document));
+    assert(Tower_Config());
+}
+
+static void set_code(unsigned code) { memcpy(save + 0x334, &code, sizeof(code)); }
+
+static void unlocks(void)
+{
+    tower_of("{\"tower\": {\"floors\": [{\"duelist\": 1}]}}");
+    memset(save, 0, sizeof(gDuel_awPlayerDeck));
+    assert(Tower_Unlocked());
+    tower_of("{\"tower\": {\"unlock\": \"after_ending\", \"floors\": [{\"duelist\": 1}]}}");
+    assert(!Tower_EndingSeen(save) && !Tower_Unlocked());
+    save[0x3DE] = 1;   /* Main_RunCredits: field_3DE |= 3 */
+    assert(Tower_EndingSeen(save) && Tower_Unlocked());
+    save[0x3DE] = 0;
+    tower_of("{\"tower\": {\"unlock\": {\"beat\": \"7\", \"after_ending\": true}, \"floors\": [{\"duelist\": 1}]}}");
+    assert(!Tower_Unlocked());
+    save[0] = 1;                         /* beaten */
+    assert(!Tower_Unlocked());           /* the ending too */
+    save[0x3DE] = 2;
+    assert(Tower_Unlocked());
+    tower_of("{\"tower\": {\"unlock\": \"later\", \"floors\": [{\"duelist\": 1}]}}");
+    assert(!Tower_Unlocked());
+    Tower_Reset();
+    assert(!Tower_Unlocked());
+}
+
+static void rules(void)
+{
+    unsigned short deck[TOWER_DECK];
+    tower_of("{\"tower\": {\"floors\": [{\"duelist\": 1}, {\"duelist\": 2, \"no_fusions\": true, \"no_equips\": true,"
+             " \"life_points\": {\"opponent\": 300}, \"deck\": {\"5\": 40}}]}}");
+    memset(&gTower, 0, sizeof(gTower));
+    D_8009B26C = 3 | 0xC0;
+    D_8009B368 = TOWER_MODE;
+    /* Not armed: nothing. */
+    assert(!Tower_DuelRules() && Tower_StartingLifePoints(1, 8000) == 8000 && !Tower_OpponentDeck(deck));
+    gTower.armed = 2;
+    gTower.rules = TOWER_RULE_NO_FUSIONS | TOWER_RULE_NO_EQUIPS;
+    assert(Tower_DuelRules() == (TOWER_RULE_NO_FUSIONS | TOWER_RULE_NO_EQUIPS));
+    assert(Tower_Refuses(TOWER_RULE_NO_FUSIONS, 1, 2, 3) && Tower_Refuses(TOWER_RULE_NO_EQUIPS, 4, 5, 5));
+    assert(Tower_StartingLifePoints(0, 8000) == 8000 && Tower_StartingLifePoints(1, 8000) == 300);
+    assert(Tower_OpponentDeck(deck) && deck[0] == 5 && deck[39] == 5);
+    /* In its 3D battle (mode 1) too. */
+    D_8009B26C = 1 | 0xC0;
+    assert(Tower_DuelRules());
+    /* A duel someone else armed (its own way back), or another screen: no
+     * rule, though `armed` was left (a jump out of the tower's duel). */
+    D_8009B368 = 6;
+    assert(!Tower_DuelRules() && !Tower_Refuses(TOWER_RULE_NO_FUSIONS, 1, 2, 3));
+    assert(Tower_StartingLifePoints(1, 8000) == 8000 && !Tower_OpponentDeck(deck));
+    D_8009B368 = TOWER_MODE;
+    D_8009B26C = 6 | 0xC0;
+    assert(!Tower_DuelRules());
+    /* Floor 1 has no rules, LP or deck of its own. */
+    D_8009B26C = 3 | 0xC0;
+    gTower.armed = 1;
+    gTower.rules = 0;
+    assert(!Tower_DuelRules() && Tower_StartingLifePoints(0, 7000) == 7000 && !Tower_OpponentDeck(deck));
+    gTower.armed = 0;
+}
+
+static void duelists(void)
+{
+    tower_of("{\"tower\": {\"floors\": [{\"duelist\": 40}, {\"duelist\": 2, \"reward\": {\"unlock_duelist\": [41, 9]}},"
+             " {\"duelist\": 3}]}}");
+    memset(&gTower, 0, sizeof(gTower));
+    memset(save, 0, sizeof(gDuel_awPlayerDeck));
+    Tower_Frame();
+    assert(!Tower_ConditionMet(1) && !Tower_ConditionMet(0) && !Tower_FreesDuelist(40) && !Tower_FreesDuelist(41));
+    Tower_ApplyResult(Tower_Config(), &gTower.progress, 0, 1);
+    assert(Tower_ConditionMet(1) && !Tower_ConditionMet(2) && Tower_FreesDuelist(40) && !Tower_FreesDuelist(41));
+    Tower_ApplyResult(Tower_Config(), &gTower.progress, 1, 1);
+    assert(Tower_ConditionMet(2) && Tower_FreesDuelist(41) && !Tower_FreesDuelist(3));
+    /* The reward's disc duelists: their Free Duel flag (0x6E0 + id), not the
+     * campaign's 0x1F + id. */
+    memset(flags, 0, sizeof(flags));
+    Tower_UnlockRetailDuelists(&Tower_Config()->floors[1]);
+    assert(flags[(0x6E0 + 9) >> 3] & (0x80 >> ((0x6E0 + 9) & 7)));
+    assert(!(flags[(0x1F + 9) >> 3] & (0x80 >> ((0x1F + 9) & 7))));
+    Tower_ApplyResult(Tower_Config(), &gTower.progress, 2, 1);
+    assert(Tower_ConditionMet(0) && Tower_ConditionMet(3));
+    /* No tower (its mod off): nothing is met. */
+    Tower_Reset();
+    assert(!Tower_ConditionMet(1) && !Tower_FreesDuelist(40));
+}
+
+static int exists(const char *relative)
+{
+    char path[1024];
+    FILE *file;
+    snprintf(path, sizeof(path), "%s/%s", user, relative);
+    file = fopen(path, "r");
+    if (file) fclose(file);
+    return file != NULL;
+}
+
+static void beside_the_save(void)
+{
+    MemoriesState state;
+    char path[1024];
+    FILE *file;
+    tower_of("{\"tower\": {\"floors\": [{\"duelist\": 1, \"checkpoint\": true}, {\"duelist\": 2}, {\"duelist\": 3}]}}");
+    memset(&gTower, 0, sizeof(gTower));
+    memset(save, 0, sizeof(gDuel_awPlayerDeck));
+    set_code(0xC0DE);
+    Tower_Frame();
+    assert(gTower.progress.owner == 0xC0DE && gTower.progress.tower == Tower_Identity(Tower_Config()));
+    /* Nothing climbed: no file. */
+    slot = 0;
+    Tower_SaveWritten(save);
+    assert(!exists("tower/11111111.txt"));
+    /* Floor 1 won, saved to slot 0; another tower's section already there
+     * (its mod off this run) is kept. */
+    Tower_ApplyResult(Tower_Config(), &gTower.progress, 0, 1);
+    snprintf(path, sizeof(path), "%s/tower", user);
+    Paths_MakeDirs(path);
+    snprintf(path, sizeof(path), "%s/tower/11111111.txt", user);
+    file = fopen(path, "w");
+    fputs("tower other\nidentity 00000009\nfloor 2\nend\n", file);
+    fclose(file);
+    gTower.progress.floor = 1;
+    {   /* loaded first, so its foreign section is known */
+        TowerProgress kept = gTower.progress;
+        Tower_SaveLoaded(save);       /* the file has no section of ours: a fresh climb */
+        assert(gTower.progress.floor == 0);
+        gTower.progress = kept;
+    }
+    Tower_SaveWritten(save);
+    assert(exists("tower/11111111.txt"));
+    /* NEW GAME: another code, nothing climbed. */
+    set_code(0xBEEF);
+    Tower_Frame();
+    assert(gTower.progress.floor == 0 && !Tower_FloorCleared(&gTower.progress, 0));
+    /* The save loaded again: its floor and checkpoint back. */
+    set_code(0xC0DE);
+    Tower_SaveLoaded(save);
+    assert(gTower.progress.floor == 1 && gTower.progress.checkpoint == 1 && Tower_FloorCleared(&gTower.progress, 0));
+    /* A save state carries the other towers' lines, the rest is game data. */
+    memset(&state, 0, sizeof(state));
+    Tower_State(&state);
+    assert(state.count == 2 && strstr((const char *)state.data[1], "tower other"));
+    state.loading = 1;
+    Tower_SaveLoaded(save);
+    Tower_State(&state);
+    /* Saved again: both sections. */
+    Tower_SaveWritten(save);
+    file = fopen(path, "r");
+    {
+        char text[1024];
+        size_t n = fread(text, 1, sizeof(text) - 1, file);
+        text[n] = 0;
+        assert(strstr(text, "tower t\n") && strstr(text, "tower other\nidentity 00000009\nfloor 2\nend\n"));
+        assert(strstr(text, "floor 1\ncheckpoint 1\n"));
+    }
+    fclose(file);
+    /* The slot's file is of the save it held before (another code): none of
+     * its progress, and a slot no save goes with any more loses its file. */
+    set_code(0xF00D);
+    Tower_SaveLoaded(save);
+    assert(gTower.progress.floor == 0);
+    tokens[0] = 0x44444444;
+    slot = 0;
+    Tower_ApplyResult(Tower_Config(), &gTower.progress, 0, 1);
+    Tower_SaveWritten(save);
+    assert(exists("tower/44444444.txt") && !exists("tower/11111111.txt"));
+}
+
+int main(void)
+{
+    int i;
+    snprintf(user, sizeof(user), "tower-game-test-%ld", (long)time(NULL));
+    Paths_MakeDirs(user);
+    unlocks();
+    rules();
+    duelists();
+    beside_the_save();
+    Tower_Reset();
+    for (i = 0; i < document_count; i++) Json_Free(documents[i]);
+    {   /* The folder the cases wrote, gone. */
+        char path[1024];
+        static const char *const files[] = {"tower/11111111.txt", "tower/44444444.txt"};
+        for (i = 0; i < 2; i++) {
+            snprintf(path, sizeof(path), "%s/%s", user, files[i]);
+            remove(path);
+        }
+        snprintf(path, sizeof(path), "%s/tower", user);
+        rmdir(path);
+        rmdir(user);
+    }
+    printf("tower game: ok\n");
+    return 0;
+}

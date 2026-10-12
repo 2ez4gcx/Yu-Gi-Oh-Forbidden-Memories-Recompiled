@@ -605,6 +605,34 @@ if(BUILD_TESTING)
         target_compile_options(memories_title_config_test PRIVATE -Wall -Wextra -Wpedantic -Werror)
     endif()
     add_test(NAME pc_title_config COMMAND memories_title_config_test)
+    # The mods' "tower" key and a save's progress in it
+    # (src/pc/tower/tower_config.c): manifests and numbers only.
+    add_executable(memories_tower_test tests/pc/tower_test.c src/pc/mods/json.c)
+    target_include_directories(memories_tower_test PRIVATE src)
+    target_compile_definitions(memories_tower_test PRIVATE MEMORIES_PC)
+    if(NOT MSVC)
+        target_compile_options(memories_tower_test PRIVATE -Wall -Wextra -Wpedantic -Werror)
+    endif()
+    if(MEMORIES_SANITIZERS)
+        target_compile_options(memories_tower_test PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
+        target_link_options(memories_tower_test PRIVATE -fsanitize=address,undefined)
+    endif()
+    add_test(NAME pc_tower COMMAND memories_tower_test)
+    # What the game asks of the tower (src/pc/tower/tower.c): its unlock,
+    # the floor's rules only in its own duel, the duelists' conditions, and
+    # the progress beside the save, with the game's bytes as variables.
+    add_executable(memories_tower_game_test tests/pc/tower_game_test.c src/pc/tower/tower.c
+        src/pc/tower/tower_config.c src/pc/mods/json.c)
+    target_include_directories(memories_tower_game_test PRIVATE src)
+    target_compile_definitions(memories_tower_game_test PRIVATE MEMORIES_PC)
+    if(NOT MSVC)
+        target_compile_options(memories_tower_game_test PRIVATE -Wall -Wextra -Wpedantic -Werror)
+    endif()
+    if(MEMORIES_SANITIZERS)
+        target_compile_options(memories_tower_game_test PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
+        target_link_options(memories_tower_game_test PRIVATE -fsanitize=address,undefined)
+    endif()
+    add_test(NAME pc_tower_game COMMAND memories_tower_game_test)
     # The mods' "ui" key as read (src/pc/platform/ui_config.c): manifests only,
     # so at the host's own width too.
     add_executable(memories_ui_config_test tests/pc/ui_config_test.c src/pc/mods/json.c)

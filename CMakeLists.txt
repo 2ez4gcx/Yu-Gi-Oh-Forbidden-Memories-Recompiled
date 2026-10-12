@@ -546,6 +546,36 @@ if(BUILD_TESTING)
     endif()
     add_test(NAME pc_cards_order_found COMMAND memories_cards_order_test found)
     add_test(NAME pc_cards_order_moved COMMAND memories_cards_order_test b-first)
+    # Custom monster types (API 12, cards.c's "card_types"/"monster_types"):
+    # a retail type renamed, the whole 24-255 bank, a retail card converted
+    # to and from a custom monster type, a name collision, two mods
+    # redefining one id, and a name the game has no letters for.
+    add_executable(memories_card_types_test tests/pc/card_types_test.c src/pc/cards/stars.c ${MOD_TEST_SOURCES}
+                   src/pc/cards/monster_effects.c tests/pc/effect_groups_stub.c)
+    target_include_directories(memories_card_types_test PRIVATE src)
+    target_compile_definitions(memories_card_types_test PRIVATE MEMORIES_PC)
+    target_link_libraries(memories_card_types_test PRIVATE m Threads::Threads)
+    if(NOT MSVC)
+        target_compile_options(memories_card_types_test PRIVATE -Wall -Wextra)
+    endif()
+    add_test(NAME pc_card_types_rename COMMAND memories_card_types_test rename)
+    add_test(NAME pc_card_types_range COMMAND memories_card_types_test range)
+    add_test(NAME pc_card_types_magic_to_monster COMMAND memories_card_types_test magic-to-monster)
+    add_test(NAME pc_card_types_monster_to_trap COMMAND memories_card_types_test monster-to-trap)
+    add_test(NAME pc_card_types_collision COMMAND memories_card_types_test collision)
+    add_test(NAME pc_card_types_multi_mod COMMAND memories_card_types_test multi-mod)
+    add_test(NAME pc_card_types_bad_glyphs COMMAND memories_card_types_test bad-glyphs)
+    # Custom monster type icons (type_icons.c): a successful load's slot
+    # math, a missing/corrupt PNG's diagnostic and cached failure, a lost HD
+    # registration's diagnostic, and the mark/cell round trip the duel's and
+    # the card view's drawing use to find a type's icon.
+    add_executable(memories_type_icons_test tests/pc/type_icons_test.c)
+    target_include_directories(memories_type_icons_test PRIVATE src)
+    target_compile_definitions(memories_type_icons_test PRIVATE MEMORIES_PC)
+    if(NOT MSVC)
+        target_compile_options(memories_type_icons_test PRIVATE -Wall -Wextra -Wpedantic -Werror)
+    endif()
+    add_test(NAME pc_type_icons COMMAND memories_type_icons_test)
     add_executable(memories_free_duel_progress_test tests/pc/free_duel_progress_test.c tests/pc/duelists_stubs.c src/pc/mods/json.c)
     target_include_directories(memories_free_duel_progress_test PRIVATE src)
     target_compile_definitions(memories_free_duel_progress_test PRIVATE MEMORIES_PC)
@@ -997,7 +1027,7 @@ if(BUILD_TESTING)
     # (src/pc/guest/low_memory.h): real functions in a 64-bit clang build,
     # malloc and free elsewhere, where low_memory.c compiles to nothing.
     foreach(target memories_duelists_test memories_stars_test memories_cards_stars_test memories_cards_order_test
-                   memories_cards_identity_test memories_card_notes_test)
+                   memories_cards_identity_test memories_card_notes_test memories_card_types_test)
         if(TARGET ${target})
             target_sources(${target} PRIVATE src/pc/guest/low_memory.c)
         endif()

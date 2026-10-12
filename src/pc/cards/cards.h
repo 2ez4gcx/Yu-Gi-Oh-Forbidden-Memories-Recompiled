@@ -125,9 +125,10 @@ const char *Cards_TypeName(int type);
  * Retail types deliberately return NULL: their icons remain the disc/HD-pack
  * assets rather than becoming global replacements. */
 const char *Cards_TypeIcon(int type);
-/* A custom type's name, glyph-encoded (0xFF-terminated) for the card view's
- * text stream (func_80037DA4), or NULL for a retail type or one with no
- * name: Cards_TypeName's UTF-8 is not the game's own glyph codes. */
+/* A mod's own name for the type, glyph-encoded (0xFF-terminated) for the
+ * card view's text stream (func_80037DA4): a custom type's, or a retail
+ * type's a mod renamed. NULL where the disc's own spelling stands.
+ * Cards_TypeName's UTF-8 is not the game's own glyph codes. */
 const unsigned char *Cards_TypeNameText(int type);
 int Cards_IsMonsterType(int type);
 int Cards_Type(int id);

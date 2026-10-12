@@ -4,6 +4,7 @@
 #include "pc/render/soft_gpu.h"
 #include "pc/render/texture_pack.h"
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 
 #define TYPE_LIMIT 256
@@ -44,6 +45,7 @@ int TypeIcons_IconCell(unsigned code, int *tpage, int *u, int *v, int *clut_x, i
 void TypeIcons_Clear(void)
 {
     memset(made, 0, sizeof(made));
+    pending = 0;
     TexturePack_BankSpritesClear(TEXTURE_BANK_OWNER_TYPE_ICONS);
 }
 
@@ -66,13 +68,17 @@ int TypeIcons_Cell(int type, int *tpage, int *u, int *v, int *clut)
     if (!path || type < 24 || type >= TYPE_LIMIT || !(bank = SoftGpu_Bank(BANK))) return 0;
     if (!made[type]) {
         made[type] = 2;
-        if (!CardArt_IconFromImage(path, NULL, pixels, palette, why, sizeof(why))) return 0;
+        if (!CardArt_IconFromImage(path, NULL, pixels, palette, why, sizeof(why))) {
+            fprintf(stderr, "memories-pc: type %d: %s\n", type, why);
+            return 0;
+        }
         memcpy(&bank[(CLUT_Y + type - 24) * SOFT_GPU_WIDTH], palette, sizeof(palette));
         store(bank, type, pixels);
         TexturePack_BankSpritesUseOwner(TEXTURE_BANK_OWNER_TYPE_ICONS);
         slot = type - 24;
-        TexturePack_AddBankSprite(BANK, PAGE * 64, 0, 0, 0, CLUT_Y + slot, (slot & 15) * SIDE, (slot >> 4) * SIDE,
-                                  SIDE, SIDE, path);
+        if (!TexturePack_AddBankSprite(BANK, PAGE * 64, 0, 0, 0, CLUT_Y + slot, (slot & 15) * SIDE, (slot >> 4) * SIDE,
+                                       SIDE, SIDE, path))
+            fprintf(stderr, "memories-pc: type %d: its icon has no HD replacement (the console-resolution one still applies)\n", type);
         made[type] = 1;
     }
     if (made[type] != 1) return 0;

@@ -473,6 +473,10 @@ static unsigned char *encode_type_name(const char *mod, const char *text, const 
         }
         length += put_glyph(glyphs + length, code);
     }
+    if (!length) {
+        Mods_Note(mod, "%s.types[%d]: \"name\" has no letter the game can display; type left out", where, index);
+        return NULL;
+    }
     glyphs[length] = 0xFF;
     return glyphs;
 }
@@ -631,8 +635,28 @@ static void add_card_types_section(const char *mod, const char *directory, const
             Mods_Note(mod, "%s.types[%d]: \"name\" must not be empty", where, index);
             continue;
         }
-        type_names[id] = Json_String(name, ""); /* later mods deliberately replace earlier names */
-        if (id > CARD_TYPE_EQUIP) type_name_text[id] = encode_type_name(mod, Json_String(name, ""), where, index);
+        {
+            /* Encoded first: a name with no letter the game can display
+             * (encode_type_name) leaves the whole type out, the way an
+             * invalid id or an empty name already does, rather than
+             * registering an identity nothing can show. */
+            unsigned char *encoded = encode_type_name(mod, Json_String(name, ""), where, index);
+            int other;
+            if (!encoded) continue;
+            /* Cards_TypeNamed returns the first match by id: a name that
+             * collides with an earlier type's (any mod's, retail or
+             * custom) silently shadows that type whenever this one's name
+             * is looked up by text instead of id. */
+            for (other = 0; other < CARD_TYPE_LIMIT; other++) {
+                if (other != id && type_names[other] && same_letters(Json_String(name, ""), type_names[other])) {
+                    Mods_Note(mod, "%s.types[%d]: \"%s\" is also type %d's name; looking it up by name always finds %d",
+                              where, index, Json_String(name, ""), other, other);
+                    break;
+                }
+            }
+            type_names[id] = Json_String(name, ""); /* later mods deliberately replace earlier names */
+            type_name_text[id] = encoded;
+        }
         type_icons[id][0] = '\0';
         if (icon) {
             if (!Paths_Contained(icon) || !directory ||
@@ -771,7 +795,7 @@ const char *Cards_TypeIcon(int type)
 
 const unsigned char *Cards_TypeNameText(int type)
 {
-    return type > CARD_TYPE_EQUIP && type < CARD_TYPE_LIMIT ? type_name_text[type] : NULL;
+    return type >= 0 && type < CARD_TYPE_LIMIT ? type_name_text[type] : NULL;
 }
 
 int Cards_IsMonsterType(int type)

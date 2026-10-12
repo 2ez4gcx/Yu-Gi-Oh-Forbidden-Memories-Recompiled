@@ -175,9 +175,10 @@ void func_80037DA4(DuelEffectChannel *object)
 #ifdef MEMORIES_PC
         if (kind == 1 || kind == 2)
             CardTextColors_Apply(object, CARD_TEXT_COLOR_GUARDIAN_STAR, star);
-        /* A type past the disc's 24 (cards.h): its name, not the retail
-           bank's string for the Dragon compatibility value id holds. */
-        if (kind == 0 && full_type > CARD_TYPE_EQUIP && Cards_TypeNameText(full_type) != 0) {
+        /* A mod's own name for the type, whether past the disc's 24
+           (cards.h) or a rename of one of those: the retail bank only has
+           the disc's own spelling. */
+        if (kind == 0 && Cards_TypeNameText(full_type) != 0) {
             object->stream_58++;
             text = (u8 *)Cards_TypeNameText(full_type);
             goto store;

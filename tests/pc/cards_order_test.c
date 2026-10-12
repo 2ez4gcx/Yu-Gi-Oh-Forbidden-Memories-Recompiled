@@ -135,6 +135,9 @@ int TexturePack_AddMade(const void *pixels, int words, int rows, int bpp, const 
 }
 int Language_Current(void) { return 0; }
 const char *Language_Code(int which) { (void)which; return "en-us"; }
+/* The custom type icon bank (type_icons.c): neither mod here declares a
+ * "card_types" icon, so a no-op stands in for it. */
+void TypeIcons_Clear(void) {}
 
 /* --- fixtures -------------------------------------------------------- */
 

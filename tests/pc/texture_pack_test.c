@@ -537,6 +537,52 @@ static void rank_preference(void)
     disc_ready = 0;
 }
 
+/* A later wide image must still override all rows when an earlier pack has
+ * more entries than the former bounded reverse lookup considered. */
+static void large_rank_preference(void)
+{
+    char wide[1024], rows[1024], manifest[32768];
+    uint16_t upload[4 * 128] = {0};
+    size_t used;
+    int i, y;
+    make_dir("large-rank");
+    make_dir("large-rank/wide");
+    make_dir("large-rank/rows");
+    write_solid_png("large-rank/wide/wide.png", 255, 0, 0);
+    used = (size_t)snprintf(manifest, sizeof(manifest), "[");
+    for (i = 0; i < 128; i++) {
+        char name[64];
+        int written;
+        snprintf(name, sizeof(name), "large-rank/rows/row%d.png", i);
+        write_solid_png(name, 0, 255, 0);
+        written = snprintf(manifest + used, sizeof(manifest) - used,
+                           "%s{\"file\":\"row%d.png\",\"archive\":\"WA_MRG.MRG\",\"offset\":%d,\"words\":4,\"rows\":1,\"bpp\":16}",
+                           i ? "," : "", i, i * 8);
+        assert(written > 0 && (size_t)written < sizeof(manifest) - used);
+        used += (size_t)written;
+    }
+    assert(used + 2 <= sizeof(manifest));
+    strcpy(manifest + used, "]");
+    write_text("large-rank/wide/manifest.json",
+               "[{\"file\":\"wide.png\",\"archive\":\"WA_MRG.MRG\",\"offset\":0,\"words\":4,\"rows\":128,\"bpp\":16}]");
+    write_text("large-rank/rows/manifest.json", manifest);
+    snprintf(wide, sizeof(wide), "%s/large-rank/wide", root);
+    snprintf(rows, sizeof(rows), "%s/large-rank/rows", root);
+    memset(disc, 0, sizeof(disc));
+    memcpy(disc + 2048, upload, sizeof(upload));
+    disc_ready = 1;
+    TextureDump_SetDiscFiles(disc_file);
+    assert(TexturePack_Load(rows, 1, NULL, NULL, NULL, 0) == 128);
+    assert(TexturePack_Load(wide, 2, NULL, NULL, NULL, 0) == 1);
+    TexturePack_Service();
+    TextureDump_Delivered(upload, sizeof(upload), 1, 0);
+    SoftGpu_Load(0, 0, 4, 128, upload);
+    TexturePack_Service();
+    for (y = 0; y < 128; y++) assert(*TextureDump_Cell(0, y, 0) == (0x8000 | 0x001f));
+    TexturePack_Unload();
+    disc_ready = 0;
+}
+
 /* The same asset shipped twice, once under a setting that is on and once
  * under one that is off: the enabled copy must be the one used. */
 static void duplicate_settings(void)
@@ -585,6 +631,7 @@ int main(void)
     named_folder();
     shared_word();
     rank_preference();
+    large_rank_preference();
     duplicate_settings();
     field_thumbnail(0);
     field_thumbnail(1);

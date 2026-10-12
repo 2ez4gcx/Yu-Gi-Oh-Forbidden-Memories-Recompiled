@@ -358,7 +358,7 @@ static int locate(uint32_t offset, int *row, int *word)
      * may cover it: a later-loaded pack wins regardless of its geometry.
      * Within one pack, the closest start remains the more specific reading,
      * as it was before packs had ranks. */
-    for (i = low - 1; i >= 0 && i >= low - 64; i--) {
+    for (i = low - 1; i >= 0; i--) {
         const Entry *entry = &entries[i];
         uint32_t delta = offset - entry->offset;
         int found_row = -1, found_word = 0;
@@ -410,7 +410,7 @@ static int locate_texel(uint32_t offset, int texel, int *row, int *word)
     }
     /* As locate(): a later-loaded pack wins wherever its crop covers this
      * texel.  Within one pack, the closest start wins. */
-    for (i = low - 1; i >= 0 && i >= low - 64; i--) {
+    for (i = low - 1; i >= 0; i--) {
         const Entry *entry = &entries[i];
         uint32_t delta = offset - entry->offset;
         int r = -1, c = 0, x;
@@ -687,6 +687,10 @@ static void paint(int x, int y, int w, int h)
                         }
                         continue;
                     }
+                    /* A selected 4-bit texture can overlap an 8-bit one.
+                     * Its texel number is not an index into the 8-bit
+                     * image, so leave incompatible fallback texels alone. */
+                    if (owner->bpp != entry->bpp) continue;
                 }
                 color = owner->pixels[orow * owner->words * per + oword * per + k];
                 for (s = 0; s < 4 / per; s++) *TextureDump_Cell(vx, vy, sub + s) = color;

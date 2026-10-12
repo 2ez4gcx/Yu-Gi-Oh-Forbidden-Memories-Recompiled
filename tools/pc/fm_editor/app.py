@@ -174,6 +174,7 @@ class App(Editing, tk.Tk):
                             ("Starter decks and pools", "notes/starter-deck.md"),
                             ("Card packs", "notes/card-packs.md"),
                             ("Added duelists and portraits", "notes/more-duelists.md"),
+                            ("Tower mode", "notes/tower-mode.md"),
                             ("Making mods", "notes/modding.md")):
             helps.add_command(label=label, command=lambda path=path: self.open_guide(path))
         helps.add_separator()

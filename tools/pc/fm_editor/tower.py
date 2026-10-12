@@ -36,8 +36,12 @@ TERRAINS = ("none", "Forest", "Wasteland", "Mountain", "Meadow", "Sea", "Dark")
 TERRAIN_WORDS = {"none": 0, "0": 0, "forest": 1, "wasteland": 2, "mountain": 3, "sogen": 4, "meadow": 4,
                  "umi": 5, "sea": 5, "yami": 6, "dark": 6}
 UNLOCKS = ("always", "after_ending", "conditions")
-TOWER_KEYS = ("name", "label", "music", "unlock", "on_lose", "scene", "dim", "intro", "ending", "lose", "floors")
+TOWER_KEYS = ("name", "label", "music", "unlock", "on_lose", "on_leave", "drops", "save_states", "cheats", "scene",
+              "dim", "intro", "ending", "lose", "floors")
+ON_LEAVE = ("resume", "checkpoint", "restart")
+DROPS_DEFAULT, DROPS_MAX = 1, 99
 FLOOR_KEYS = ("duelist", "field", "deck", "life_points", "no_fusions", "no_equips", "reward", "checkpoint",
+              "unlock_opponent",
               "before", "after")
 REWARD_KEYS = ("card", "cards", "starchips", "unlock_duelist")
 UNLOCK_KEYS = ("after_ending", "beat", "wins", "story", "card", "copies")
@@ -569,6 +573,15 @@ def check(tower, duelist_named, card_named) -> list:
         add("error", "tower.unlock", "is \"always\", \"after_ending\" or an object of conditions; the tower stays locked")
     if tower.get("on_lose") not in (None, "checkpoint", "restart"):
         add("warning", "tower.on_lose", "is \"checkpoint\" or \"restart\"; checkpoint it is")
+    if tower.get("on_leave") is not None and str(tower["on_leave"]).lower() not in ON_LEAVE:
+        add("warning", "tower.on_leave", "is \"resume\", \"checkpoint\" or \"restart\"; resume it is")
+    drops = tower.get("drops")
+    if drops is not None and str(drops).lower() != "player" and \
+            (_number(drops) is None or not 1 <= _number(drops) <= DROPS_MAX):
+        add("warning", "tower.drops", f"is 1 to {DROPS_MAX} cards a won duel, or \"player\"; {DROPS_DEFAULT} it is")
+    for key in ("save_states", "cheats"):
+        if key in tower and not isinstance(tower[key], bool):
+            add("warning", f"tower.{key}", "is true or false, without quotes; left as if not written")
     if "scene" in tower:
         _check_scene(tower["scene"], "tower", add)
     if "dim" in tower and not isinstance(tower["dim"], bool):
@@ -762,6 +775,8 @@ def _check_floor(floor, where, duelist_named, card_named, add) -> bool:
         return False
     if "field" in floor and terrain_of(floor["field"]) is None:
         add("warning", f"{where}.field", "is none, Forest, Wasteland, Mountain, Meadow, Sea or Dark (1-6)")
+    if "unlock_opponent" in floor and not isinstance(floor["unlock_opponent"], bool):
+        add("warning", f"{where}.unlock_opponent", "is true or false, without quotes; left as if not written")
     for key in ("no_fusions", "no_equips", "checkpoint"):
         if key in floor and not isinstance(floor[key], bool):
             add("warning", f"{where}.{key}", "is true or false, without quotes")
@@ -820,3 +835,53 @@ def new_floor(duelist="1") -> dict:
 
 def copy(value):
     return _copy.deepcopy(value)
+
+
+# --- the guide and the example (the Tower tab's "How to build a tower") ------------------
+
+GUIDE = (
+    ("1. Turn it on", "Tick \"This mod has a tower\". The title's second menu gets a button for it (its label "
+     "below; TOWER without one). \"Start from an example\" fills in a small tower to change."),
+    ("2. The tower", "Name it, give the button its words and pick when it opens: always, after the save has seen "
+     "the game's ending, or on conditions (a duelist beaten, wins, a story flag, a card held)."),
+    ("3. Floors", "Add a floor for each duel, bottom first. Each has an opponent, a field, LP for either side, "
+     "rules (no fusions, no equips) and, if you like, the opponent's own forty cards. A checkpoint floor is "
+     "where a lost duel sends the player back to, and the tower offers a save there."),
+    ("4. Rewards and unlocks", "The first win of a floor gives its reward cards and starchips. Tick \"Unlock "
+     "this opponent in Free Duel when beaten\" to let the opponent onto the Free Duel grid, and pick more "
+     "duelists to unlock in the list beside it. A duelist the mod adds that should be the tower's alone is "
+     "ticked in \"The tower's own duelists\": hidden in Free Duel until the tower lets it out."),
+    ("5. Stories", "Write what is said before the first climb, before and after each floor, at the top and "
+     "after a loss: a line of text a page. The Stage box puts a scene behind them and the campaign's "
+     "characters (or your own PNGs) on top: click a story, then a button."),
+    ("6. The rules of the run", "On leaving: \"resume\" comes back where the player was, \"checkpoint\" or "
+     "\"restart\" take the climb back (no save keeps a floor past it). A loss goes back to the checkpoint or "
+     "to floor 1. Cards a won duel gives: 1 by default, whatever the player's Card drops setting says; "
+     "\"player\" follows it. Untick save states or cheats to keep them out of the tower."),
+    ("7. Try it", "Save the mod, turn it on in the game's Mods window and climb. The status line above lists "
+     "anything the game would read otherwise than you meant."),
+)
+
+
+def example_tower() -> dict:
+    """A small tower that works as it is, for "Start from an example"."""
+    return {
+        "name": "The Example Tower",
+        "label": "TOWER",
+        "unlock": "always",
+        "on_lose": "checkpoint",
+        "intro": {"scene": "seal shrine", "characters": {"left": "Simon Muran"},
+                  "lines": [{"text": "Three floors stand between you and the top, my prince.", "speaker": "left"},
+                            {"text": "Win them all.", "speaker": "left"}]},
+        "ending": {"scene": "throne room", "lines": ["The tower is yours."]},
+        "lose": "Down you go. Try again.",
+        "floors": [
+            {"duelist": "Simon Muran", "checkpoint": True, "life_points": {"opponent": 4000},
+             "reward": {"cards": ["Kuriboh"], "starchips": 25},
+             "before": "Show me what you have learned.", "after": "Well fought. Climb on."},
+            {"duelist": "Teana", "field": "Forest", "no_fusions": True, "unlock_opponent": True,
+             "before": "Nobody fuses on this floor."},
+            {"duelist": "Seto", "no_equips": True, "reward": {"starchips": 100},
+             "before": "No equips here. Only your monsters."},
+        ],
+    }

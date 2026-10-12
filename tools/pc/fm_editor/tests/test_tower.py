@@ -315,6 +315,102 @@ class TowerTabTest(unittest.TestCase):
         tab.refresh()
         return app, tab
 
+    def test_guide_and_example(self):
+        """The tab's own help: the guide opens, and the example is a tower
+        the game reads without a note."""
+        p = project()
+        app, tab = self.make(p)
+        tab.show_guide()
+        self.assertTrue(tab.guide.winfo_exists())
+        tab.guide.destroy()
+        tab.start_example(ask=False)
+        self.assertEqual(p.other["tower"], tower.example_tower())
+        self.assertEqual(problems(p, p.other["tower"]), [])
+        self.assertTrue(tab.has.get() and len(tab.list.get_children()) == 3)
+        self.assertEqual(app.changes, 1)
+        self.assertTrue(tab.commit())
+        self.assertEqual(p.other["tower"], tower.example_tower())   # shown and committed untouched: as it is
+
+    def test_rules_of_the_run(self):
+        """on_leave, drops, save_states and cheats: shown, written only when
+        they differ from the defaults, kept as written."""
+        p = project()
+        app, tab = self.make(p)
+        self.assertEqual((tab.vars["on_leave"].get(), tab.vars["drops"].get(), tab.vars["save_states"].get(),
+                          tab.vars["cheats"].get()), ("resume", "1", True, True))
+        tab.vars["on_leave"].set("checkpoint")
+        tab.vars["drops"].set("player")
+        tab.vars["save_states"].set(False)
+        tab.vars["cheats"].set(False)
+        self.assertTrue(tab.commit())
+        written = p.other["tower"]
+        self.assertEqual((written["on_leave"], written["drops"], written["save_states"], written["cheats"]),
+                         ("checkpoint", "player", False, False))
+        self.assertEqual(problems(p, written), [])
+        tab.refresh()
+        self.assertEqual(tab.vars["drops"].get(), "player")
+        tab.vars["drops"].set("12")
+        tab.vars["on_leave"].set("resume")
+        tab.vars["save_states"].set(True)
+        self.assertTrue(tab.commit())
+        written = p.other["tower"]
+        self.assertEqual(written["drops"], 12)
+        self.assertNotIn("on_leave", written)
+        self.assertNotIn("save_states", written)
+        self.assertTrue(any(w == "tower.drops" for _, w, _ in problems(p, dict(written, drops=200))))
+        # As the game reads them: any case, and a drops it cannot read is the default.
+        p.other["tower"] = dict(written, on_leave="Checkpoint", drops="Player")
+        tab.refresh()
+        self.assertEqual((tab.vars["on_leave"].get(), tab.vars["drops"].get()), ("checkpoint", "player"))
+        self.assertTrue(tab.commit())
+        self.assertEqual((p.other["tower"]["on_leave"], p.other["tower"]["drops"]), ("Checkpoint", "Player"))
+        tab.vars["drops"].set("abc")
+        tab.vars["name"].set("Renamed")
+        self.assertTrue(tab.commit())
+        self.assertNotIn("drops", p.other["tower"])
+        self.assertEqual(tab.vars["drops"].get(), "1")
+
+    def test_unlock_opponent(self):
+        """The floor's checkbox: a tower-only opponent unlocks by default
+        (unticked writes false), a disc one does not (ticked writes true);
+        the picker adds more duelists to unlock."""
+        p = project()
+        app, tab = self.make(p)
+        tab.list.selection_set("1")      # the tower-only Ghost Simon
+        tab.pick()
+        self.assertTrue(tab.vars["unlock_opponent"].get())
+        self.assertIn("tower's own", tab.unlock_hint.cget("text"))
+        tab.vars["unlock_opponent"].set(False)
+        tab._unlock_touched()            # unticked by hand
+        self.assertIs(p.other["tower"]["floors"][1]["unlock_opponent"], False)
+        tab.list.selection_set("2")      # Seto (7), the disc's
+        tab.pick()
+        self.assertFalse(tab.vars["unlock_opponent"].get())
+        tab.vars["unlock_opponent"].set(True)
+        tab._unlock_touched()
+        tab.unlock_pick.set("Nitemare")
+        tab._add_unlock()
+        tab.unlock_pick.set("Rex Raptor")
+        tab._add_unlock()
+        tab._add_unlock()                # once
+        self.assertTrue(tab.commit())
+        floor = p.other["tower"]["floors"][2]
+        self.assertIs(floor["unlock_opponent"], True)
+        self.assertEqual(floor["reward"]["unlock_duelist"], ["Nitemare", "Rex Raptor"])
+        tab._remove_unlock()
+        self.assertTrue(tab.commit())
+        self.assertEqual(p.other["tower"]["floors"][2]["reward"]["unlock_duelist"], "Nitemare")
+        # A floor nobody touched keeps not saying it, and its box follows
+        # the opponent: changed to the tower-only Ghost Simon, ticked.
+        self.assertNotIn("unlock_opponent", p.other["tower"]["floors"][0])
+        tab.list.selection_set("0")
+        tab.pick()
+        self.assertFalse(tab.vars["unlock_opponent"].get())
+        tab.vars["duelist"].set("m:ghost")
+        self.assertTrue(tab.commit())
+        self.assertTrue(tab.vars["unlock_opponent"].get())
+        self.assertNotIn("unlock_opponent", p.other["tower"]["floors"][0])
+
     def test_tab_shows_and_keeps(self):
         p = project()
         app, tab = self.make(p)

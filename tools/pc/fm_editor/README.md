@@ -1064,25 +1064,41 @@ incomplete; fix the file before sharing the mod.
 A mod's `"tower"` ([Tower mode](../../../notes/tower-mode.md)): one more
 button in the title's second menu, a run of duels the save climbs. Check
 **This mod has a tower** to give the mod one (a floor against Simon Muran to
-start from); unchecked, the mod has none.
+start from); unchecked, the mod has none. **How to build a tower...** opens
+the tab's own guide, step by step, and **Start from an example** fills in a
+small working tower of three floors (stories, a reward, an unlock) to change.
+Help > **Tower mode** opens the notes with every key. Resting the pointer on
+the options below says what each does.
 
 - **The tower:** its name, the menu button's words (`TOWER` without),
   its music, when it opens (**always**, **after_ending**, or **conditions**:
-  beat, wins, story, hold, copies, and **and the ending seen**) and what a
-  loss does (**checkpoint** or **restart**).
+  beat, wins, story, hold, copies, and **and the ending seen**), what a
+  loss does (**checkpoint** or **restart**), its default **Scene**, and
+  **Draw the character not speaking darker**.
+- **The rules of the run:** **Leaving** (**resume**: come back where you
+  were; **checkpoint** or **restart**: the climb goes back, and no save keeps
+  a floor past it), **Cards a win** (1-99 cards a won tower duel gives,
+  whatever Game > Card drops says; **player** follows that setting), **Allow
+  save states in the tower** and **Allow cheats in the tower** (unticked: none
+  of them while the player is in it).
+- **Stage:** writes a story's bracketed lines (`[scene: ...]`, `[left:
+  ...]`, `[right: ...]`, `[pan: ...]`) into the story last clicked, with
+  pictures of the disc's scenes and characters made from your game files.
 - **Story:** what is told before the first climb, at the top and after a
-  loss. A line is one dialogue box; `@Seto: ...` is said by a duelist (an
-  id, a name, an identity: its portrait shows), `#8: ...` shows one of the
-  campaign's 25 portraits, `@none: ...` nobody's.
+  loss. A line is a page or more of the box; `@left:`, `@right:` or
+  `@Seto: ...` says who speaks, `#8: ...` adds one of the campaign's 25
+  portraits, `@none: ...` nobody's.
 - **The tower's own duelists:** the mod's added duelists (from the Duelists
-  tab); a checked one is kept off Free Duel until a won floor fights it or
-  names it in its reward (`"tower_only"`).
+  tab); a checked one is hidden in Free Duel until the tower lets it out
+  (`"tower_only"`).
 - **Floors**, bottom first: **Add floor**, **Remove**, **Up**, **Down**. The
   selected floor: its opponent, field, both sides' starting LP (empty: the
-  usual), **No fusions**, **No equips**, **Checkpoint**, the reward (cards,
-  starchips, duelists to unlock), its deck (a card a line, `Card x3`, forty in
-  all, or empty for the opponent's own) and its lines before the duel and
-  after a win.
+  usual), **No fusions**, **No equips**, **Checkpoint**, **Unlock this
+  opponent in Free Duel when beaten** (ticked by itself for a tower-only
+  opponent), the reward (cards, starchips, and **Also unlocks**: more
+  duelists picked from the list, **Add** / **Remove last**), its deck (a card
+  a line, `Card x3`, forty in all, or empty for the opponent's own) and its
+  lines before the duel and after a win.
 
 The line above the form lists what the game would leave out or read
 otherwise (the same as Conflicts' **Tower** area). A tower needs mod API 13,

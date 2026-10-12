@@ -22,6 +22,39 @@ STORY_HINT = ("A line is a page or more of the campaign's stone box, over a scen
               "own face. \\n breaks a line inside the box; a backslash keeps the next letter as it is.")
 THUMB_SCENE = (160, 80)
 THUMB_CHARACTER = (96, 96)
+DROPS_CHOICES = ("1", "2", "3", "5", "10", "player")
+
+
+class Tip:
+    """A line of help that shows under the pointer while it rests on a widget."""
+
+    def __init__(self, widget, text: str):
+        self.widget, self.text, self.window, self.job = widget, text, None, None
+        widget.bind("<Enter>", self._schedule, add="+")
+        widget.bind("<Leave>", self._hide, add="+")
+        widget.bind("<ButtonPress>", self._hide, add="+")
+
+    def _schedule(self, _event=None):
+        self._hide()
+        self.job = self.widget.after(450, self._show)
+
+    def _show(self):
+        self.job = None
+        if self.window is not None or not self.widget.winfo_ismapped():
+            return
+        self.window = tk.Toplevel(self.widget)
+        self.window.wm_overrideredirect(True)
+        self.window.wm_geometry(f"+{self.widget.winfo_rootx() + 12}+{self.widget.winfo_rooty() + self.widget.winfo_height() + 4}")
+        ttk.Label(self.window, text=self.text, wraplength=380, justify="left", relief="solid", borderwidth=1,
+                  padding=(6, 3)).pack()
+
+    def _hide(self, _event=None):
+        if self.job is not None:
+            self.widget.after_cancel(self.job)
+            self.job = None
+        if self.window is not None:
+            self.window.destroy()
+            self.window = None
 
 
 class TowerTab(Tab):
@@ -35,6 +68,14 @@ class TowerTab(Tab):
                         command=self.toggle).pack(anchor="w")
         ttk.Label(body, style="Hint.TLabel", text="Each floor is a duel; a save keeps how far it climbed. "
                                                   "notes/tower-mode.md says the rest.").pack(anchor="w")
+        help_row = ttk.Frame(body)
+        help_row.pack(anchor="w", pady=(2, 0))
+        ttk.Button(help_row, text="How to build a tower...", command=self.show_guide).pack(side="left")
+        start = ttk.Button(help_row, text="Start from an example", command=self.start_example)
+        start.pack(side="left", padx=(6, 0))
+        Tip(start, "Fills in a small working tower of three floors (with stories, a reward and an unlock) "
+                   "to change as you like. It replaces the tower this mod has, after asking.")
+        self.guide = None
         self.status = ttk.Label(body, style="Error.TLabel", wraplength=1100, justify="left")
         self.status.pack(anchor="w", pady=(2, 4))
         columns = ttk.Frame(body)
@@ -58,10 +99,12 @@ class TowerTab(Tab):
     # nobody touched writes nothing back: the mod keeps its own spelling
     # ("Yami", {"text": ...} lines, key order) instead of the tab's.
     FLOOR_FIELDS = ("duelist", "field", "lp.player", "lp.opponent", "no_fusions", "no_equips", "checkpoint",
+                    "unlock_opponent",
                     "reward.cards", "reward.starchips", "reward.unlock_duelist")
     FLOOR_TEXTS = ("deck", "before", "after")
     TOP_FIELDS = ("name", "label", "music", "unlock", "unlock.beat", "unlock.wins", "unlock.story", "unlock.card",
-                  "unlock.copies", "unlock.after_ending", "on_lose", "scene", "dim")
+                  "unlock.copies", "unlock.after_ending", "on_lose", "on_leave", "drops", "save_states", "cheats",
+                  "scene", "dim")
     TOP_TEXTS = ("intro", "ending", "lose")
 
     def _form(self, fields, texts) -> tuple:
@@ -132,6 +175,42 @@ class TowerTab(Tab):
         self.vars["dim"] = tk.BooleanVar()
         ttk.Checkbutton(frame, text="Draw the character not speaking darker (the campaign only keeps it still)",
                         variable=self.vars["dim"], command=self.commit).grid(row=7, column=0, columnspan=3, sticky="w")
+        ttk.Label(frame, text="Leaving").grid(row=8, column=0, sticky="w")
+        self.vars["on_leave"] = tk.StringVar(value="resume")
+        leave = ttk.Combobox(frame, textvariable=self.vars["on_leave"], values=tower.ON_LEAVE, state="readonly",
+                             width=14)
+        leave.grid(row=8, column=1, sticky="w", padx=(4, 0))
+        leave.bind("<<ComboboxSelected>>", lambda e: self.commit())
+        ttk.Label(frame, style="Hint.TLabel", text="resume where they were, or back to the checkpoint / floor 1").grid(
+            row=8, column=2, sticky="w", padx=(4, 0))
+        Tip(leave, "What LEAVE (or any other way out of the tower) does to the climb. resume: the player comes "
+                   "back where they were. checkpoint: back to the floor after the last checkpoint won. restart: "
+                   "back to floor 1. With checkpoint or restart no save keeps a floor past it, so quitting or "
+                   "saving outside the tower is no way around it.")
+        ttk.Label(frame, text="Cards a win").grid(row=9, column=0, sticky="w")
+        self.vars["drops"] = tk.StringVar(value=str(tower.DROPS_DEFAULT))
+        drops = ttk.Combobox(frame, textvariable=self.vars["drops"], values=DROPS_CHOICES, width=8)
+        drops.grid(row=9, column=1, sticky="w", padx=(4, 0))
+        drops.bind("<<ComboboxSelected>>", lambda e: self.commit())
+        drops.bind("<FocusOut>", lambda e: self.commit())
+        drops.bind("<Return>", lambda e: self.commit())
+        ttk.Label(frame, style="Hint.TLabel", text="1-99 cards a won duel; player: Game > Card drops").grid(
+            row=9, column=2, sticky="w", padx=(4, 0))
+        Tip(drops, "The cards a won tower duel gives on its results screen, whatever the player set Game > "
+                   "Card drops to (up to 99). \"player\" follows that setting. A floor's reward is given as well.")
+        self.vars["save_states"] = tk.BooleanVar(value=True)
+        states = ttk.Checkbutton(frame, text="Allow save states in the tower", variable=self.vars["save_states"],
+                                 command=self.commit)
+        states.grid(row=10, column=0, columnspan=3, sticky="w")
+        Tip(states, "Unticked: no save state is saved or loaded while the player is in the tower (its screen, "
+                    "its stories, its duels), by hotkey, menu or anything else; the game says why.")
+        self.vars["cheats"] = tk.BooleanVar(value=True)
+        cheats = ttk.Checkbutton(frame, text="Allow cheats in the tower", variable=self.vars["cheats"],
+                                 command=self.commit)
+        cheats.grid(row=11, column=0, columnspan=3, sticky="w")
+        Tip(cheats, "Unticked: in the tower the Cheats menu's Starting LP and Show CPU's hand do not apply, its "
+                    "Give cards, Unlock all and StarChips are refused, and during a floor's duel so are the Debug jumps and "
+                    "Restart game.")
         self._stage_form(parent)
         story = ttk.LabelFrame(parent, text="Story", padding=(6, 2))
         story.pack(fill="x", pady=(4, 0))
@@ -139,7 +218,8 @@ class TowerTab(Tab):
         for key, label in (("intro", "Before the first climb"), ("ending", "At the top"), ("lose", "After a loss")):
             ttk.Label(story, text=label).pack(anchor="w")
             self._text(story, key).pack(anchor="w", fill="x")
-        only = ttk.LabelFrame(parent, text="The tower's own duelists", padding=(6, 2))
+        only = ttk.LabelFrame(parent, text="The tower's own duelists (hidden in Free Duel until the tower lets them out)",
+                              padding=(6, 2))
         only.pack(fill="x", pady=(4, 0))
         ttk.Label(only, style="Hint.TLabel", wraplength=420, justify="left",
                   text="Checked: not in Free Duel until a won floor fights it or names it in its reward "
@@ -274,6 +354,95 @@ class TowerTab(Tab):
         if name:
             self._insert(f"[{self.stage_side.get()}: {name}{' flip' if self.stage_flip.get() else ''}]")
 
+    # --- help, the example, the floor's unlocks ----------------------------------------
+
+    def show_guide(self):
+        """The steps of building a tower, in a window of their own."""
+        if self.guide is not None and self.guide.winfo_exists():
+            self.guide.lift()
+            return
+        self.guide = tk.Toplevel(self)
+        self.guide.title("How to build a tower")
+        frame = ttk.Frame(self.guide)
+        frame.pack(fill="both", expand=True)
+        text = tk.Text(frame, width=72, height=30, wrap="word", padx=10, pady=8, font="TkDefaultFont")
+        bar = ttk.Scrollbar(frame, orient="vertical", command=text.yview)
+        text.configure(yscrollcommand=bar.set)
+        bar.pack(side="right", fill="y")
+        text.tag_configure("head", font=("TkDefaultFont", 10, "bold"))
+        for head, body in tower.GUIDE:
+            text.insert("end", head + "\n", "head")
+            text.insert("end", body + "\n\n")
+        text.insert("end", "Every key, with an example: notes/tower-mode.md (Help > Tower mode).")
+        text.configure(state="disabled")
+        text.pack(side="left", fill="both", expand=True)
+        buttons = ttk.Frame(self.guide, padding=(8, 4))
+        buttons.pack(fill="x")
+        ttk.Button(buttons, text="Start from an example", command=self.start_example).pack(side="left")
+        ttk.Button(buttons, text="Close", command=self.guide.destroy).pack(side="right")
+
+    def start_example(self, ask=True):
+        if self.project is None:
+            return
+        if ask and self.project.other.get("tower") is not None and not messagebox.askyesno(
+                "Start from an example", "Replace this mod's tower with the example?", parent=self):
+            return
+        self.project.other["tower"] = tower.example_tower()
+        self.refresh()
+        self.app.changed()
+
+    @staticmethod
+    def _drops_shown(value) -> str:
+        """The drops as the game reads them: 1-99, "player", else the default."""
+        if isinstance(value, str) and value.lower() == "player":
+            return "player"
+        if isinstance(value, int) and not isinstance(value, bool) and 1 <= value <= tower.DROPS_MAX:
+            return str(value)
+        return str(tower.DROPS_DEFAULT)
+
+    def _duelist_of_floor(self):
+        text = self.vars["duelist"].get().strip()
+        return roster.named(self.project, text) if self.project is not None and text else None
+
+    def _unlock_default(self) -> bool:
+        """Whether a floor that does not say so lets its opponent into Free
+        Duel: a duelist the mod adds as the tower's own, yes; any other, no."""
+        e = self._duelist_of_floor()
+        return e is not None and not isinstance(e, int) and getattr(e, "extra", {}).get("tower_only") is True
+
+    def _unlock_touched(self):
+        self.unlock_touched = True
+        self.commit()
+
+    def _unlock_note(self):
+        e = self._duelist_of_floor()
+        if e is None:
+            text = ""
+        elif not isinstance(e, int) and e.extra.get("tower_only") is True:
+            text = "This opponent is the tower's own: hidden in Free Duel until it is beaten (if ticked)."
+        else:
+            text = "Ticked, beating it puts this opponent on the Free Duel grid."
+        self.unlock_hint.configure(text=text)
+
+    def _unlock_choices(self):
+        if self.project is not None:
+            self.unlock_box.configure(values=duelist_rules.references(self.project))
+
+    def _add_unlock(self):
+        pick = self.unlock_pick.get().strip()
+        if not pick:
+            return
+        names = [n.strip() for n in self.vars["reward.unlock_duelist"].get().split(",") if n.strip()]
+        if pick not in names:
+            names.append(pick)
+        self.vars["reward.unlock_duelist"].set(", ".join(names))
+        self.commit()
+
+    def _remove_unlock(self):
+        names = [n.strip() for n in self.vars["reward.unlock_duelist"].get().split(",") if n.strip()]
+        self.vars["reward.unlock_duelist"].set(", ".join(names[:-1]))
+        self.commit()
+
     def _floors_form(self, parent):
         frame = ttk.LabelFrame(parent, text="Floors", padding=(6, 2))
         frame.pack(fill="x")
@@ -323,25 +492,47 @@ class TowerTab(Tab):
             self.vars[key] = tk.BooleanVar()
             ttk.Checkbutton(flags, text=label, variable=self.vars[key], command=self.commit).pack(side="left",
                                                                                                 padx=(0, 8))
+        self.vars["unlock_opponent"] = tk.BooleanVar()
+        unlock_box = ttk.Checkbutton(form, text="Unlock this opponent in Free Duel when beaten",
+                                     variable=self.vars["unlock_opponent"], command=self._unlock_touched)
+        unlock_box.grid(row=4, column=0, columnspan=2, sticky="w", pady=(2, 0))
+        Tip(unlock_box, "Beaten for the first time, the floor's opponent appears on the Free Duel grid. A duelist "
+                        "the mod adds as the tower's own (tower_only) is hidden there until then; unticked, it "
+                        "stays hidden.")
+        self.unlock_hint = ttk.Label(form, style="Hint.TLabel")
+        self.unlock_hint.grid(row=5, column=0, columnspan=2, sticky="w")
         reward = ttk.Frame(form)
-        reward.grid(row=4, column=0, columnspan=2, sticky="w", pady=(2, 0))
+        reward.grid(row=6, column=0, columnspan=2, sticky="w", pady=(2, 0))
         for row, (key, label, width, hint) in enumerate((
                 ("reward.cards", "Reward cards", 34, "names or ids, a comma between"),
-                ("reward.starchips", "Starchips", 8, "the first win only"),
-                ("reward.unlock_duelist", "Unlocks", 34, "duelists, a comma between: on the Free Duel grid"))):
+                ("reward.starchips", "Starchips", 8, "the first win only"))):
             ttk.Label(reward, text=label).grid(row=row, column=0, sticky="w")
             var = self.vars[key] = tk.StringVar()
             entry = ttk.Entry(reward, textvariable=var, width=width)
             entry.grid(row=row, column=1, sticky="w", padx=(4, 0), pady=1)
             entry.bind("<FocusOut>", lambda e: self.commit())
             ttk.Label(reward, style="Hint.TLabel", text=hint).grid(row=row, column=2, sticky="w", padx=(4, 0))
-        ttk.Label(form, text="Its deck").grid(row=5, column=0, sticky="nw")
+        ttk.Label(reward, text="Also unlocks").grid(row=2, column=0, sticky="w")
+        self.vars["reward.unlock_duelist"] = tk.StringVar()
+        ttk.Entry(reward, textvariable=self.vars["reward.unlock_duelist"], width=34, state="readonly").grid(
+            row=2, column=1, sticky="w", padx=(4, 0), pady=1)
+        pick = ttk.Frame(reward)
+        pick.grid(row=3, column=1, columnspan=2, sticky="w", padx=(4, 0))
+        self.unlock_pick = tk.StringVar()
+        self.unlock_box = ttk.Combobox(pick, textvariable=self.unlock_pick, width=22, state="readonly",
+                                       postcommand=self._unlock_choices)
+        self.unlock_box.pack(side="left")
+        ttk.Button(pick, text="Add", command=self._add_unlock).pack(side="left", padx=(4, 0))
+        ttk.Button(pick, text="Remove last", command=self._remove_unlock).pack(side="left", padx=(4, 0))
+        Tip(self.unlock_box, "More duelists this floor puts on the Free Duel grid the first time it is won: the "
+                             "disc's or the mod's own.")
+        ttk.Label(form, text="Its deck").grid(row=7, column=0, sticky="nw")
         deck = ttk.Frame(form)
-        deck.grid(row=5, column=1, sticky="w", padx=(4, 0))
+        deck.grid(row=7, column=1, sticky="w", padx=(4, 0))
         self._text(deck, "deck", height=4, width=40).pack(anchor="w")
         ttk.Label(deck, style="Hint.TLabel", text="a card a line, \"Card x3\"; forty in all, or empty for its own"
                   ).pack(anchor="w")
-        for row, (key, label) in enumerate((("before", "Before the duel"), ("after", "After a win")), start=6):
+        for row, (key, label) in enumerate((("before", "Before the duel"), ("after", "After a win")), start=8):
             ttk.Label(form, text=label).grid(row=row, column=0, sticky="nw")
             self._text(form, key, height=3, width=46).grid(row=row, column=1, sticky="w", padx=(4, 0), pady=1)
 
@@ -395,6 +586,11 @@ class TowerTab(Tab):
         self.vars["reward.cards"].set(tower.names_text(cards))
         self.vars["reward.starchips"].set("" if reward.get("starchips") is None else str(reward["starchips"]))
         self.vars["reward.unlock_duelist"].set(tower.names_text(reward.get("unlock_duelist")))
+        self.unlock_touched = False
+        self.vars["unlock_opponent"].set(floor["unlock_opponent"] is True if isinstance(floor.get("unlock_opponent"),
+                                                                                       bool)
+                                         else self._unlock_default())
+        self._unlock_note()
         self._set_text("deck", tower.deck_text(floor.get("deck")))
         self._set_text("before", tower.story_text(floor.get("before")))
         self._set_text("after", tower.story_text(floor.get("after")))
@@ -451,6 +647,15 @@ class TowerTab(Tab):
             floor["reward"] = reward
         if self.vars["checkpoint"].get():
             floor["checkpoint"] = True
+        # Written when the mod had it or the box was ticked or unticked by
+        # hand; else the box follows the opponent's default (a tower-only
+        # one unlocks, any other not) as the opponent changes.
+        unlock = self.vars["unlock_opponent"].get()
+        if "unlock_opponent" in old or getattr(self, "unlock_touched", False):
+            floor["unlock_opponent"] = unlock
+        else:
+            self.vars["unlock_opponent"].set(self._unlock_default())
+            self._unlock_note()
         for key in ("before", "after"):
             value = tower.story_value(self._get_text(key))
             if value is not None:
@@ -546,6 +751,12 @@ class TowerTab(Tab):
         number = tower.scene_number(scene) if scene is not None else None
         self.vars["scene"].set("" if scene is None else tower.scene_label(number) if number is not None else str(scene))
         self.vars["dim"].set(written.get("dim") is True)
+        leave = str(written.get("on_leave", "resume")).lower()
+        self.vars["on_leave"].set(leave if leave in tower.ON_LEAVE else "resume")
+        self.vars["drops"].set(self._drops_shown(written.get("drops")))
+        # As the game reads them: only false turns one off (a wrong value is as if not written).
+        self.vars["save_states"].set(written.get("save_states") is not False)
+        self.vars["cheats"].set(written.get("cheats") is not False)
         self._preview()
         for key in ("intro", "ending", "lose"):
             self._set_text(key, tower.story_text(written.get(key)))
@@ -607,6 +818,18 @@ class TowerTab(Tab):
                 number if isinstance(number, int) and scene.isdigit() else scene
         if self.vars["dim"].get():
             out["dim"] = True
+        if self.vars["on_leave"].get() in ("checkpoint", "restart"):
+            out["on_leave"] = self.vars["on_leave"].get()
+        drops = self.vars["drops"].get().strip().lower()
+        old_drops = written.get("drops") if written is not None else None
+        if drops == "player":
+            out["drops"] = old_drops if str(old_drops).lower() == "player" else "player"
+        elif drops.isdigit() and 1 <= int(drops) <= tower.DROPS_MAX and int(drops) != tower.DROPS_DEFAULT:
+            out["drops"] = int(drops)
+        self.vars["drops"].set(self._drops_shown(out.get("drops")))
+        for key in ("save_states", "cheats"):
+            if not self.vars[key].get():
+                out[key] = False
         for key in ("intro", "ending", "lose"):
             value = tower.story_value(self._get_text(key))
             if value is not None:

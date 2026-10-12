@@ -192,3 +192,17 @@ packaged `self-test` sets the tower's scene and puts a campaign character and
 a PNG on a story's stage, and checks the export carries both, the PNG in the
 mod's folder.
 
+Round 3 (2026-10-12): the tab explains itself. **How to build a tower...**
+opens a step-by-step guide (`tower.GUIDE`), **Start from an example** fills
+in a working tower of three floors (`tower.example_tower()`, which the
+checks read without a note), the options carry tooltips, and Help has a
+**Tower mode** entry. A floor has **Unlock this opponent in Free Duel when
+beaten** (`"unlock_opponent"`, ticked by itself for a tower-only opponent and
+written only when it differs) and **Also unlocks** picks duelists from a
+list instead of free text. The tower has **Leaving** (`on_leave`), **Cards a
+win** (`drops`), **Allow save states in the tower** and **Allow cheats in the
+tower**. `tests/test_tower.py` adds the guide and the example, the rules of
+the run written only when they differ from the defaults, and the unlock
+checkbox and picker. Window pictures of the tab (the guide, the options, a
+floor's unlock) are taken by PrintWindow, the editor's window alone.
+

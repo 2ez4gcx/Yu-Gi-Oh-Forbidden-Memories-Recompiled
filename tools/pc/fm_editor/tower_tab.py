@@ -13,7 +13,9 @@ from . import duelist_rules, roster, tower
 from .tabs import Tab
 from .widgets import ScrolledForm
 
-STORY_HINT = "A line a box. @Name: said by a duelist, #N: a campaign portrait (0-24), @none: nobody's."
+STORY_HINT = ("A line a box. @Name: said by a duelist, #N: a campaign portrait (0-24), #N @Name: both, "
+              "@none: nobody's. \\n breaks a line inside the box; a backslash keeps the next letter as it is "
+              "(\\@ for words that start with @).")
 
 
 class TowerTab(Tab):
@@ -307,8 +309,7 @@ class TowerTab(Tab):
         for key in ("before", "after"):
             value = tower.story_value(self._get_text(key))
             if value is not None:
-                floor[key] = value if old.get(key) is None or tower.story_text(old[key]) != self._get_text(key).strip() \
-                    else old[key]
+                floor[key] = old[key] if tower.same_story(old.get(key), self._get_text(key)) else value
         order = list(tower.FLOOR_KEYS)
         return {**{k: floor[k] for k in order if k in floor}, **{k: v for k, v in floor.items() if k not in order}}
 
@@ -452,8 +453,7 @@ class TowerTab(Tab):
             value = tower.story_value(self._get_text(key))
             if value is not None:
                 old = written.get(key) if written is not None else None
-                same = old is not None and tower.story_text(old) == self._get_text(key).strip()
-                out[key] = old if same else value
+                out[key] = old if tower.same_story(old, self._get_text(key)) else value
         out["floors"] = [tower.copy(f) for f in self.floors]
         out.update(self.kept)
         return out

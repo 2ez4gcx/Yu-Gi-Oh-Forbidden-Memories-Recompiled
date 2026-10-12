@@ -69,6 +69,34 @@ def _speaks(line: str) -> bool:
     return bool(found) and (found.group(1) is not None or found.group(2) is not None)
 
 
+def _encode(text: str, plain: bool) -> str:
+    """Words as a line of the tab: a backslash before a backslash, \\n for a
+    line break, and a backslash before what the line's trimming or a
+    speaker's "@Name:" would otherwise take (a plain line's first letter when
+    it would read as a speaker's, a space at either end)."""
+    out = text.replace("\\", "\\\\").replace("\n", NEWLINE)
+    if out and out[-1].isspace():
+        out = out[:-1] + "\\" + out[-1]
+    if out and (out[0].isspace() or (plain and _speaks(out))):
+        out = "\\" + out
+    return out
+
+
+def _trim(text: str) -> str:
+    """Spaces off both ends of a line, but for one a backslash keeps."""
+    text = text.lstrip()
+    kept = text.rstrip()
+    if len(kept) < len(text) and (len(kept) - len(kept.rstrip("\\"))) % 2:
+        kept += text[len(kept)]
+    return kept
+
+
+def _decode(text: str) -> str:
+    """The tab's line back to its words, in one pass: \\n is a line break,
+    a backslash before anything else is that letter."""
+    return re.sub(r"\\(.)", lambda found: "\n" if found.group(1) == "n" else found.group(1), text)
+
+
 def story_text(value) -> str:
     """A story as the tab shows it: a line of text per line. A plain line
     that would read as a speaker's starts with a backslash."""
@@ -78,19 +106,21 @@ def story_text(value) -> str:
     out = []
     for item in items:
         if isinstance(item, str):
-            text = item.replace("\n", NEWLINE)
-            out.append("\\" + text if _speaks(text) or text.startswith("\\") else text)
+            out.append(_encode(item, True))
         elif isinstance(item, dict):
-            text = str(item.get("text", "")).replace("\n", NEWLINE)
+            text = str(item.get("text", ""))
             head = f"#{item['portrait']}" if "portrait" in item else ""
             if "speaker" in item:
                 speaker = item["speaker"]
                 head += (" " if head else "") + f"@{'none' if speaker in (None, '') else speaker}"
-            if head:
-                out.append(f"{head}: {text}")
-            else:
-                out.append("\\" + text if _speaks(text) or text.startswith("\\") else text)
+            out.append(f"{head}: {_encode(text, False)}" if head else _encode(text, True))
     return "\n".join(out)
+
+
+def same_story(old, text: str) -> bool:
+    """Whether the tab's text still says what `old` (as written) says: then
+    the mod keeps its own spelling of it."""
+    return old is not None and story_value(text) == story_value(story_text(old))
 
 
 def story_value(text: str):
@@ -98,15 +128,15 @@ def story_value(text: str):
     for one plain line, else a list."""
     out = []
     for line in text.splitlines():
-        line = line.strip()
+        line = _trim(line)
         if not line:
             continue
         if line.startswith("\\"):
-            out.append(line[1:].replace(NEWLINE, "\n"))
+            out.append(_decode(line))
             continue
         found = LINE_RE.match(line)
         if found and (found.group(1) is not None or found.group(2) is not None):
-            entry = {"text": found.group(3).strip().replace(NEWLINE, "\n")}
+            entry = {"text": _decode(_trim(found.group(3)))}
             if found.group(1) is not None:
                 entry["portrait"] = int(found.group(1))
             if found.group(2) is not None:
@@ -114,7 +144,7 @@ def story_value(text: str):
                 entry["speaker"] = "none" if who.lower() in ("", "none") else int(who) if who.isdigit() else who
             out.append(entry)
         else:
-            out.append(line.replace(NEWLINE, "\n"))
+            out.append(_decode(line))
     if not out:
         return None
     if len(out) == 1 and isinstance(out[0], str):

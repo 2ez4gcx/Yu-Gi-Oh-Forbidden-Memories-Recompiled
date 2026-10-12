@@ -60,7 +60,10 @@ class TowerTest(unittest.TestCase):
         # break in a box, plain words that look like a speaker's, a
         # portrait with a speaker, a backslash.
         kept = ["One\nTwo", {"text": "A\nB", "speaker": "Seto"}, "@Seto: plain words", "#3: plain too",
-                {"text": "x", "portrait": 3, "speaker": "Seto"}, "back\\slash", "\\lead"]
+                {"text": "x", "portrait": 3, "speaker": "Seto"}, "back\\slash", "\\lead",
+                # A backslash and n written as such, spaces the trimming would take, a lone space.
+                "C:\\new", "\\nope", "  @Seto: hi", " \\o/", "ends ", " ", "two  ", "slash\\ ",
+                {"text": " spaced ", "speaker": "Seto"}, {"text": "", "portrait": 1}]
         text = tower.story_text(kept)
         self.assertEqual(len(text.splitlines()), len(kept))
         self.assertEqual(tower.story_value(text), kept)

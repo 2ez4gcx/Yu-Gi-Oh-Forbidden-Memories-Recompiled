@@ -111,6 +111,9 @@ def main():
     player = menu_shot(executable, "menu-player", {})
     shutil.copy(locked, drops.OUT / "menu-locked.bmp")
     shutil.copy(player, drops.OUT / "menu-player.bmp")
+    assert locked.read_bytes() != player.read_bytes(), "the locked menu should look other than the player's"
+    log = (drops.OUT / "menu-locked" / "run.log").read_text(errors="replace")
+    assert "state load failed" not in log and "mod lock-five:" not in log, "the lock should load without a note"
     if arguments.menus:
         print(f"card drops mod lock: menus in {drops.OUT}")
         return

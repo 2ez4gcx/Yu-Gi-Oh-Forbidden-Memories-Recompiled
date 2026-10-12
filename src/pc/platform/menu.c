@@ -1685,8 +1685,11 @@ void Menu_Draw(MenuCanvas *into)
 
 /* --- behaviour ------------------------------------------------------- */
 
+/* A slider that is off (Card drops while a mod locks it) keeps the
+ * player's value as it is, whichever way it is reached. */
 static void set_slider(const Item *item, int value)
 {
+    if (item->flags & ITEM_DISABLED) return;
     Settings_Set(item->setting, value);
 }
 
@@ -2183,8 +2186,12 @@ int Menu_Event(const MenuEvent *event, int *quit)
             int level = active_level(), *hot = active_hot();
             const Item *item = *hot >= 0 ? &level_menu(level)->items[*hot] : NULL;
             if (item && item->kind == ITEM_SLIDER) {
-                set_slider(item, Settings_Get(item->setting) + (event->key == MENU_KEY_RIGHT ? 1 : -1) * slider_step(item));
-                Settings_Save();
+                /* The pointer can rest on a slider that is off: the key
+                 * does nothing there. */
+                if (!(item->flags & ITEM_DISABLED)) {
+                    set_slider(item, Settings_Get(item->setting) + (event->key == MENU_KEY_RIGHT ? 1 : -1) * slider_step(item));
+                    Settings_Save();
+                }
             } else if (event->key == MENU_KEY_RIGHT && item && item->kind == ITEM_SUBMENU) {
                 open_submenu(*hot);
                 hot_sub = step_item(1, -1, 1);

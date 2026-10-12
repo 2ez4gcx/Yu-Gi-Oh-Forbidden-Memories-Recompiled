@@ -24,8 +24,9 @@ when the mod is removed (a restart, as for every `limits` key) the menu and
 the duels have it back.
 
 - **Several mods** that set it: the one applied later wins, as for every
-  `limits` key (the Mods window's order, then `after` and `priority`). The
-  earlier one gets a note in the Mods window naming the other,
+  `limits` key (the mods' load order, [When mods
+  overlap](modding.md#when-mods-overlap)). The mod whose different number
+  it replaces gets a note in the Mods window naming it,
   `limits: "card_drops" 5 is not used: other-mod, applied later, locks it
   at 7`, and the Mods window's overlaps and the FM Editor's Conflicts list
   both.
@@ -152,7 +153,8 @@ test user directory: a mod's 5 over the player's 99 deals 5, a mod's 99
 over the player's 1 deals 99, the player's 99 is back without the mod, a
 mod's 0 is noted and left out, and of two mods the later one's count is
 dealt. It also saves the window with Game open on the locked row
-(`menu-locked.bmp`), and takes `--windows`, `--executable` and `--out` as
+(`menu-locked.bmp`) and without the mod (`menu-player.bmp`), `--menus` for
+those two alone, and takes `--windows`, `--executable` and `--out` as
 above (`tmp/pc/card-drops-mod-smoke/`).
 
 `--windows` runs it on the Windows build under Wine; `--executable` names

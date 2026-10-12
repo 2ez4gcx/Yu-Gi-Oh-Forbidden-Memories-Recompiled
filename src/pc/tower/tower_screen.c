@@ -3,21 +3,19 @@
  * to after every floor's duel.
  *
  * Everything on it is the game's own: its text boxes with their window,
- * letters, page arrow, choice cursor and sounds, and, beside a line of
- * story, the speaker's portrait drawn by the dialogue's portrait effect
- * (F6 41-59, Text_HandleDisplayEffectCommand) from the same 48 x 48 cells
- * of VRAM the campaign's scene package fills (campaign_scene_package.h):
- * a duelist's is its Free Duel portrait (a mod's own, else its base's, off
- * the disc), and one of the campaign's 25 is that package's record. The
- * text is composed here in the game's codes into gTower.text, a game
- * variable, so the boxes point into the game's data and a save state keeps
- * them.
+ * letters, page arrow, choice cursor and sounds over the title's wall, and
+ * a story told as the campaign tells a scene's dialogue (the stage, below):
+ * a scene, the campaign's large characters and its stone-framed box, small
+ * portraits beside it drawn by the dialogue's portrait effect (F6 41-59)
+ * from the 48 x 48 cells the campaign's scene package fills. The text is
+ * composed here in the game's codes into gTower.text, a game variable, so
+ * the boxes point into the game's data and a save state keeps them.
  *
  * Its steps (gTower.step):
  *
  *   BEGIN    the first frame: the music, the result of the duel just come
  *            back from (Tower_ApplyResult, the reward), then what to tell
- *   STORY    lines of story, one dialogue box each, page by page
+ *   STORY    a story on its stage, in one box, page by page
  *   NOTICE   one box of what happened (a floor won, a loss), then on
  *   STATUS   the tower's name, the floor, its opponent and rules: DUEL or
  *            LEAVE
@@ -74,7 +72,6 @@ extern u16 gDuel_awPlayerDeck[];
 #define PORTRAIT_RECORD 0x980
 #define PORTRAIT_IMAGE 0x900
 #define PORTRAIT_EFFECT 0x41            /* F6 id of cell 0 */
-#define SPEAKER_CELL 0                  /* the cell a face is put in: clear of the title's wall (x 960 up) */
 
 /* The dialogue box (Script_OpShowDialog's place) and the menu box. */
 enum { DIALOG_X = 0x10, DIALOG_Y = 0xB0, DIALOG_W = 0x120, DIALOG_H = 0x30 };
@@ -328,24 +325,16 @@ static int disc_record(int sector, int index, unsigned char record[PORTRAIT_RECO
     return 1;
 }
 
-/* The F6 id of the face a line shows, uploaded now; 0 for none. */
-static int portrait_for(const TowerLine *line, int floor_duelist)
+/* A duelist's own face (its Free Duel portrait: a mod's, else its base's,
+ * off the disc) into `cell`; 0 when it has none. */
+static int duelist_face(int duelist, int cell)
 {
     unsigned char record[PORTRAIT_RECORD];
-    int speaker = line->speaker == TOWER_SPEAKER_FLOOR ? floor_duelist : line->speaker;
-    if (line->portrait >= 0) {
-        if (!disc_record(CAMPAIGN_PORTRAITS_SECTOR, line->portrait, record)) return 0;
-        upload(SPEAKER_CELL, record);
-        return PORTRAIT_EFFECT + SPEAKER_CELL;
-    }
-    if (speaker <= 0 || !Duelists_Valid(speaker)) return 0;
-    if (Duelists_Portrait(speaker)) {
-        memcpy(record, Duelists_Portrait(speaker), PORTRAIT_RECORD);
-    } else if (!disc_record(FREE_DUEL_PORTRAITS_SECTOR, Duelists_BaseId(speaker), record)) {
-        return 0;
-    }
-    upload(SPEAKER_CELL, record);
-    return PORTRAIT_EFFECT + SPEAKER_CELL;
+    if (duelist <= 0 || !Duelists_Valid(duelist)) return 0;
+    if (Duelists_Portrait(duelist)) memcpy(record, Duelists_Portrait(duelist), PORTRAIT_RECORD);
+    else if (!disc_record(FREE_DUEL_PORTRAITS_SECTOR, Duelists_BaseId(duelist), record)) return 0;
+    upload(cell, record);
+    return 1;
 }
 
 /* --- the boxes --------------------------------------------------------------------- */
@@ -399,26 +388,244 @@ static void tell(int which, int floor, int then)
     gTower.phase = 0;
 }
 
-/* The line on the box: its portrait (F6 id flags 0: in, as a scene's
- * dialogue brings one in) and its text, a page at a time. */
-static void show_line(const TowerLine *line, int floor_duelist)
+/* --- the stage (tower.h, notes/tower-mode.md: Story) -------------------------------
+ *
+ * A story is told as the campaign tells a scene's dialogue: one text in its
+ * stone-framed box (Script_OpShowDialog's place, no dark window), its
+ * pages a button apart, over a scene picture (Tower_Scene), with the
+ * campaign's large characters brought in, quieted and taken out by the
+ * text's own codes, as the campaign's dialogue does it:
+ *
+ *   F6 id 1x       a character in on its side (bit 0: the right), its
+ *                  expression in bits 1-2 (Text_HandleDisplayEffectCommand)
+ *   F6 id 4e       its expression changed to e
+ *   F6 id 20 / 21  speaking (its mouth moves with the words) / not
+ *   F6 id 80       out
+ *   F6 41+n 00/80  a small portrait in and out beside the box
+ *   F7 05 id       another scene, crossfaded (func_8003767C, Script_OpShowImage)
+ *   F7 0B x y n    the view panned (func_8003771C, Script_UpdateViewportTween)
+ *
+ * The scene's crossfade copies the screen to VRAM (448, 256)-(767, 415),
+ * across the right side's character (640-831, 256-511), so a right
+ * character goes out before another scene and comes back after it, as the
+ * campaign's own scripts order it. One text, because a new box resets the
+ * display-effect records (TextBox_BuildStep's func_80039E9C) and would
+ * leave the characters' objects behind. */
+
+typedef struct {
+    int fx;                             /* the F6 id on the side, 0 none */
+    int expression;
+    int duelist;                        /* who it is, for a speaker: a duelist, TOWER_SPEAKER_FLOOR, 0 */
+} Side;
+
+static const u8 pool_ids[TOWER_POOL_SIZE] = TOWER_POOL_IDS;
+
+/* The F6 id a mod's picture is told as this story: one of the characters
+ * the disc keeps empty (gTower.pool). 0 when the story has five already. */
+static int pool_character(int art)
 {
-    Out out = begin(DIALOG_W - 2 * LETTER);
-    int face = portrait_for(line, floor_duelist);
-    if (face) {
-        put(&out, 0xF6);
-        put(&out, face);
-        put(&out, 0);
+    int k;
+    const TowerConfig *config = tower();
+    if (!config || art < 0 || art >= config->art_count || !config->arts[art].ready) return 0;
+    for (k = 0; k < TOWER_POOL_SIZE; k++) {
+        if (gTower.pool[k] == art + 1) return pool_ids[k];
     }
-    wrapped(&out, line->text, DIALOG_LINES);
-    put(&out, 0xFA);
-    if (face) {
-        put(&out, 0xF6);   /* out again with the box */
-        put(&out, face);
-        put(&out, 0x80);
+    for (k = 0; k < TOWER_POOL_SIZE; k++) {
+        if (!gTower.pool[k]) {
+            gTower.pool[k] = (u8)(art + 1);
+            return pool_ids[k];
+        }
+    }
+    LOG(LOG_MODS, "tower: a story shows at most %d pictures of the mod's; %s is left out", TOWER_POOL_SIZE,
+        config->arts[art].path);
+    return 0;
+}
+
+/* What a cast stands for on the stage of floor `floor_duelist`'s story. */
+static Side side_of(const TowerCast *cast, int floor_duelist)
+{
+    Side side = {0, 0, 0};
+    side.expression = cast->expression;
+    side.duelist = cast->duelist;
+    switch (cast->kind) {
+    case TOWER_CAST_RETAIL: side.fx = cast->id; break;
+    case TOWER_CAST_ART: side.fx = pool_character(cast->id); break;
+    case TOWER_CAST_OPPONENT:
+        side.fx = Tower_DuelistCharacter(floor_duelist);
+        side.duelist = TOWER_SPEAKER_FLOOR;
+        break;
+    }
+    if (!side.fx) side.duelist = 0;
+    return side;
+}
+
+/* The scene a line asks for, one that can be shown: a mod's picture that
+ * was not made is the tower's own scene, then the torch corridor. */
+static int scene_shown(int scene)
+{
+    const TowerConfig *config = tower();
+    const u16 *clut;
+    if (scene >= TOWER_SCENE_ART && !Tower_ArtScene(scene - TOWER_SCENE_ART, &clut)) {
+        scene = config->scene;
+        if (scene >= TOWER_SCENE_ART && !Tower_ArtScene(scene - TOWER_SCENE_ART, &clut)) scene = TOWER_SCENE_DEFAULT;
+    }
+    return scene;
+}
+
+static int story_scene(TowerStory story)
+{
+    const TowerConfig *config = tower();
+    int scene = story.count ? config->lines[story.first].scene : TOWER_SCENE_KEEP;
+    return scene_shown(scene == TOWER_SCENE_KEEP ? config->scene : scene);
+}
+
+static void put16(Out *out, int value)
+{
+    put(out, value & 0xFF);
+    put(out, (value >> 8) & 0xFF);
+}
+
+static void fx(Out *out, int id, int flags)
+{
+    put(out, 0xF6);
+    put(out, id);
+    put(out, flags);
+}
+
+/* The side a line's speaker stands on, -1 for none on the stage. */
+static int speaking_side(int speaker, const Side sides[TOWER_SIDES], int floor_duelist)
+{
+    int s, want;
+    if (speaker == TOWER_SPEAKER_LEFT) return sides[0].fx ? 0 : -1;
+    if (speaker == TOWER_SPEAKER_RIGHT) return sides[1].fx ? 1 : -1;
+    if (speaker == TOWER_SPEAKER_NONE) return -1;
+    for (s = 0; s < TOWER_SIDES; s++) {
+        if (sides[s].fx && sides[s].duelist == speaker) return s;
+    }
+    want = Tower_DuelistCharacter(speaker == TOWER_SPEAKER_FLOOR ? floor_duelist : speaker);
+    for (s = 0; s < TOWER_SIDES; s++) {
+        if (want && sides[s].fx == want) return s;
+    }
+    return -1;
+}
+
+/* The whole of story `which` in the game's codes, its small portraits put
+ * in their cells (the campaign's 25 are there already, Tower_Scene; a
+ * duelist's own face takes a cell from 24 down that the story's campaign
+ * portraits leave free). */
+static void compose_story(int which, TowerStory story, int floor_duelist)
+{
+    const TowerConfig *config = tower();
+    Out out = begin(DIALOG_W - 2 * LETTER);
+    Side sides[TOWER_SIDES] = {{0, 0, 0}, {0, 0, 0}};
+    int scene = story_scene(story), i, s, face_cell = TOWER_CAMPAIGN_PORTRAITS - 1, faces[8][2], face_count = 0;
+    char used[TOWER_CAMPAIGN_PORTRAITS];
+    memset(used, 0, sizeof(used));
+    for (i = 0; i < story.count; i++) {
+        int portrait = config->lines[story.first + i].portrait;
+        if (portrait >= 0 && portrait < TOWER_CAMPAIGN_PORTRAITS) used[portrait] = 1;
+    }
+    for (i = 0; i < story.count; i++) {
+        const TowerLine *line = &config->lines[story.first + i];
+        Side want[TOWER_SIDES];
+        int talking, portrait = line->portrait, cell = -1, speaker_duelist;
+        /* Room for this line at its most (two bytes a letter, a code a
+         * row, its stage's codes) and the closing ones: else the story
+         * ends here, whole (tower_config.c keeps a story under it). */
+        if (out.end - out.at < (long)(2 * strlen(line->text) + strlen(line->text) / 16 + TOWER_LINE_CODES + 16)) {
+            LOG(LOG_MODS, "tower: the box is full; the story ends before line %d", i + 1);
+            break;
+        }
+        for (s = 0; s < TOWER_SIDES; s++) {
+            TowerCast cast = line->cast[s];
+            if (cast.kind == TOWER_CAST_KEEP && i == 0) {
+                /* A floor's story has its opponent on the right unless it
+                 * says otherwise. */
+                cast.kind = (which == STORY_BEFORE || which == STORY_AFTER) && s == TOWER_SIDE_RIGHT
+                                ? TOWER_CAST_OPPONENT : TOWER_CAST_NONE;
+            }
+            want[s] = cast.kind == TOWER_CAST_KEEP ? sides[s] : side_of(&cast, floor_duelist);
+        }
+        if (want[0].fx && want[0].fx == want[1].fx) {
+            /* The game finds a character by its id: one of each a stage. */
+            LOG(LOG_MODS, "tower: character %d is on the left already; the right is left empty", want[1].fx);
+            want[1].fx = 0;
+            want[1].duelist = 0;
+        }
+        /* Another scene: the right side out over its crossfade, in again after. */
+        if (i > 0 && line->scene != TOWER_SCENE_KEEP && scene_shown(line->scene) != scene) {
+            scene = scene_shown(line->scene);
+            if (sides[1].fx) {
+                fx(&out, sides[1].fx, 0x80);
+                sides[1].fx = 0;
+            }
+            put(&out, 0xF7);
+            put(&out, 5);
+            put16(&out, scene);
+        }
+        /* Every side going out before any comes in: the game finds a
+         * character by its id, so one moving across must leave first. */
+        for (s = 0; s < TOWER_SIDES; s++) {
+            if (want[s].fx != sides[s].fx && sides[s].fx) fx(&out, sides[s].fx, 0x80);
+        }
+        for (s = 0; s < TOWER_SIDES; s++) {
+            if (want[s].fx != sides[s].fx) {
+                if (want[s].fx) fx(&out, want[s].fx, 0x10 | (want[s].expression & 3) << 1 | s);
+            } else if (want[s].fx && want[s].expression != sides[s].expression) {
+                fx(&out, want[s].fx, 0x40 | (want[s].expression & 3));
+            }
+            sides[s] = want[s];
+        }
+        if (i == 0) {
+            static const char *const names[] = {"", "intro", "before", "after", "ending", "lose"};
+            LOG(LOG_MODS, "tower: the %s on scene 0x%03x, characters %d and %d", names[which], scene, sides[0].fx,
+                sides[1].fx);
+        }
+        talking = speaking_side(line->speaker, sides, floor_duelist);
+        for (s = 0; s < TOWER_SIDES; s++) {
+            if (sides[s].fx) fx(&out, sides[s].fx, s == talking ? 0x20 : 0x21);
+        }
+        speaker_duelist = line->speaker == TOWER_SPEAKER_FLOOR ? floor_duelist : line->speaker > 0 ? line->speaker : 0;
+        if (talking >= 0 && (line->speaker == TOWER_SPEAKER_LEFT || line->speaker == TOWER_SPEAKER_RIGHT))
+            speaker_duelist = sides[talking].duelist == TOWER_SPEAKER_FLOOR ? floor_duelist :
+                              sides[talking].duelist > 0 ? sides[talking].duelist : 0;
+        if (portrait == TOWER_PORTRAIT_AUTO) portrait = talking < 0 && speaker_duelist ? TOWER_PORTRAIT_SPEAKER : -1;
+        if (portrait >= 0 && portrait < TOWER_CAMPAIGN_PORTRAITS) {
+            cell = portrait;
+        } else if (portrait == TOWER_PORTRAIT_SPEAKER && speaker_duelist) {
+            int k;
+            for (k = 0; k < face_count && faces[k][0] != speaker_duelist; k++) {}
+            if (k < face_count) {
+                cell = faces[k][1];
+            } else {
+                while (face_cell >= 0 && used[face_cell]) face_cell--;
+                if (face_cell < 0 || face_count == 8)
+                    LOG(LOG_MODS, "tower: a story shows at most 8 duelists' own faces; %s's is left out",
+                        Duelists_Name(speaker_duelist) ? Duelists_Name(speaker_duelist) : "a duelist");
+                else if (duelist_face(speaker_duelist, face_cell)) {
+                    faces[face_count][0] = speaker_duelist;
+                    faces[face_count++][1] = face_cell;
+                    cell = face_cell--;
+                }
+            }
+        }
+        if (cell >= 0) fx(&out, PORTRAIT_EFFECT + cell, 0);
+        if (line->pan) {
+            put(&out, 0xF7);
+            put(&out, 0x0B);
+            put16(&out, line->pan_x);
+            put16(&out, line->pan_y + (line->pan_wait ? 0x1000 : 0));
+            put16(&out, line->pan_frames);
+        }
+        out.x = 0;
+        wrapped(&out, line->text, DIALOG_LINES);
+        put(&out, 0xFA);
+        if (cell >= 0) fx(&out, PORTRAIT_EFFECT + cell, 0x80);
+    }
+    for (s = 0; s < TOWER_SIDES; s++) {
+        if (sides[s].fx) fx(&out, sides[s].fx, 0x80);
     }
     finish(&out);
-    open_box(DIALOG_X, DIALOG_Y, DIALOG_W, DIALOG_H, 0);
 }
 
 static void step_story(void)
@@ -426,19 +633,38 @@ static void step_story(void)
     const TowerStory story = story_of(gTower.story, gTower.floor);
     const TowerConfig *config = tower();
     int duelist = gTower.floor >= 0 && gTower.floor < config->floor_count ? config->floors[gTower.floor].duelist : 0;
+    if (gTower.scene_on) Tower_SceneFrame();
     if (gTower.phase == 0) {
-        if (gTower.line < 0 || gTower.line >= story.count) {
-            close_box();
+        if (!story.count) {
             gTower.step = gTower.then;
-            gTower.phase = 0;
             return;
         }
-        show_line(&config->lines[story.first + gTower.line], duelist);
+        /* The stage up from black, the story's one box on it. */
+        close_box();
+        if (!gTower.faded) Fade_WaitOut();
+        Tower_Scene(1, story_scene(story));
+        gTower.dim = (s16)config->dim;
+        compose_story(gTower.story, story, duelist);
+        Tower_CreateBox(TOWER_TEXT_ID, DIALOG_X, DIALOG_Y, DIALOG_W, DIALOG_H, 0);
+        Fade_WaitIn();
+        gTower.faded = 0;
         gTower.phase = 1;
         return;
     }
-    if (!box_done()) return;
-    gTower.line++;
+    if (gTower.phase == 1) {
+        if (!box_done()) return;
+        gTower.phase = 2;
+    }
+    /* Its characters gone, the stage down again, to black: the next step
+     * fades its own screen in (gTower.faded; a duel's own screen does, and
+     * the wall is not brought back for it). */
+    if (Tower_SceneBusy()) return;
+    close_box();
+    Fade_WaitOut();
+    Tower_Scene(0, gTower.then != STEP_DUEL);
+    gTower.faded = 1;
+    gTower.line = (s16)story.count;
+    gTower.step = gTower.then;
     gTower.phase = 0;
 }
 
@@ -756,7 +982,6 @@ void Tower_RunMode(void)
         int song = config->music >= 0 ? config->music : TOWER_DEFAULT_SONG;
         D_8009B26C |= 0x40;
         Tower_Frame();   /* the save's progress is of this tower (tower.c) */
-        Tower_Background(1);
         SD_BGMPlay(0x7000 + (u32)song);
         gTower.step = STEP_BEGIN;
         gTower.phase = 0;
@@ -768,7 +993,14 @@ void Tower_RunMode(void)
         } else {
             gTower.step = STEP_STATUS;
         }
-        Fade_WaitIn();
+        /* The screen comes from black (the menu and the duel fade out to
+         * it): a story brings its stage up itself, anything else the wall. */
+        gTower.faded = 1;
+        if (gTower.step != STEP_STORY || !story_of(gTower.story, gTower.floor).count) {
+            Tower_Background(1);
+            Fade_WaitIn();
+            gTower.faded = 0;
+        }
         return;
     }
     {   /* For the log (MEMORIES_TRACE=mods), which the tests follow. */
@@ -795,4 +1027,9 @@ void Tower_RunMode(void)
     default: gTower.step = STEP_STATUS; gTower.phase = 0; break;
     }
     func_80039794();
+    /* After a story: the wall is up again (Tower_Scene), its box begun. */
+    if (gTower.faded && gTower.step != STEP_STORY && gTower.step != STEP_DUEL && gTower.step != STEP_LEAVE) {
+        Fade_WaitIn();
+        gTower.faded = 0;
+    }
 }

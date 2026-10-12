@@ -3,8 +3,9 @@
 A mod can add a **tower**: a run of duels, its *floors*, that the title's
 second menu offers once the mod is on. Each floor is an opponent with a field,
 a deck, starting LP and rules of its own (no fusions, no equips), a reward and
-lines of story before and after it, told in the game's dialogue box with the
-speaker's portrait. A save keeps how far it climbed. Without a tower mod the
+lines of story before and after it, told as the campaign tells its own: in
+its stone-framed box, over a scene, with its large characters on top (or a
+mod's own pictures of both). A save keeps how far it climbed. Without a tower mod the
 game is the same, frame for frame (checked against a build without tower mode:
 the title's two menus, the cursor walked through them).
 
@@ -21,10 +22,15 @@ the title's two menus, the cursor walked through them).
         "label": "SHADOW TOWER",
         "unlock": "after_ending",
         "on_lose": "checkpoint",
-        "intro": [
-            "Three floors stand between you and the top of the tower.",
-            {"text": "Win them all, my prince.", "portrait": 0}
-        ],
+        "scene": "torch corridor",
+        "intro": {
+            "scene": "seal shrine",
+            "characters": {"left": "Simon Muran"},
+            "lines": [
+                "Three floors stand between you and the top of the tower.",
+                {"text": "Win them all, my prince.", "speaker": "left"}
+            ]
+        },
         "ending": "The tower is yours.",
         "floors": [
             {
@@ -79,8 +85,11 @@ The tower's screen is the game's own pieces, drawn by the game's own code:
   and `CHECKPOINT` (four lines a page, a button between), or `YOU LOST. BACK
   TO FLOOR 2.`; at a checkpoint and after the top, `SAVE YOUR PROGRESS?` and
   then the game's own save (the port's slot menu);
-- the story in the campaign's dialogue box at the foot of the screen, page by
-  page, with the speaker's portrait sliding in above it as a scene's does.
+- the stories, told as the campaign tells a scene's dialogue: the screen goes
+  black and comes up on a scene picture with the campaign's stone-framed box
+  at its foot, its large characters sliding in on the left and the right,
+  the one speaking moving its mouth, page by page; then black again and the
+  wall ([Story](#story)).
 
 DUEL tells the floor's `before`, then the duel, armed as the Free Duel screen
 arms one (the deck screen first); the game comes back to the tower after it.
@@ -96,6 +105,8 @@ second menu, the cursor on the tower's button.
 | `music` | the screen's song, as `title`'s `music` takes it (`0x000`-`0xFFF`); the Free Duel screen's (`0x2C0`) without one |
 | `unlock` | when the button opens it: `"always"` (the default), `"after_ending"`, or an object of conditions (below) |
 | `on_lose` | `"checkpoint"` (the default): a loss sends the player back to the floor after the last checkpoint won; `"restart"`: back to floor 1, the checkpoints forgotten |
+| `scene` | the scene of a story that names none ([Story](#story)); `"torch corridor"` without |
+| `dim` | `true`: a character not speaking is drawn darker (the campaign only keeps it still) |
 | `intro` | told the first time the tower is entered on a save |
 | `ending` | told when the last floor is won |
 | `lose` | told after a loss, before where it goes back to |
@@ -171,29 +182,151 @@ which the event script tests to choose scenes); an added duelist marked
 
 ### Story
 
-A story is one line of text, or a list of them; each line is one dialogue box,
-cut into pages of three lines at the box's width, a button between them. A
-line may be an object instead:
+A story is told as the campaign tells a scene's dialogue: in its
+stone-framed box at the foot of the screen, over a **scene** picture, with up
+to two of its large **characters** standing on the box, one on the left and
+one on the right. It is the campaign's own machinery doing it, so a retail
+scene with a retail character is the campaign's frame, pixel for pixel (the
+end-to-end test compares one with the campaign's first scene).
+
+A story is one line of text, a list of them, or an object whose `lines` are
+the list:
+
+```json
+"before": {
+    "scene": "throne room",
+    "characters": {"left": "Simon Muran", "right": "opponent"},
+    "lines": [
+        {"text": "My prince, he is here.", "speaker": "left"},
+        {"text": "Show me what you have learned.", "speaker": "right"},
+        {"text": "Outside, then.", "scene": "scenes/courtyard.png",
+         "characters": {"left": {"image": "art/hero.png", "flip": true}}},
+        {"text": "Look at the sky.", "pan": {"x": 64, "frames": 90}}
+    ]
+}
+```
+
+Each line is a page or more of the box (three lines of text a page, at its
+width, a button between pages). What a line says about the stage holds from
+that line on, until another line changes it; what the story object says is
+its first line's.
 
 | Key | Meaning |
 |---|---|
 | `text` | the words (UTF-8; letters the game and the mods' fonts lack are left out) |
-| `speaker` | whose portrait shows beside it: a duelist (id, name, identity), `"none"` for nobody's, `"opponent"` for the floor's |
-| `portrait` | one of the campaign's 25 dialogue portraits, `0`-`24` (0 is Simon Muran), in place of the speaker's |
+| `scene` | the picture behind, from this line on (below). Another scene mid-story crossfades as the campaign's do |
+| `characters` | `{"left": ..., "right": ...}`, the sides it names (below); a side it does not name stays as it was. A character that changes slides out and the new one in |
+| `speaker` | who says it: `"left"` or `"right"`, a duelist (id, name, identity; the side showing its character), `"opponent"` (the floor's), or `"none"` |
+| `portrait` | a small face beside the box as well: one of the campaign's 25 dialogue portraits, `0`-`24` (0 is Simon Muran), `"speaker"` for the speaker's own (its Free Duel portrait), or `"none"` |
+| `pan` | `{"x": ..., "y": ..., "frames": ..., "wait": ...}`: the scene's view moved to x (0-576), y (0-96) over that many frames (60 without; 1-3600), the words waiting for it with `"wait": true`. A wide scene (100-141, 200-212) has room to move; a mode-0 one, 320 wide, shows black past its edge |
 
-A floor's `before` and `after` lines are the floor's opponent's unless they say
-otherwise; `intro`, `ending` and `lose` lines are nobody's.
+**Defaults, all overridable.** A story that names no scene is told over the
+tower's `scene`, else `"torch corridor"` (22). A floor's `before` and `after`
+have the floor's opponent's campaign character on the right and are its words
+(`speaker` `"opponent"`); `intro`, `ending` and `lose` have nobody on the stage
+and are nobody's. A small portrait shows only when a line asks for one, or
+when its speaker is a duelist without a character on the stage (then its own
+face, as the old portrait-only stories had it); `"portrait": "none"` keeps it
+off. The speaker's character moves its mouth with the words and blinks; the
+other one keeps still, as the campaign does it (`F6 id 20`/`21`). **The
+campaign never darkens the one not speaking**: the tower's `"dim": true` does,
+an option of the port's own.
 
-How it is drawn: the box is the campaign's dialogue box (`Script_OpShowDialog`'s
-place, `0x10, 0xB0`, `0x120 x 0x30`), and the portrait is the dialogue's own
-portrait effect (text code `F6 41`-`59`, `Text_HandleDisplayEffectCommand`),
-which draws from the 48 x 48 cells of VRAM the campaign's scene package fills
-(`Campaign_LoadScenePackage`, [dialog portrait bank](dialog-portrait-bank.md)).
-The tower puts the face it needs into the first cell itself, a duelist's Free
-Duel portrait (a mod's own, else its base's, from the disc's Free Duel package,
-WA sector `0x1EAA`) or a campaign portrait (WA `0xF35000`), so the scene
-package is never loaded outside the campaign. That cell is clear of the
-title's wall (VRAM x 960 up), which the screen draws behind.
+**A scene** is one of the disc's pictures, by name or by number, or a PNG of
+the mod's:
+
+- mode 0, the 320 x 160 backgrounds the campaign tells its dialogue over, by
+  name or 0-41: `black` (0), `palace gate`, `palace chamber`, `jungle temple
+  door`, `card shop`, `colonnade hall`, `moonlit colonnade`, `collapsed
+  ruins`, `classroom`, `tournament lounge`, `card collection` (10), `shop
+  street`, `temple ruins`, `destroyed town`, `ruined altar room`, `ruined
+  chamber`, `sunlit ruined hall`, `fiery valley gate`, `seal shrine`, `green
+  pyramid`, `green mausoleum` (20), `obelisk avenue`, `torch corridor`, `cliff
+  temple`, `night temple stairs`, `jungle pyramid`, `green shrine`, `dusk
+  tower`, `altar hall`, `desert sphinx`, `sphinx shrine` (30), `meadow
+  temple`, `twin statue shrine`, `throne room`, `hall of fires`, `eye
+  chamber`, `town at night`, `night balcony`, `golden doors`, `golden door
+  chamber`, `statue gallery`, `burning pyramid` (41); `"none"` is black;
+- modes 1 and 2, 100-141 and 200-212: the campaign's wider stills, each with
+  its own figures drawn in (Heishin with the lamp, the robed mages, the
+  Millennium items, the tournament's stadium...);
+- a PNG (any size, made into 320 x 160 at 8 bits, its clear parts black), a
+  path inside the mod. Above the console's resolution the PNG itself is drawn,
+  at its own resolution (the texture pack's made images, [image
+  remaster](image-remaster.md)).
+
+The number is the game's own image id written in decimal: its digits are
+the id's hexadecimal ones (BCD), 22 is `0x022`, 139 is `0x139`. The FM
+Editor's Tower tab shows each one as a picture, made from the player's disc.
+
+**A character**, a side's value:
+
+- `"none"`: nobody;
+- a number, 1-64: the campaign's large character of that number (1 Simon
+  Muran, 4 Seto, 12 the prince...; 0, 5, 11, 39, 40 and 41 are empty on the
+  disc). The Tower tab shows each one;
+- a duelist (id, name, identity), or `"opponent"`: the character the
+  campaign shows that duelist as before its duel (an added duelist: its
+  base's). The villagers and the five shrine mages have none;
+- a PNG, a path inside the mod: a picture of up to 256 x 256 (a larger one is
+  shrunk to fit), its clear parts clear, standing on the box as the
+  campaign's do -- its middle over the side's place, its bottom edge just
+  under the box's top, or, taller than the 178 rows above it, its top at the
+  screen's and the rest under the box. It is drawn at the console's resolution;
+- an object: `{"character": 4, "expression": 2}` (a campaign character's
+  expression 0-3, changed in place on a later line), `{"duelist": "Seto"}`,
+  `{"image": "art/ghost.png", "flip": true, "duelist": "opponent"}` (the
+  PNG turned to face the other way; its duelist the one whose lines it
+  speaks).
+
+**Limits.** Two sides, no middle (the campaign has two places; the third
+record is the small portrait). One character may stand on one side at a
+time (the game finds them by number). A story shows at most five pictures of
+the mod's (the cache of characters has five places), and a tower has at most
+96 PNGs, scenes and characters together. A story is told in one box, so its words are at
+most about 12000 letters, each line counting 48 more for its stage's codes; the lines past
+that are left out, noted (and should a box still fill, the story ends there, logged). A
+line without words is left out, its stage with it.
+
+**How it is drawn.** It is the campaign's scene machinery, driven from the
+tower's screen rather than from the event script (`Script_RunTick`):
+
+- the stage comes up from black: `Campaign_LoadScenePackage` (the box's
+  stone frame, phase 0 of the package at VRAM (832, 0), drawn by
+  `Campaign_CreatePrimaryDisplayObject`; the 25 portraits, [dialog portrait
+  bank](dialog-portrait-bank.md); the scene slots), then the scene by
+  `ScriptImage_RequestTransfer` and `ScriptImage_RebuildObjects`, as
+  `Script_OpLoadImageScene` loads one; the title's wall is gone meanwhile (the
+  scene's palette, (0, 240) 256 x 4, is inside the wall's), and back after;
+- the story is one text in the box (`TextBox_Create`'s place, `0x10, 0xB0`,
+  `0x120 x 0x30`, no dark window), in the game's codes: a character in
+  (`F6 id 1x`, bit 0 the right, bits 1-2 the expression,
+  `Text_HandleDisplayEffectCommand`), its expression (`F6 id 4e`), speaking
+  or still (`F6 id 20`/`21`), out (`F6 id 80`), a small portrait (`F6 41+n`),
+  another scene (`F7 05 id`: `func_8003767C`, then `Script_OpShowImage`, which
+  `TextBox_BuildStep` dispatches as the campaign's text does), a pan (`F7 0B
+  x y frames`: `func_8003771C`, `Script_UpdateViewportTween`). One text,
+  because a new box resets the display-effect records (`TextBox_BuildStep`'s
+  `func_80039E9C`), which would leave the characters' objects behind;
+- another scene's crossfade copies the screen to VRAM (448, 256)-(767, 415),
+  across the right side's character (640-831, 256-511): a right character goes
+  out before it and comes back after, as the campaign's own scripts order it;
+- a mod's scene has an image id no record of the disc's has (0x0A0 up, not
+  BCD): `ScriptImage_RequestTransfer` asks the tower first (`#ifdef
+  MEMORIES_PC`) and the tower puts it where a mode-0 record streams, in that
+  record's layout (words 0-127 of rows 256-415, the right 64 texels in rows
+  416-495), from the game's memory, so the texture pack's tags of those words
+  are cleared or found by their bytes, never left over;
+- a mod's character is one of the characters the disc keeps empty (0x27,
+  0x28, 0x29, 0x0B, 0x05), and `func_8003A560` asks the tower to fill its
+  cache slot (`#ifdef MEMORIES_PC`) before it would read the disc: the sheet,
+  the two palette rows and a parts bank as the disc's records have them, so
+  it slides, speaks and goes as theirs do;
+- the stage goes down to black after the last page, the characters released
+  (`func_80039FD4`), the scene's objects and the frame too, the wall up again.
+
+Without a tower story on the screen the two hooks find nothing to do: the
+ids they answer are none of the disc's.
 
 ## Duelists of the tower's alone
 
@@ -212,11 +345,14 @@ intro was told.
 
 - It is **game data** (`gTower`, `src/pc/game/zz_tower_storage.c`), so every
   save state has it, and a state saved in a tower duel keeps its floor and
-  rules. It is the last game unit, so no game variable moves; it does make the
-  game's zeroed variables longer, and a state restores those only at this
-  build's size, so a save state made by a build before tower mode loads
-  without them, as after `drops.c` came in (memory card saves are not
-  touched).
+  rules, and a state saved in the middle of a story comes back to the same
+  page on the same stage (the scene, its characters, the cache of mod
+  pictures they stand for are all in the game's memory). It is the last game
+  unit, so no game variable moves; it does make the game's zeroed variables
+  longer (`gTower` is about 16.5 KB, a whole story's text; the stage's upload
+  buffers about 45 KB more), and a state restores those only at this build's
+  size, so a save state made by a build before this one loads without them,
+  as after `drops.c` came in (memory card saves are not touched).
 - Beside the save, as `tower/<slot token>.txt` in the user folder, read when
   the save is loaded and written when it is saved (as the card packs' progress
   is), one section per tower by its mod's id:
@@ -269,8 +405,10 @@ mod without its tower.
 |---|---|
 | `src/pc/tower/tower_config.c` | the key as read, with its notes; the progress and its file format |
 | `src/pc/tower/tower.c` | the unlock, the floor's rules, LP and deck in its duel, the duelists' conditions, the save's file and the state chunk |
-| `src/pc/tower/tower_screen.c` | the screen: its steps, text, portraits, the duel's arming and its result |
-| `src/pc/game/zz_tower_storage.c` | `gTower`, and the two calls only game code reaches (the box's layout reset, the title's wall) |
+| `src/pc/tower/tower_screen.c` | the screen: its steps, text, a story's stage in the game's codes, the duel's arming and its result |
+| `src/pc/tower/tower_art.c` | a story's PNGs made into the game's pictures (a scene record, a character's sheet and parts bank) |
+| `src/pc/game/zz_tower_storage.c` | `gTower`, and what only game code reaches: the box's layout reset, the title's wall, the stage up and down, a mod's scene put in VRAM, a mod's character in the cache |
+| `src/game/script_image_objects.c`, `display_effect_resource_setup.c` | the two hooks (`#ifdef MEMORIES_PC`): a mod's scene id, a mod's character |
 | `src/game/main_loop.c` | mode 17, the tower's, run beside the game's seventeen rather than growing the table |
 | `src/game/main_apply_menu_selection.c` | the button's choice (12, none of the game's) |
 | `src/pc/platform/title_config.c`, `title_menu.c` | the button, the action, dimmed while locked |
@@ -293,7 +431,11 @@ what the end-to-end test follows.
 - `pc_fusion_rules`, `pc_duelists`, `pc_title_config`: the rules through
   `CardRules_*` and the `Duel_Check*` the CPU asks, a code mod's answer
   overruled; the duelists' conditions; the button and the action.
-- `tools/pc/fm_editor/tests/test_tower.py`: the Tower tab.
+- `pc_tower` also reads every key of a story's stage, right and wrong, its
+  defaults and the story's cut.
+- `tools/pc/fm_editor/tests/test_tower.py`: the Tower tab, the stage's text
+  form and its round trip, the checks, the scene names and keys against
+  `tower_config.c`, the pickers' pictures from an archive's bytes.
 - `tests/pc/tower/tower_e2e.py`, in the running game through the control
   channel ([agent control](agent-control.md)), with the tests' tower: the
   button, floor 1 won (its reward, the save at its checkpoint), floor 2 lost
@@ -302,9 +444,16 @@ what the end-to-end test follows.
   the checkpoint; a new process LOADs and is at floor 2; the tower-only
   duelist out of Free Duel until floor 2 is won; floor 3 (an equip refused)
   clears the tower, its ending told and the climb saved, Nitemare on the grid; `after_ending`
-  dimmed and buzzing until the save's byte says the ending was seen; and,
-  without the mod, the title's menus the same frames as a build without tower
-  mode.
+  dimmed and buzzing until the save's byte says the ending was seen; every
+  story (intro, before, after, lose, ending) told on a stage; the stage
+  itself (a phase of its own, with PNGs the test draws): the campaign's first
+  scene (Simon Muran at the palace gate) as the campaign shows it, against a
+  NEW GAME run's frame -- no pixel above the box differs, only the words in
+  it --, a mod's character on the right, a mod's scene mid-story with that
+  character out and back whole, a pan, a save state taken mid-story loading
+  to the same page, a campaign portrait, the stage down after, and `"dim"`;
+  and, without the mod, the title's menus the same frames as a build without
+  tower mode.
 
   ```sh
   python tests/pc/tower/tower_e2e.py --exe tmp/pc/game32/memories-pc.exe \

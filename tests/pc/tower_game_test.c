@@ -44,6 +44,12 @@ int Duelists_Named(const char *text) { return atoi(text) > 0 ? atoi(text) : -1; 
 int Cards_Valid(int id) { return id >= 1 && id <= 722; }
 int Cards_Named(const char *text) { return atoi(text); }
 int Tables_TerrainNamed(const char *text) { return atoi(text) >= 1 && atoi(text) <= 6 ? atoi(text) : -1; }
+/* The stage's leanings (tower_config.c): no folder, no pictures made. */
+const char *Mods_Directory(int mod) { (void)mod; return NULL; }
+int Paths_Contained(const char *relative) { return relative && relative[0] != '/' && !strstr(relative, ".."); }
+int Duelists_BaseId(int duelist) { return duelist > 39 ? 1 : duelist; }
+const char *Duelists_Name(int duelist) { (void)duelist; return "a duelist"; }
+void Tower_MakeArt(TowerConfig *config) { (void)config; }
 /* The duelists' conditions: "beat" is met by the save's first byte. */
 int Duelists_ConditionsMet(const void *state, const char *beat, int wins, int story, const char *card, int copies)
 {
@@ -111,7 +117,7 @@ static void tower_of(const char *text)
     assert(document);
     documents[document_count++] = document;
     Tower_Reset();
-    Tower_Read("t", Json_Root(document));
+    Tower_Read("t", NULL, Json_Root(document));
     assert(Tower_Config());
 }
 

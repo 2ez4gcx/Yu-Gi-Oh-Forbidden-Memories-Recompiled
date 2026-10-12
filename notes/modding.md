@@ -1428,8 +1428,9 @@ the whole thing rests on.
 A mod's `"tower"` puts one more button in the title's second menu: a run of
 duels, its floors, each an opponent with a field, a deck, starting LP and
 rules of its own (no fusions, no equips, held by the game's own checks for the
-player and the CPU alike), a reward, and lines of story told in the game's
-dialogue box with the speaker's portrait. It opens always, after the save has
+player and the CPU alike), a reward, and lines of story told as the campaign
+tells its own: in its stone-framed box over a scene picture, with up to two of
+its large characters on top (the disc's, or PNGs of the mod's). It opens always, after the save has
 seen the ending, or on the duelists' unlock conditions; a loss goes back to
 the last checkpoint or to the first floor; a save keeps the climb. A duelist a
 mod adds may be the tower's alone (`"tower_only"`), let out into Free Duel by a
@@ -1441,15 +1442,15 @@ won floor, and any duelist's `unlock` may ask for a floor won (`"tower"`).
     "unlock": "after_ending",
     "floors": [
         {"duelist": "Simon Muran", "checkpoint": true, "reward": {"cards": ["Kuriboh"]},
-         "before": "Show me what you have learned."},
+         "before": {"scene": "throne room", "lines": ["Show me what you have learned."]}},
         {"duelist": "Seto", "field": "Dark", "no_fusions": true, "life_points": {"opponent": 4000}}
     ]
 }
 ```
 
 A mod with a tower asks for `"min_api": 13`. [Tower mode](tower-mode.md) has
-every key, what the player sees, where the progress is kept and how the screen
-is drawn.
+every key, the scenes and characters a story may use, what the player sees,
+where the progress is kept and how the screen is drawn.
 
 ## Starter decks: what a new game begins with
 

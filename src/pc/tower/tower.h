@@ -5,8 +5,9 @@
  * A tower is a run of duels, its floors, that the title's second menu
  * offers once a mod with a "tower" is on: each floor an opponent with a
  * field, a deck, starting LP and rules of its own (no fusions, no equips),
- * a reward, and lines of story before and after it, told in the game's
- * dialogue box with the speaker's portrait. Progress is the save's: it is
+ * a reward, and lines of story before and after it, told as the campaign
+ * tells its own (a scene, its large characters, its stone-framed box: the
+ * stage below). Progress is the save's: it is
  * kept beside the memory card's block, as the card packs' is, and in every
  * save state.
  *
@@ -27,6 +28,8 @@ struct JsonValue;
 #define TOWER_REWARD_CARDS 10
 #define TOWER_REWARD_DUELISTS 8
 #define TOWER_LINE_TEXT 1024          /* one line of story as written */
+#define TOWER_STORY_TEXT 12000        /* a story's letters, all told in one box (TOWER_TEXT_SIZE) */
+#define TOWER_LINE_CODES 48           /* what a line's stage may add to them: its codes, at most */
 #define TOWER_CAMPAIGN_PORTRAITS 25   /* the campaign's dialogue portraits (campaign_scene_package.h) */
 
 /* The title's second menu returns this for the tower's button
@@ -41,7 +44,7 @@ enum { TOWER_RULE_NO_FUSIONS = 1, TOWER_RULE_NO_EQUIPS = 2 };
 enum { TOWER_ON_LOSE_CHECKPOINT, TOWER_ON_LOSE_RESTART };
 enum { TOWER_UNLOCK_ALWAYS, TOWER_UNLOCK_CONDITIONS, TOWER_UNLOCK_NEVER };
 /* A line's speaker: a duelist id (1 up), or one of these. */
-enum { TOWER_SPEAKER_NONE = 0, TOWER_SPEAKER_FLOOR = -1 };
+enum { TOWER_SPEAKER_NONE = 0, TOWER_SPEAKER_FLOOR = -1, TOWER_SPEAKER_LEFT = -2, TOWER_SPEAKER_RIGHT = -3 };
 
 /* "unlock": "always" (the default), "after_ending", or an object of the
  * duelists' conditions (pc/free_duel/duelists.h) and "after_ending": true.
@@ -57,10 +60,61 @@ typedef struct {
     int copies;
 } TowerUnlock;
 
-/* One line of story: what one dialogue box says, page after page. */
+/* --- the stage a story is told on (notes/tower-mode.md, Story) ----------------
+ *
+ * The campaign's own: a scene picture (ScriptImage_RequestTransfer's
+ * records, or a mod's PNG made into one), up to two of its large characters
+ * on the left and the right (the display-effect records F6 01-40 bring in,
+ * or a mod's PNG made into one), and its stone-framed box. */
+
+/* A scene: the game's image id (its digits are its decimal digits, BCD:
+ * 22 is 0x022, 139 is 0x139), or a mod's picture, TOWER_SCENE_ART up: ids
+ * that are not BCD, which no retail script asks for. */
+#define TOWER_SCENE_KEEP (-1)         /* a line that does not change it */
+#define TOWER_SCENE_DEFAULT 0x022     /* "torch corridor": a story that names none */
+#define TOWER_SCENE_NAMES 42          /* mode 0's pictures, 0x000-0x041, have names */
+/* The campaign's large characters: the display-effect records 0x01-0x40.
+ * The ones the disc keeps empty ("no data" sheets) carry a mod's pictures
+ * instead (TOWER_CHARACTER_POOL), so a mod cannot name them. */
+#define TOWER_CHARACTERS 0x40
+#define TOWER_CHARACTER_POOL 5        /* display-effect cache slots (func_8003A560.h) */
+#define TOWER_ARTS 96                 /* a tower's PNGs, scenes and characters together */
+#define TOWER_ART_PATH 512
+#define TOWER_PORTRAIT_SPEAKER 100    /* "portrait": the speaker's own (Free Duel) face */
+#define TOWER_PORTRAIT_AUTO (-2)      /* the speaker's face only when it has no character on stage */
+
+enum { TOWER_SIDE_LEFT, TOWER_SIDE_RIGHT, TOWER_SIDES };
+/* What stands on a side. */
+enum { TOWER_CAST_KEEP, TOWER_CAST_NONE, TOWER_CAST_RETAIL, TOWER_CAST_ART, TOWER_CAST_OPPONENT };
 typedef struct {
-    int speaker;                      /* TOWER_SPEAKER_*, or a duelist whose portrait shows */
-    int portrait;                     /* one of the campaign's 25, 0-24; -1 for the speaker's */
+    int kind;                         /* TOWER_CAST_* */
+    int id;                           /* the retail character (1-0x40), or the art's index */
+    int expression;                   /* 0-3: the retail sheet's expression (F6 flags 0x10/0x40) */
+    int duelist;                      /* the duelist it was named by, 0 none: a speaker finds it */
+} TowerCast;
+
+/* A mod's PNG, made into the game's kind of picture when the tower is
+ * built (tower_art.c): a scene's 320 x 160 at 8 bits, or a character's
+ * sheet (up to 256 x 256, its bottom edge standing on the box). */
+enum { TOWER_ART_SCENE, TOWER_ART_CHARACTER };
+typedef struct {
+    int kind;                         /* TOWER_ART_* */
+    int flip;                         /* a character turned to face the other way */
+    char path[TOWER_ART_PATH];
+    int ready;                        /* made (tower_art.c); 0: it shows nothing */
+    int width, height;                /* a character's, in texels */
+    unsigned char *texels;            /* scene: 320 x 160; character: the cache slot's 384 x 256 */
+    unsigned short clut[256];
+    unsigned char *bank;              /* a character's parts (0x800 bytes), as a disc record's */
+} TowerArt;
+
+/* One line of story: what one page or more of the box says. */
+typedef struct {
+    int speaker;                      /* TOWER_SPEAKER_*, or a duelist */
+    int portrait;                     /* a campaign portrait 0-24, TOWER_PORTRAIT_SPEAKER, AUTO, or -1 none */
+    int scene;                        /* TOWER_SCENE_KEEP, or the scene from this line on */
+    TowerCast cast[TOWER_SIDES];      /* KEEP: the side as it was */
+    int pan, pan_x, pan_y, pan_frames, pan_wait;   /* "pan": the viewport moved to x, y */
     char *text;                       /* UTF-8, as written */
 } TowerLine;
 
@@ -92,11 +146,15 @@ typedef struct {
     int music;                        /* the screen's song, -1 the game's (TOWER_DEFAULT_SONG) */
     TowerUnlock unlock;
     int on_lose;                      /* TOWER_ON_LOSE_* */
+    int scene;                        /* a story's scene when it names none (TOWER_SCENE_DEFAULT) */
+    int dim;                          /* "dim": a character not speaking is drawn darker */
     TowerStory intro, ending, lose;
     int floor_count;
     TowerFloor floors[TOWER_MAX_FLOORS];
     TowerLine *lines;
     int line_count, line_room;
+    TowerArt arts[TOWER_ARTS];
+    int art_count;
 } TowerConfig;
 
 /* --- the tower as written (tower_config.c) -------------------------------- */
@@ -106,8 +164,25 @@ void Tower_Reset(void);
 /* One mod's manifest: its "tower", if it has one, over the one read before
  * (the last mod in load order to declare a tower has the menu's). Names a
  * duelist and a card are resolved now, so Duelists_Build and Cards_Build
- * have run. */
-void Tower_Read(const char *mod, const struct JsonValue *manifest);
+ * have run. `directory` is the mod's folder its PNGs are in (NULL: it has
+ * none, and a PNG it names is noted). */
+void Tower_Read(const char *mod, const char *directory, const struct JsonValue *manifest);
+/* A scene's name (mode 0's, "torch corridor") to its id, -1 for none; and
+ * back, NULL for an id without one. */
+int Tower_SceneNamed(const char *name);
+const char *Tower_SceneName(int id);
+/* Whether `id` is a picture of the disc's (mode 0 0x000-0x041, mode 1
+ * 0x100-0x141, mode 2 0x200-0x212). */
+int Tower_RetailScene(int id);
+/* A retail duelist's large character in the campaign (the one its dialogue
+ * brings in before its duel), 0 for none. */
+int Tower_DuelistCharacter(int duelist);
+/* Whether the disc keeps character `id` (0x01-0x40) empty: then it carries
+ * a mod's picture instead. */
+int Tower_EmptyCharacter(int id);
+/* The tower's PNGs made into the game's pictures (tower_art.c), once the
+ * tower is read. */
+void Tower_MakeArt(TowerConfig *config);
 /* Every active mod's, in load order; once, from Cards_Build. */
 void Tower_Build(void);
 /* The tower this run has, or NULL. */

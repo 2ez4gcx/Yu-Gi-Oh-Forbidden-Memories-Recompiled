@@ -11,6 +11,7 @@
 #include "pc/cards/cards.h"
 #include "pc/cards/tables.h"
 #include "pc/free_duel/duelists.h"
+#include "pc/platform/paths.h"
 #include <ctype.h>
 #include <stdarg.h>
 #include <stdlib.h>
@@ -18,8 +19,9 @@
 
 static TowerConfig config;
 static int defined;
+static const char *reading_directory;   /* the mod's folder while its tower is read */
 
-/* Every line's text, freed with the tower. */
+/* Every line's text and every PNG made, freed with the tower. */
 static void free_lines(void)
 {
     int i;
@@ -27,6 +29,84 @@ static void free_lines(void)
     free(config.lines);
     config.lines = NULL;
     config.line_count = config.line_room = 0;
+    for (i = 0; i < config.art_count; i++) {
+        free(config.arts[i].texels);
+        free(config.arts[i].bank);
+    }
+    config.art_count = 0;
+}
+
+/* --- the campaign's scenes and characters ---------------------------------- */
+
+/* Mode 0's pictures (ScriptImage_RequestTransfer, 33 sectors from WA sector
+ * 0x21D5), named for what they show; 0x042-0x049 are empty on the disc. */
+static const char *const scene_names[TOWER_SCENE_NAMES] = {
+    "black", "palace gate", "palace chamber", "jungle temple door", "card shop", "colonnade hall",
+    "moonlit colonnade", "collapsed ruins", "classroom", "tournament lounge", "card collection",
+    "shop street", "temple ruins", "destroyed town", "ruined altar room", "ruined chamber",
+    "sunlit ruined hall", "fiery valley gate", "seal shrine", "green pyramid", "green mausoleum",
+    "obelisk avenue", "torch corridor", "cliff temple", "night temple stairs", "jungle pyramid",
+    "green shrine", "dusk tower", "altar hall", "desert sphinx", "sphinx shrine", "meadow temple",
+    "twin statue shrine", "throne room", "hall of fires", "eye chamber", "town at night",
+    "night balcony", "golden doors", "golden door chamber", "statue gallery", "burning pyramid",
+};
+
+static int bcd(int index) { return (index / 10) << 4 | index % 10; }
+static int unbcd(int id) { return ((id >> 4) & 0xF) * 10 + (id & 0xF); }
+
+int Tower_SceneNamed(const char *name)
+{
+    int i;
+    for (i = 0; i < TOWER_SCENE_NAMES; i++) {
+        const char *a = name, *b = scene_names[i];
+        for (; *a && *b; a++, b++) {
+            int x = tolower((unsigned char)*a);
+            if (x == '_' || x == '-') x = ' ';
+            if (x != (unsigned char)*b) break;
+        }
+        if (!*a && !*b) return bcd(i);
+    }
+    return -1;
+}
+
+const char *Tower_SceneName(int id)
+{
+    if (id < 0 || id >= 0x100 || (id & 0xF) > 9 || unbcd(id) >= TOWER_SCENE_NAMES) return NULL;
+    return scene_names[unbcd(id)];
+}
+
+int Tower_RetailScene(int id)
+{
+    static const int counts[3] = {TOWER_SCENE_NAMES, 42, 13};
+    int mode = id >> 8;
+    if (id < 0 || mode > 2 || (id & 0xF) > 9 || ((id >> 4) & 0xF) > 9) return 0;
+    return unbcd(id & 0xFF) < counts[mode];
+}
+
+/* The character each retail duelist's own dialogue brings in before its
+ * duel: the last F6 01-40 of the text that starts its duel (F8 0D
+ * <duelist>) in the campaign's dialogue; Jono's two duels show none there,
+ * and he is 0x02 where he speaks ({fx 02 00} "Can you believe that guy!?",
+ * text 0x521); Heishin's second, Heishin's own 0x07. 0: the campaign never
+ * shows one (the villagers, the five shrine mages). */
+static const unsigned char duelist_characters[39] = {
+    0,
+    0x01, 0x03, 0x02, 0, 0, 0, 0x04, 0x07, 0x10, 0x11,          /* Simon Muran .. Weevil Underwood */
+    0x12, 0x13, 0x0F, 0x14, 0x15, 0x2F, 0x0E, 0x18, 0x02, 0x03, /* Mai Valentine .. Teana 2nd */
+    0, 0x1A, 0, 0x1C, 0, 0x1E, 0, 0x20, 0, 0x22,                /* Ocean Mage .. High Mage Kepura */
+    0x2E, 0x04, 0x23, 0x24, 0x07, 0x04, 0x25, 0x26,             /* Labyrinth Mage .. Nitemare */
+};
+
+int Tower_DuelistCharacter(int duelist)
+{
+    if (duelist <= 0) return 0;
+    if (duelist >= (int)sizeof(duelist_characters)) duelist = Duelists_BaseId(duelist);
+    return duelist > 0 && duelist < (int)sizeof(duelist_characters) ? duelist_characters[duelist] : 0;
+}
+
+int Tower_EmptyCharacter(int id)
+{
+    return id == 0x00 || id == 0x05 || id == 0x0B || id == 0x27 || id == 0x28 || id == 0x29;
 }
 
 void Tower_Reset(void)
@@ -108,7 +188,224 @@ static int card_named(const char *mod, const char *where, const JsonValue *value
     return id;
 }
 
-static int add_line(int speaker, int portrait, const char *text)
+static int read_flag(const char *mod, const char *where, const JsonValue *object, const char *key);
+
+/* A PNG the tower names, relative to the mod's folder: its art's index,
+ * -1 noted. The same file of the same kind is made once. */
+static int art_named(const char *mod, const char *where, const char *file, int kind, int flip)
+{
+    char path[TOWER_ART_PATH];
+    int i;
+    if (!reading_directory) {
+        Mods_Note(mod, "%s: %s: the mod has no folder to find it in", where, file);
+        return -1;
+    }
+    if (!Paths_Contained(file)) {
+        Mods_Note(mod, "%s: %s is not a path inside the mod", where, file);
+        return -1;
+    }
+    if (snprintf(path, sizeof(path), "%s/%s", reading_directory, file) >= (int)sizeof(path)) {
+        Mods_Note(mod, "%s: the path of %s is too long", where, file);
+        return -1;
+    }
+    for (i = 0; i < config.art_count; i++) {
+        if (config.arts[i].kind == kind && config.arts[i].flip == flip && !strcmp(config.arts[i].path, path)) return i;
+    }
+    if (config.art_count == TOWER_ARTS) {
+        Mods_Note(mod, "%s: a tower has at most %d pictures of its own; %s is left out", where, TOWER_ARTS, file);
+        return -1;
+    }
+    memset(&config.arts[config.art_count], 0, sizeof(config.arts[0]));
+    config.arts[config.art_count].kind = kind;
+    config.arts[config.art_count].flip = flip;
+    snprintf(config.arts[config.art_count].path, sizeof(config.arts[0].path), "%s", path);
+    return config.art_count++;
+}
+
+static int is_png(const char *text)
+{
+    size_t length = text ? strlen(text) : 0;
+    return length > 4 && same_word(text + length - 4, ".png");
+}
+
+/* "scene": a name of mode 0's, the game's id in decimal digits (22, 139,
+ * 205), "none" (black), or a PNG of the mod's. TOWER_SCENE_KEEP, noted,
+ * when it is none of those. */
+static int read_scene(const char *mod, const char *where, const JsonValue *value)
+{
+    const char *word = Json_String(value, NULL);
+    int id;
+    if (Json_TypeOf(value) == JSON_NUMBER) {
+        long number = Json_Number(value, -1);
+        id = number >= 0 && number <= 299 ? (int)((number / 100) << 8 | bcd((int)(number % 100))) : -1;
+        if (id >= 0 && Tower_RetailScene(id)) return id;
+        Mods_Note(mod, "%s: \"scene\" %ld is none of the disc's (0-41, 100-141, 200-212)", where, number);
+        return TOWER_SCENE_KEEP;
+    }
+    if (word && is_png(word)) {
+        int art = art_named(mod, where, word, TOWER_ART_SCENE, 0);
+        if (art < 0) return TOWER_SCENE_KEEP;
+        if (art >= TOWER_SCENE_ARTS) {
+            Mods_Note(mod, "%s: a tower has at most %d scenes of its own; %s is left out", where,
+                      TOWER_SCENE_ARTS, word);
+            return TOWER_SCENE_KEEP;
+        }
+        return TOWER_SCENE_ART + art;
+    }
+    if (word && (id = Tower_SceneNamed(word)) >= 0) return id;
+    if (word && same_word(word, "none")) return 0x000;
+    Mods_Note(mod, "%s: \"scene\" is a scene's name (\"torch corridor\"), its number (22, 139) or a PNG", where);
+    return TOWER_SCENE_KEEP;
+}
+
+/* One side's character: "none", a character of the campaign's by its
+ * number (1-64), a duelist ("Seto"; "opponent", the floor's), a PNG of the
+ * mod's, or an object of one of those ("character", "duelist", "image")
+ * with "expression" (0-3) and, for a PNG, "flip". */
+static TowerCast read_cast(const char *mod, const char *where, const JsonValue *value)
+{
+    static const char *const known[] = {"character", "duelist", "image", "expression", "flip"};
+    TowerCast cast;
+    const JsonValue *what = value;
+    const char *word;
+    long number;
+    int flip = 0;
+    memset(&cast, 0, sizeof(cast));
+    cast.kind = TOWER_CAST_NONE;
+    if (Json_TypeOf(value) == JSON_OBJECT) {
+        check_keys(mod, where, value, known, sizeof(known) / sizeof(known[0]));
+        what = Json_Member(value, "character");
+        if (!what) what = Json_Member(value, "duelist");
+        if (!what) what = Json_Member(value, "image");
+        if (Json_Member(value, "character") && (Json_Member(value, "duelist") || Json_Member(value, "image")))
+            Mods_Note(mod, "%s: a side is a \"character\", or a \"duelist\" and its \"image\"", where);
+        if (Json_Member(value, "expression")) {
+            if (whole(Json_Member(value, "expression"), 0, 3, &number)) cast.expression = (int)number;
+            else Mods_Note(mod, "%s: \"expression\" is 0 to 3", where);
+        }
+        flip = read_flag(mod, where, value, "flip");
+        if (Json_Member(value, "character") && Json_TypeOf(what) != JSON_NUMBER) {
+            Mods_Note(mod, "%s: \"character\" is one of the campaign's, 1 to 64", where);
+            return cast;
+        }
+        if (Json_Member(value, "image") && !Json_Member(value, "duelist") && !is_png(Json_String(what, NULL))) {
+            Mods_Note(mod, "%s: \"image\" is a PNG of the mod's", where);
+            return cast;
+        }
+    }
+    if (Json_TypeOf(value) == JSON_OBJECT && Json_Member(value, "image") && what == Json_Member(value, "duelist")) {
+        /* An image whose duelist is empty or "none" is the image alone. */
+        const char *named = Json_String(what, NULL);
+        if (Json_TypeOf(what) == JSON_NULL || (named && (same_word(named, "none") || !named[0])))
+            what = Json_Member(value, "image");
+    }
+    word = Json_String(what, NULL);
+    if (!what || Json_TypeOf(what) == JSON_NULL || (word && (same_word(word, "none") || !word[0]))) return cast;
+    if (Json_TypeOf(value) == JSON_OBJECT && Json_Member(value, "image") && what == Json_Member(value, "duelist")) {
+        /* {"image": ..., "duelist": ...}: the mod's picture of that duelist,
+         * whose lines it then speaks. */
+        const char *file = Json_String(Json_Member(value, "image"), NULL);
+        int art = file && is_png(file) ? art_named(mod, where, file, TOWER_ART_CHARACTER, flip) : -1;
+        if (art < 0) {
+            if (!file || !is_png(file)) Mods_Note(mod, "%s: \"image\" is a PNG of the mod's", where);
+            return cast;
+        }
+        cast.kind = TOWER_CAST_ART;
+        cast.id = art;
+        cast.duelist = word && same_word(word, "opponent") ? TOWER_SPEAKER_FLOOR : duelist_named(mod, where, what);
+        return cast;
+    }
+    if (Json_TypeOf(what) == JSON_NUMBER && !(Json_TypeOf(value) == JSON_OBJECT && what == Json_Member(value, "duelist"))) {
+        if (!whole(what, 1, TOWER_CHARACTERS, &number) || Tower_EmptyCharacter((int)number)) {
+            Mods_Note(mod, "%s: character %ld is none of the campaign's (1-64; 5, 11, 39, 40 and 41 are empty)",
+                      where, Json_Number(what, 0));
+            return cast;
+        }
+        cast.kind = TOWER_CAST_RETAIL;
+        cast.id = (int)number;
+        return cast;
+    }
+    if (word && is_png(word)) {
+        int art = art_named(mod, where, word, TOWER_ART_CHARACTER, flip);
+        if (art >= 0) {
+            cast.kind = TOWER_CAST_ART;
+            cast.id = art;
+        }
+        return cast;
+    }
+    if (flip) Mods_Note(mod, "%s: \"flip\" turns a PNG of the mod's, not a character of the campaign's", where);
+    if (word && same_word(word, "opponent")) {
+        cast.kind = TOWER_CAST_OPPONENT;
+        cast.duelist = TOWER_SPEAKER_FLOOR;
+        return cast;
+    }
+    cast.duelist = duelist_named(mod, where, what);
+    if (!cast.duelist) return cast;
+    cast.id = Tower_DuelistCharacter(cast.duelist);
+    if (!cast.id) {
+        const char *name = Duelists_Name(cast.duelist);
+        Mods_Note(mod, "%s: %s has no character in the campaign; give the side a PNG", where,
+                  name ? name : "the duelist");
+        cast.duelist = 0;
+        return cast;
+    }
+    cast.kind = TOWER_CAST_RETAIL;
+    return cast;
+}
+
+/* "characters": {"left": ..., "right": ...}; a side it does not name stays
+ * as it was. */
+static void read_characters(const char *mod, const char *where, const JsonValue *value,
+                            TowerCast cast[TOWER_SIDES])
+{
+    static const char *const known[] = {"left", "right"};
+    static const char *const sides[TOWER_SIDES] = {"left", "right"};
+    char at[200];
+    int side;
+    if (Json_TypeOf(value) != JSON_OBJECT) {
+        Mods_Note(mod, "%s: \"characters\" is {\"left\": ..., \"right\": ...}", where);
+        return;
+    }
+    check_keys(mod, where, value, known, sizeof(known) / sizeof(known[0]));
+    for (side = 0; side < TOWER_SIDES; side++) {
+        const JsonValue *one = Json_Member(value, sides[side]);
+        if (!one) continue;
+        snprintf(at, sizeof(at), "%s %s", where, sides[side]);
+        cast[side] = read_cast(mod, at, one);
+    }
+}
+
+/* "pan": {"x": ..., "y": ..., "frames": ..., "wait": ...}: the scene's
+ * view moved there over that many frames (F7 0B, the campaign's
+ * Script_UpdateViewportTween); with "wait" the words wait for it. */
+static void read_pan(const char *mod, const char *where, const JsonValue *value, TowerLine *line)
+{
+    static const char *const known[] = {"x", "y", "frames", "wait"};
+    long number;
+    if (Json_TypeOf(value) != JSON_OBJECT) {
+        Mods_Note(mod, "%s: \"pan\" is {\"x\": ..., \"y\": ..., \"frames\": ...}", where);
+        return;
+    }
+    check_keys(mod, where, value, known, sizeof(known) / sizeof(known[0]));
+    line->pan = 1;
+    line->pan_x = line->pan_y = 0;
+    line->pan_frames = 60;
+    if (Json_Member(value, "x")) {
+        if (whole(Json_Member(value, "x"), 0, 576, &number)) line->pan_x = (int)number;
+        else Mods_Note(mod, "%s: pan \"x\" is 0 to 576", where);
+    }
+    if (Json_Member(value, "y")) {
+        if (whole(Json_Member(value, "y"), 0, 96, &number)) line->pan_y = (int)number;
+        else Mods_Note(mod, "%s: pan \"y\" is 0 to 96", where);
+    }
+    if (Json_Member(value, "frames")) {
+        if (whole(Json_Member(value, "frames"), 1, 3600, &number)) line->pan_frames = (int)number;
+        else Mods_Note(mod, "%s: pan \"frames\" is 1 to 3600", where);
+    }
+    line->pan_wait = read_flag(mod, where, value, "wait");
+}
+
+static int add_line(const TowerLine *staged, const char *text)
 {
     TowerLine *line;
     if (config.line_count == config.line_room) {
@@ -119,8 +416,7 @@ static int add_line(int speaker, int portrait, const char *text)
         config.line_room = room;
     }
     line = &config.lines[config.line_count];
-    line->speaker = speaker;
-    line->portrait = portrait;
+    *line = *staged;
     line->text = malloc(strlen(text) + 1);
     if (!line->text) return 0;
     strcpy(line->text, text);
@@ -128,28 +424,56 @@ static int add_line(int speaker, int portrait, const char *text)
     return 1;
 }
 
-/* One line: its text, alone or with who says it. */
-static void read_line(const char *mod, const char *where, const JsonValue *value, int speaker)
+/* A line that changes nothing but its words. */
+static TowerLine plain_line(int speaker)
 {
-    static const char *const known[] = {"text", "speaker", "portrait"};
+    TowerLine line;
+    memset(&line, 0, sizeof(line));
+    line.speaker = speaker;
+    line.portrait = TOWER_PORTRAIT_AUTO;
+    line.scene = TOWER_SCENE_KEEP;
+    return line;
+}
+
+/* "speaker": "left", "right", "none", "opponent" or a duelist. */
+static int read_speaker(const char *mod, const char *where, const JsonValue *who)
+{
+    const char *word = Json_String(who, NULL);
+    if (Json_TypeOf(who) == JSON_NULL || (word && (same_word(word, "none") || !word[0]))) return TOWER_SPEAKER_NONE;
+    if (word && same_word(word, "opponent")) return TOWER_SPEAKER_FLOOR;
+    if (word && same_word(word, "left")) return TOWER_SPEAKER_LEFT;
+    if (word && same_word(word, "right")) return TOWER_SPEAKER_RIGHT;
+    return duelist_named(mod, where, who);
+}
+
+/* One line: its words, alone or with who says them and what the stage does
+ * from it on. */
+static void read_line(const char *mod, const char *where, const JsonValue *value, const TowerLine *defaults)
+{
+    static const char *const known[] = {"text", "speaker", "portrait", "scene", "characters", "pan"};
     const char *text = Json_String(value, NULL);
-    int portrait = -1;
+    TowerLine line = *defaults;
     if (!text && Json_TypeOf(value) == JSON_OBJECT) {
-        const JsonValue *who = Json_Member(value, "speaker"), *face = Json_Member(value, "portrait");
+        const JsonValue *who = Json_Member(value, "speaker"), *face = Json_Member(value, "portrait"), *part;
         check_keys(mod, where, value, known, sizeof(known) / sizeof(known[0]));
         text = Json_String(Json_Member(value, "text"), NULL);
-        if (who) {
-            const char *word = Json_String(who, NULL);
-            if (Json_TypeOf(who) == JSON_NULL || (word && (same_word(word, "none") || !word[0]))) speaker = TOWER_SPEAKER_NONE;
-            else if (word && same_word(word, "opponent")) speaker = TOWER_SPEAKER_FLOOR;
-            else speaker = duelist_named(mod, where, who);
-        }
+        if (who) line.speaker = read_speaker(mod, where, who);
         if (face) {
             long number;
-            if (whole(face, 0, TOWER_CAMPAIGN_PORTRAITS - 1, &number)) portrait = (int)number;
-            else Mods_Note(mod, "%s: \"portrait\" is one of the campaign's portraits, 0 to %d", where,
-                           TOWER_CAMPAIGN_PORTRAITS - 1);
+            const char *word = Json_String(face, NULL);
+            if (whole(face, 0, TOWER_CAMPAIGN_PORTRAITS - 1, &number)) line.portrait = (int)number;
+            else if ((word && same_word(word, "speaker")) || (Json_TypeOf(face) == JSON_BOOL && Json_Bool(face, 0)))
+                line.portrait = TOWER_PORTRAIT_SPEAKER;
+            else if ((word && same_word(word, "none")) || Json_TypeOf(face) == JSON_NULL ||
+                     Json_TypeOf(face) == JSON_BOOL)
+                line.portrait = -1;
+            else
+                Mods_Note(mod, "%s: \"portrait\" is one of the campaign's portraits (0 to %d), \"speaker\" or \"none\"",
+                          where, TOWER_CAMPAIGN_PORTRAITS - 1);
         }
+        if ((part = Json_Member(value, "scene"))) line.scene = read_scene(mod, where, part);
+        if ((part = Json_Member(value, "characters"))) read_characters(mod, where, part, line.cast);
+        if ((part = Json_Member(value, "pan"))) read_pan(mod, where, part, &line);
     }
     if (!text) {
         Mods_Note(mod, "%s: a line is text, or {\"text\": ..., \"speaker\": ...}", where);
@@ -159,33 +483,58 @@ static void read_line(const char *mod, const char *where, const JsonValue *value
         char cut[TOWER_LINE_TEXT];
         Mods_Note(mod, "%s: a line is at most %d bytes; the rest is left out", where, TOWER_LINE_TEXT - 1);
         snprintf(cut, sizeof(cut), "%s", text);
-        add_line(speaker, portrait, cut);
+        add_line(&line, cut);
         return;
     }
     if (!text[0]) return;
-    add_line(speaker, portrait, text);
+    add_line(&line, text);
 }
 
-/* A story: a line, or a list of them. `speaker` says them unless a line
- * names another. */
+/* A story: a line, a list of them, or {"scene": ..., "characters": ...,
+ * "lines": [...]}, whose stage is its first line's. `speaker` says the
+ * lines that name none. */
 static TowerStory read_story(const char *mod, const char *where, const JsonValue *value, int speaker)
 {
+    static const char *const known[] = {"scene", "characters", "lines"};
     TowerStory story;
+    TowerLine first = plain_line(speaker), rest = plain_line(speaker);
+    const JsonValue *lines = value;
+    size_t letters = 0;
     char at[160];
+    int i;
     story.first = config.line_count;
     story.count = 0;
     if (!value) return story;
-    if (Json_TypeOf(value) == JSON_ARRAY) {
+    if (Json_TypeOf(value) == JSON_OBJECT && Json_Member(value, "lines")) {
+        const JsonValue *part;
+        check_keys(mod, where, value, known, sizeof(known) / sizeof(known[0]));
+        if ((part = Json_Member(value, "scene"))) first.scene = read_scene(mod, where, part);
+        if ((part = Json_Member(value, "characters"))) read_characters(mod, where, part, first.cast);
+        lines = Json_Member(value, "lines");
+    }
+    if (Json_TypeOf(lines) == JSON_ARRAY) {
         const JsonValue *item;
         int index = 0;
-        for (item = Json_At(value, 0); item; item = Json_Next(item), index++) {
+        for (item = Json_At(lines, 0); item; item = Json_Next(item), index++) {
             snprintf(at, sizeof(at), "%s[%d]", where, index);
-            read_line(mod, at, item, speaker);
+            read_line(mod, at, item, config.line_count == story.first ? &first : &rest);
         }
     } else {
-        read_line(mod, where, value, speaker);
+        read_line(mod, where, lines, &first);
     }
     story.count = config.line_count - story.first;
+    /* One box tells a story (tower_screen.c): its words in the game's codes
+     * fit TOWER_STORY_TEXT. */
+    for (i = 0; i < story.count; i++) {
+        letters += strlen(config.lines[story.first + i].text) + TOWER_LINE_CODES;
+        if (letters > TOWER_STORY_TEXT) {
+            Mods_Note(mod, "%s: a story is at most about %d letters; lines %d on are left out", where,
+                      TOWER_STORY_TEXT, i);
+            for (; story.first + i < config.line_count; config.line_count--) free(config.lines[config.line_count - 1].text);
+            story.count = i;
+            break;
+        }
+    }
     return story;
 }
 
@@ -432,10 +781,10 @@ static void read_unlock(const char *mod, const JsonValue *value)
         unlock->kind = TOWER_UNLOCK_ALWAYS;   /* {} asks for nothing */
 }
 
-void Tower_Read(const char *mod, const JsonValue *manifest)
+void Tower_Read(const char *mod, const char *directory, const JsonValue *manifest)
 {
-    static const char *const known[] = {"name", "label", "music", "unlock", "on_lose", "intro", "ending", "lose",
-                                        "floors"};
+    static const char *const known[] = {"name", "label", "music", "unlock", "on_lose", "scene", "dim", "intro",
+                                        "ending", "lose", "floors"};
     const JsonValue *tower = Json_Member(manifest, "tower"), *part, *floor;
     char previous[64];
     int index = 0;
@@ -452,6 +801,7 @@ void Tower_Read(const char *mod, const JsonValue *manifest)
     snprintf(previous, sizeof(previous), "%s", defined ? config.mod : "");
     if (previous[0]) Mods_Note(previous, "tower: %s's tower, loaded after this mod, is the one the menu offers", mod);
     Tower_Reset();
+    reading_directory = directory;
     check_keys(mod, "tower", tower, known, sizeof(known) / sizeof(known[0]));
     snprintf(config.mod, sizeof(config.mod), "%s", mod);
     snprintf(config.name, sizeof(config.name), "%s", Json_String(Json_Member(tower, "name"), mod));
@@ -481,6 +831,12 @@ void Tower_Read(const char *mod, const JsonValue *manifest)
         else if (same_word(word, "restart")) config.on_lose = TOWER_ON_LOSE_RESTART;
         else Mods_Note(mod, "tower: \"on_lose\" is \"checkpoint\" or \"restart\"; checkpoint it is");
     }
+    config.scene = TOWER_SCENE_DEFAULT;
+    if ((part = Json_Member(tower, "scene"))) {
+        int scene = read_scene(mod, "tower", part);
+        if (scene != TOWER_SCENE_KEEP) config.scene = scene;
+    }
+    config.dim = read_flag(mod, "tower", tower, "dim");
     config.intro = read_story(mod, "tower intro", Json_Member(tower, "intro"), TOWER_SPEAKER_NONE);
     config.ending = read_story(mod, "tower ending", Json_Member(tower, "ending"), TOWER_SPEAKER_NONE);
     config.lose = read_story(mod, "tower lose", Json_Member(tower, "lose"), TOWER_SPEAKER_NONE);
@@ -491,6 +847,7 @@ void Tower_Read(const char *mod, const JsonValue *manifest)
         }
         if (read_floor(mod, index, floor, &config.floors[config.floor_count])) config.floor_count++;
     }
+    reading_directory = NULL;
     if (!config.floor_count) {
         Mods_Note(mod, "tower: no floor can be fought; no tower");
         Tower_Reset();
@@ -505,8 +862,9 @@ void Tower_Build(void)
     Tower_Reset();
     for (i = 0; i < Mods_LoadedCount(); i++) {
         int mod = Mods_Loaded(i);
-        if (Mods_Active(mod)) Tower_Read(Mods_Id(mod), Mods_Manifest(mod));
+        if (Mods_Active(mod)) Tower_Read(Mods_Id(mod), Mods_Directory(mod), Mods_Manifest(mod));
     }
+    if (defined) Tower_MakeArt(&config);
 }
 
 /* --- progress ---------------------------------------------------------------- */

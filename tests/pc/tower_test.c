@@ -65,6 +65,14 @@ int Cards_Named(const char *text)
     if (!strcmp(text, "Kuriboh")) return 40;
     return 0;
 }
+/* The stage's leanings: a folder's paths, an added duelist's base, its name;
+ * no picture is made without a game (tower_art.c). */
+const char *Mods_Directory(int mod) { (void)mod; return "folder"; }
+int Paths_Contained(const char *relative) { return relative && relative[0] != '/' && !strstr(relative, ".."); }
+int Duelists_BaseId(int duelist) { return duelist == 40 ? 1 : duelist; }
+const char *Duelists_Name(int duelist) { return duelist == 7 ? "Seto" : "a duelist"; }
+void Tower_MakeArt(TowerConfig *config) { (void)config; }
+
 int Tables_TerrainNamed(const char *text)
 {
     if (!strcmp(text, "Forest")) return 1;
@@ -84,7 +92,7 @@ static void read_as(const char *mod, const char *text)
     CHECK(document != NULL);
     CHECK(document_count < 32);
     documents[document_count++] = document;
-    Tower_Read(mod, Json_Root(document));
+    Tower_Read(mod, "folder", Json_Root(document));
 }
 
 static const TowerLine *line_of(TowerStory story, int index)
@@ -147,7 +155,8 @@ static void every_key(void)
     CHECK(tower->music == 42 && tower->on_lose == TOWER_ON_LOSE_RESTART);
     CHECK(tower->unlock.kind == TOWER_UNLOCK_CONDITIONS && tower->unlock.after_ending);
     CHECK(tower->intro.count == 1 && !strcmp(line_of(tower->intro, 0)->text, "Climb."));
-    CHECK(line_of(tower->intro, 0)->speaker == TOWER_SPEAKER_NONE && line_of(tower->intro, 0)->portrait == -1);
+    CHECK(line_of(tower->intro, 0)->speaker == TOWER_SPEAKER_NONE &&
+          line_of(tower->intro, 0)->portrait == TOWER_PORTRAIT_AUTO);
     CHECK(tower->ending.count == 2 && line_of(tower->ending, 1)->speaker == 1);
     CHECK(tower->lose.count == 1 && line_of(tower->lose, 0)->portrait == 8);
     CHECK(tower->floor_count == 3);
@@ -237,8 +246,9 @@ static void mistakes(void)
     CHECK(tower->floors[0].reward_starchips == 0 && heard("\"starchips\" is 0 to 999999"));
     CHECK(heard("tower floors[1]: unknown key \"gold\""));
     CHECK(!tower->floors[0].checkpoint && heard("\"checkpoint\" is true or false"));
-    CHECK(tower->floors[0].before.count == 1 && line_of(tower->floors[0].before, 0)->portrait == -1);
-    CHECK(heard("\"portrait\" is one of the campaign's portraits, 0 to 24"));
+    CHECK(tower->floors[0].before.count == 1 &&
+          line_of(tower->floors[0].before, 0)->portrait == TOWER_PORTRAIT_AUTO);
+    CHECK(heard("\"portrait\" is one of the campaign's portraits (0 to 24)"));
     CHECK(heard("tower floors[1] before[1]: a line is text"));
     /* A deck naming a card that is not there deals the opponent's own. */
     forget();
@@ -362,6 +372,150 @@ static void progress_file(void)
     fclose(file);
 }
 
+/* --- the stage a story is told on ------------------------------------------ */
+
+static void stage(void)
+{
+    const TowerConfig *tower;
+    const TowerLine *line;
+    Tower_Reset();
+    forget();
+    /* Defaults: the torch corridor, nobody on the stage but a floor's
+     * opponent (tower_screen.c), a portrait only for a speaker who has no
+     * character there, no pan, no dimming. */
+    read_as("s", "{\"tower\": {\"intro\": \"Hello.\", \"floors\": [{\"duelist\": \"Seto\", \"before\": \"Hi.\"}]}}");
+    tower = Tower_Config();
+    CHECK(tower && notes == 0 && tower->scene == TOWER_SCENE_DEFAULT && tower->scene == 0x022 && !tower->dim);
+    line = line_of(tower->intro, 0);
+    CHECK(line->scene == TOWER_SCENE_KEEP && line->cast[0].kind == TOWER_CAST_KEEP &&
+          line->cast[1].kind == TOWER_CAST_KEEP && !line->pan && line->portrait == TOWER_PORTRAIT_AUTO);
+    CHECK(line_of(tower->floors[0].before, 0)->speaker == TOWER_SPEAKER_FLOOR);
+
+    /* Every key, right. */
+    Tower_Reset();
+    forget();
+    read_as("s", "{\"tower\": {\"scene\": \"seal shrine\", \"dim\": true,"
+                 " \"intro\": {\"scene\": 139, \"characters\": {\"left\": 1, \"right\": \"art/hero.png\"},"
+                 "  \"lines\": [\"One.\","
+                 "   {\"text\": \"Two.\", \"speaker\": \"right\", \"scene\": \"scenes/sky.png\"},"
+                 "   {\"text\": \"Three.\", \"speaker\": \"left\", \"scene\": \"none\", \"portrait\": \"speaker\","
+                 "    \"characters\": {\"left\": {\"character\": 4, \"expression\": 2}, \"right\": \"none\"}},"
+                 "   {\"text\": \"Four.\", \"speaker\": \"Seto\", \"portrait\": 24, \"pan\": {\"x\": 160, \"y\": 8,"
+                 "    \"frames\": 90, \"wait\": true}, \"characters\": {\"right\": {\"image\": \"art/hero.png\","
+                 "    \"flip\": true}}},"
+                 "   {\"text\": \"Five.\", \"portrait\": \"none\", \"scene\": 205,"
+                 "    \"characters\": {\"left\": \"Seto\", \"right\": {\"image\": \"art/ghost.png\", \"duelist\": \"opponent\"}}},"
+                 "   {\"text\": \"Six.\", \"characters\": {\"left\": {\"duelist\": 7}, \"right\": \"opponent\"}},"
+                 "   {\"text\": \"Seven.\", \"characters\": {\"right\": {\"image\": \"art/hero.png\", \"duelist\": \"none\"}}}]},"
+                 " \"floors\": [{\"duelist\": \"Seto\"}]}}");
+    tower = Tower_Config();
+    CHECK(tower && notes == 0);
+    CHECK(tower->scene == 0x018 && tower->dim);
+    CHECK(tower->intro.count == 7);
+    line = line_of(tower->intro, 0);
+    CHECK(line->scene == 0x139 && line->speaker == TOWER_SPEAKER_NONE);
+    CHECK(line->cast[0].kind == TOWER_CAST_RETAIL && line->cast[0].id == 1);
+    CHECK(line->cast[1].kind == TOWER_CAST_ART && line->cast[1].id == 0);
+    CHECK(tower->art_count == 4);   /* hero, sky, hero turned, ghost */
+    CHECK(tower->arts[0].kind == TOWER_ART_CHARACTER && !strcmp(tower->arts[0].path, "folder/art/hero.png"));
+    line = line_of(tower->intro, 1);
+    CHECK(line->speaker == TOWER_SPEAKER_RIGHT && line->scene == TOWER_SCENE_ART + 1);
+    CHECK(tower->arts[1].kind == TOWER_ART_SCENE && line->cast[0].kind == TOWER_CAST_KEEP);
+    line = line_of(tower->intro, 2);
+    CHECK(line->speaker == TOWER_SPEAKER_LEFT && line->scene == 0x000 && line->portrait == TOWER_PORTRAIT_SPEAKER);
+    CHECK(line->cast[0].kind == TOWER_CAST_RETAIL && line->cast[0].id == 4 && line->cast[0].expression == 2);
+    CHECK(line->cast[1].kind == TOWER_CAST_NONE);
+    line = line_of(tower->intro, 3);
+    CHECK(line->speaker == 7 && line->portrait == 24 && line->pan && line->pan_x == 160 && line->pan_y == 8 &&
+          line->pan_frames == 90 && line->pan_wait);
+    CHECK(line->cast[1].kind == TOWER_CAST_ART && line->cast[1].id == 2 && tower->arts[2].flip);
+    line = line_of(tower->intro, 4);
+    CHECK(line->portrait == -1 && line->scene == 0x205);
+    CHECK(line->cast[0].kind == TOWER_CAST_RETAIL && line->cast[0].id == 0x04 && line->cast[0].duelist == 7);
+    CHECK(line->cast[1].kind == TOWER_CAST_ART && line->cast[1].id == 3 && line->cast[1].duelist == TOWER_SPEAKER_FLOOR);
+    line = line_of(tower->intro, 5);
+    CHECK(line->cast[0].kind == TOWER_CAST_RETAIL && line->cast[0].duelist == 7);
+    CHECK(line->cast[1].kind == TOWER_CAST_OPPONENT);
+    line = line_of(tower->intro, 6);   /* an image whose duelist is "none": the image alone */
+    CHECK(line->cast[1].kind == TOWER_CAST_ART && line->cast[1].id == 0 && line->cast[1].duelist == 0);
+    CHECK(Tower_SceneNamed("Torch_Corridor") == 0x022 && Tower_SceneNamed("nowhere") == -1);
+    CHECK(!strcmp(Tower_SceneName(0x041), "burning pyramid") && Tower_SceneName(0x042) == NULL);
+    CHECK(Tower_RetailScene(0x141) && !Tower_RetailScene(0x142) && Tower_RetailScene(0x212) &&
+          !Tower_RetailScene(0x213) && !Tower_RetailScene(0x0A0) && !Tower_RetailScene(0x300));
+    CHECK(Tower_DuelistCharacter(1) == 0x01 && Tower_DuelistCharacter(7) == 0x04 && Tower_DuelistCharacter(4) == 0);
+    CHECK(Tower_DuelistCharacter(40) == 0x01);   /* an added duelist: its base's (Simon Muran's) */
+
+    /* And wrong: each noted, the rest kept. */
+    Tower_Reset();
+    forget();
+    read_as("s", "{\"tower\": {\"scene\": 150, \"dim\": \"yes\", \"floors\": [{\"duelist\": \"Seto\","
+                 " \"before\": {\"scene\": \"../out.png\", \"characters\": {\"middle\": 1, \"left\": 39}, \"lines\": ["
+                 "  {\"text\": \"A.\", \"characters\": [1], \"pan\": {\"x\": 9999, \"speed\": 1}},"
+                 "  {\"text\": \"B.\", \"characters\": {\"left\": {\"character\": \"Seto\"}, \"right\": 4},"
+                 "   \"scene\": \"the moon\", \"portrait\": \"face\"},"
+                 "  {\"text\": \"C.\", \"characters\": {\"left\": {\"duelist\": 4, \"flip\": true, \"mood\": 1},"
+                 "   \"right\": {\"character\": 2, \"expression\": 9}}}]},"
+                 " \"after\": {\"lines\": []}}]}}");
+    tower = Tower_Config();
+    CHECK(tower && tower->scene == TOWER_SCENE_DEFAULT);
+    CHECK(heard("tower: \"scene\" 150 is none of the disc's"));
+    CHECK(heard("tower: \"dim\" is true or false"));
+    CHECK(heard("../out.png is not a path inside the mod"));
+    CHECK(heard("tower floors[0] before: unknown key \"middle\""));
+    CHECK(heard("character 39 is none of the campaign's"));
+    CHECK(heard("before[0]: \"characters\" is {\"left\": ..., \"right\": ...}"));
+    CHECK(heard("pan \"x\" is 0 to 576") && heard("before[0]: unknown key \"speed\""));
+    CHECK(heard("\"character\" is one of the campaign's, 1 to 64"));
+    CHECK(heard("\"scene\" is a scene's name"));
+    CHECK(heard("\"portrait\" is one of the campaign's portraits (0 to 24)"));
+    CHECK(heard("has no character in the campaign"));
+    CHECK(heard("\"flip\" turns a PNG of the mod's") && heard("unknown key \"mood\""));
+    CHECK(heard("\"expression\" is 0 to 3"));
+    line = line_of(tower->floors[0].before, 0);
+    CHECK(line->scene == TOWER_SCENE_KEEP && line->cast[0].kind == TOWER_CAST_NONE && line->pan && line->pan_x == 0);
+    line = line_of(tower->floors[0].before, 1);
+    CHECK(line->cast[0].kind == TOWER_CAST_NONE && line->cast[1].kind == TOWER_CAST_RETAIL && line->cast[1].id == 4);
+    CHECK(line->scene == TOWER_SCENE_KEEP && line->portrait == TOWER_PORTRAIT_AUTO);
+    line = line_of(tower->floors[0].before, 2);
+    CHECK(line->cast[0].kind == TOWER_CAST_NONE && line->cast[1].kind == TOWER_CAST_RETAIL && line->cast[1].id == 2 &&
+          line->cast[1].expression == 0);
+    CHECK(tower->floors[0].after.count == 0);
+
+    /* No folder to find a PNG in: noted, the line kept without it. */
+    Tower_Reset();
+    forget();
+    {
+        char error[256];
+        JsonDocument *document = Json_Parse("{\"tower\": {\"intro\": {\"text\": \"X.\", \"scene\": \"a.png\"},"
+                                            " \"floors\": [{\"duelist\": 1}]}}", error, sizeof(error));
+        CHECK(document && document_count < 32);
+        documents[document_count++] = document;
+        Tower_Read("s", NULL, Json_Root(document));
+    }
+    CHECK(heard("a.png: the mod has no folder to find it in"));
+    CHECK(line_of(Tower_Config()->intro, 0)->scene == TOWER_SCENE_KEEP && Tower_Config()->art_count == 0);
+
+    /* A story longer than one box holds: cut, and noted. */
+    Tower_Reset();
+    forget();
+    {
+        static char text[40000];
+        size_t at = 0;
+        int i;
+        at += (size_t)snprintf(text + at, sizeof(text) - at, "{\"tower\": {\"intro\": [");
+        for (i = 0; i < 40; i++) {
+            at += (size_t)snprintf(text + at, sizeof(text) - at, "%s\"", i ? "," : "");
+            memset(text + at, 'a', 500);
+            at += 500;
+            at += (size_t)snprintf(text + at, sizeof(text) - at, "\"");
+        }
+        snprintf(text + at, sizeof(text) - at, "], \"floors\": [{\"duelist\": 1}]}}");
+        read_as("s", text);
+    }
+    CHECK(heard("a story is at most about 12000 letters; lines 21 on are left out"));
+    CHECK(Tower_Config()->intro.count == 21 && Tower_Config()->line_count == 21);
+}
+
 int main(void)
 {
     int i;
@@ -369,6 +523,7 @@ int main(void)
     every_key();
     last_wins();
     mistakes();
+    stage();
     results();
     progress_file();
     Tower_Reset();

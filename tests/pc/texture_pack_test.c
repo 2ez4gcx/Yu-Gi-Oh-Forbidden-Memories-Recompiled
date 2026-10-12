@@ -485,9 +485,8 @@ static void shared_word(void)
 }
 
 /* A wide replacement and one replacement per row describe the same 4x4
- * upload.  The first row starts at the same byte, but later rows begin closer
- * to their per-row entries.  Rank therefore changes row zero only when the
- * wide pack is later, and all rows when the per-row pack is later. */
+ * upload. A later-loaded pack replaces every covered row, regardless of
+ * whether its entry is wide or one-row specific. */
 static void rank_preference(void)
 {
     char wide[1024], rows[1024];
@@ -526,15 +525,14 @@ static void rank_preference(void)
     for (y = 0; y < 4; y++) assert(*TextureDump_Cell(0, y, 0) == (0x8000 | 0x03e0));
     TexturePack_Unload();
 
-    /* The later wide pack wins only row zero; nearer per-row starts own the rest. */
+    /* The later wide pack overrides every earlier per-row replacement. */
     assert(TexturePack_Load(rows, 1, NULL, NULL, NULL, 0) == 4);
     assert(TexturePack_Load(wide, 2, NULL, NULL, NULL, 0) == 1);
     TexturePack_Service();
     TextureDump_Delivered(upload, sizeof(upload), 1, 0);
     SoftGpu_Load(0, 0, 4, 4, upload);
     TexturePack_Service();
-    assert(*TextureDump_Cell(0, 0, 0) == (0x8000 | 0x001f));
-    for (y = 1; y < 4; y++) assert(*TextureDump_Cell(0, y, 0) == (0x8000 | 0x03e0));
+    for (y = 0; y < 4; y++) assert(*TextureDump_Cell(0, y, 0) == (0x8000 | 0x001f));
     TexturePack_Unload();
     disc_ready = 0;
 }

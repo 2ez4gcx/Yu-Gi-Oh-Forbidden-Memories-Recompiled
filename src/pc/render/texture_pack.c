@@ -145,12 +145,14 @@ static int compare(const void *a, const void *b)
     return x->position < y->position ? -1 : x->position > y->position;
 }
 
-/* At one disc offset, a later-loaded pack overrides an earlier one.  Leave
- * equal ranks alone: the backwards lookup then retains the same entry that
- * the old first-hit lookup chose. */
-static int higher_rank(const Entry *candidate, const Entry *current)
+/* A later-loaded pack overrides an earlier one wherever both cover a word.
+ * Within one pack, retain the old first-hit result: the nearer offset wins,
+ * and an exact tie keeps the first entry encountered by the backwards scan. */
+static int preferred_entry(const Entry *candidate, uint32_t candidate_delta,
+                           const Entry *current, uint32_t current_delta)
 {
-    return candidate->rank > current->rank;
+    return candidate->rank > current->rank ||
+           (candidate->rank == current->rank && candidate_delta < current_delta);
 }
 
 /* The PNG, as the texture's own grid of 15-bit colors: each texel takes
@@ -353,16 +355,13 @@ static int locate(uint32_t offset, int *row, int *word)
     /* Entries overlap (the same texture drawn as sub-rectangles, or two
      * packs describing the same bytes with different geometry), so look
      * back through those starting at or before the offset. More than one
-     * may cover it: the one starting closest to it is the more specific
-     * reading and wins regardless of pack, as it always has; only between
-     * two whose own offset is equally close (typically the same offset, two
-     * packs' different takes on one picture) does the later pack's rank
-     * decide.  Equal ranks retain the old first-hit result. */
+     * may cover it: a later-loaded pack wins regardless of its geometry.
+     * Within one pack, the closest start remains the more specific reading,
+     * as it was before packs had ranks. */
     for (i = low - 1; i >= 0 && i >= low - 64; i--) {
         const Entry *entry = &entries[i];
         uint32_t delta = offset - entry->offset;
         int found_row = -1, found_word = 0;
-        if (best >= 0 && delta > best_delta) break;
         if (entry->row_offsets) {
             int r;
             for (r = 0; r < entry->rows; r++) {
@@ -381,7 +380,7 @@ static int locate(uint32_t offset, int *row, int *word)
             }
         }
         if (found_row < 0) continue;
-        if (best < 0 || (delta == best_delta && higher_rank(entry, &entries[best]))) {
+        if (best < 0 || preferred_entry(entry, delta, &entries[best], best_delta)) {
             best = i;
             best_row = found_row;
             best_word = found_word;
@@ -409,14 +408,12 @@ static int locate_texel(uint32_t offset, int texel, int *row, int *word)
         if (entries[middle].offset <= offset) low = middle + 1;
         else high = middle;
     }
-    /* As locate(): more than one entry's crop can cover this texel. The one
-     * starting closest to it wins, as always; only a tie at equal distance
-     * falls to the pack rank. */
+    /* As locate(): a later-loaded pack wins wherever its crop covers this
+     * texel.  Within one pack, the closest start wins. */
     for (i = low - 1; i >= 0 && i >= low - 64; i--) {
         const Entry *entry = &entries[i];
         uint32_t delta = offset - entry->offset;
         int r = -1, c = 0, x;
-        if (best >= 0 && delta > best_delta) break;
         if (entry->row_offsets) {
             int at;
             for (at = 0; at < entry->rows; at++) {
@@ -437,7 +434,7 @@ static int locate_texel(uint32_t offset, int texel, int *row, int *word)
         if (r < 0) continue;
         x = c * per_word(entry->bpp) + texel;
         if (x < entry->crop_left || x >= entry->crop_left + entry->crop_width) continue;
-        if (best < 0 || (delta == best_delta && higher_rank(entry, &entries[best]))) {
+        if (best < 0 || preferred_entry(entry, delta, &entries[best], best_delta)) {
             best = i;
             best_delta = delta;
             best_row = r;

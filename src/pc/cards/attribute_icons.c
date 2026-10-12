@@ -28,10 +28,11 @@
 #define ICON_Y 16
 #define CLUT_Y 272
 #define CELL_LIMIT 224   /* (CLUT_Y - ICON_Y) / CARD_ICON_SIDE * ICON_COLS: ICON_Y's own capacity, the tighter of the two */
-static unsigned char made[ATTRIBUTES_MAX + 1];   /* 0 not yet, 1 made, 2 no cell left */
+static unsigned char made[ATTRIBUTES_MAX + 1];   /* 0 not yet, 1 made */
 static unsigned char has_cell[ATTRIBUTES_MAX + 1];
 static short cell_for[ATTRIBUTES_MAX + 1];
 static int cells_used;
+static int exhaustion_reported;
 
 void Attributes_IconsClear(void)
 {
@@ -39,6 +40,7 @@ void Attributes_IconsClear(void)
     memset(has_cell, 0, sizeof(has_cell));
     memset(cell_for, 0, sizeof(cell_for));
     cells_used = 0;
+    exhaustion_reported = 0;
     TexturePack_BankSpritesClear(TEXTURE_BANK_OWNER_ATTRIBUTE_ICONS);
 }
 
@@ -50,7 +52,11 @@ void Attributes_IconsClear(void)
 static int cell_of(int id)
 {
     if (!has_cell[id]) {
-        if (cells_used >= CELL_LIMIT) return -1;
+        if (cells_used >= CELL_LIMIT) {
+            if (!exhaustion_reported++)
+                fprintf(stderr, "memories-pc: attribute icons: no room for attribute %d; the shared bank holds %d icons\n", id, CELL_LIMIT);
+            return -1;
+        }
         has_cell[id] = 1;
         cell_for[id] = (short)cells_used++;
     }

@@ -28,7 +28,6 @@ int Attributes_Valid(int attribute);
 int Attributes_Declared(int attribute);
 const char *Attributes_Name(int attribute);
 const char *Attributes_Icon(int attribute);
-int Attributes_IconOwnPalette(int attribute);
 
 /* A card's original packed nibble is still present for the console's code,
  * but PC card metadata keeps the real id here.  A mod-defined attribute

@@ -15,7 +15,6 @@ static const char *const retail_names[ATTRIBUTES_RETAIL] = {
 };
 static char *names[ATTRIBUTES_MAX + 1];
 static char *icons[ATTRIBUTES_MAX + 1];
-static unsigned char own_palettes[ATTRIBUTES_MAX + 1];
 static unsigned char declared[ATTRIBUTES_MAX + 1];
 static int built;
 
@@ -37,6 +36,23 @@ static char *copy(const char *text)
     return out;
 }
 
+static int name_has_letters(const char *name)
+{
+    for (; *name; name++)
+        if (isalnum((unsigned char)*name) || ((unsigned char)*name & 0x80)) return 1;
+    return 0;
+}
+
+/* Attributes_Find resolves a complete integer spelling before it attempts a
+ * name. Do not admit names in that spelling space: they could not be found
+ * reliably and could change meaning as another mod declares that id. */
+static int numeric_name(const char *name)
+{
+    char *end;
+    (void)strtol(name, &end, 10);
+    return *name && !*end;
+}
+
 void Attributes_Clear(void)
 {
     Attributes_IconsClear();
@@ -45,7 +61,6 @@ void Attributes_Clear(void)
         free(icons[i]);
         names[i] = NULL;
         icons[i] = NULL;
-        own_palettes[i] = 0;
         declared[i] = 0;
     }
     built = 0;
@@ -84,11 +99,6 @@ const char *Attributes_Icon(int attribute)
     return attribute >= 0 && attribute <= ATTRIBUTES_MAX ? icons[attribute] : NULL;
 }
 
-int Attributes_IconOwnPalette(int attribute)
-{
-    return attribute >= 0 && attribute <= ATTRIBUTES_MAX && own_palettes[attribute];
-}
-
 int Attributes_Find(const char *name)
 {
     char *end;
@@ -110,7 +120,10 @@ int Attributes_Value(const JsonValue *value)
 {
     if (!value) return -1;
     if (Json_TypeOf(value) == JSON_NUMBER) {
-        int attribute = (int)Json_Number(value, -1);
+        long raw_attribute = Json_Number(value, -1);
+        int attribute;
+        if (raw_attribute < 0 || raw_attribute > ATTRIBUTES_MAX) return -1;
+        attribute = (int)raw_attribute;
         return Attributes_Valid(attribute) && (attribute < ATTRIBUTES_RETAIL || declared[attribute]) ? attribute : -1;
     }
     return Json_TypeOf(value) == JSON_STRING ? Attributes_Find(Json_String(value, "")) : -1;
@@ -143,6 +156,10 @@ static void add(const char *mod, const char *directory, const JsonValue *manifes
             Mods_Note(mod, "attributes: attributes[%d]: 6 and 7 are reserved for the game's magic and trap cards", index);
         } else if (!name || !*name) {
             Mods_Note(mod, "attributes: attributes[%d]: \"name\" is a non-empty string", index);
+        } else if (!name_has_letters(name)) {
+            Mods_Note(mod, "attributes: attributes[%d]: \"name\" contains a letter or number", index);
+        } else if (numeric_name(name)) {
+            Mods_Note(mod, "attributes: attributes[%d]: \"name\" is not a numeric attribute id", index);
         } else if (name_taken(name, id)) {
             Mods_Note(mod, "attributes: attributes[%d]: \"name\" duplicates another attribute", index);
         } else {
@@ -156,7 +173,6 @@ static void add(const char *mod, const char *directory, const JsonValue *manifes
              * mod's icon instead of inheriting it under a new name. */
             free(icons[id]);
             icons[id] = NULL;
-            own_palettes[id] = 0;
             if (icon) {
                 char path[1200];
                 FILE *probe;
@@ -173,7 +189,6 @@ static void add(const char *mod, const char *directory, const JsonValue *manifes
                         fclose(probe);
                         free(icons[id]);
                         icons[id] = copy(path);
-                        own_palettes[id] = !strcmp(Json_String(Json_Member(entry, "palette"), "own"), "own");
                     }
                 }
             }

@@ -639,7 +639,37 @@ def _clamp(value, low, high):
     return max(low, min(high, value))
 
 
-def _apply_fields(card, entry: dict, is_replace: bool, messages: list, where: str, stars_section=None, effect_type=None):
+def _attribute_choice(value, section) -> int:
+    """The retail choices plus names declared by the API-12 attributes key.
+    A ``value`` that resolves to a 6-255 id (a number, a digit string, or a
+    declared name) is only accepted when this mod's own "attributes" section
+    actually declares that id -- same as the engine's Attributes_Value
+    (attributes.c) requires. Accepting an undeclared id here would write a
+    card that the engine later refuses to apply (Attributes_Value, same
+    file) and that falls back to reading past the retail attribute strip in
+    the card-detail renderer (func_80028B08.c)."""
+    entries = section.get("attributes") if isinstance(section, dict) else None
+    declared = {entry["id"] for entry in entries
+               if isinstance(entry, dict) and isinstance(entry.get("id"), int)} if isinstance(entries, list) else set()
+    found = _choice(value, ATTRIBUTE_NAMES)
+    if 0 <= found < len(ATTRIBUTE_NAMES):
+        return found
+    if found >= 0:
+        return found if found not in (6, 7) and found in declared else -1
+    if not isinstance(value, str) or not isinstance(entries, list):
+        return -1
+    folded = "".join(c for c in value.lower() if c.isalnum())
+    for entry in entries:
+        if not isinstance(entry, dict) or not isinstance(entry.get("id"), int) or not isinstance(entry.get("name"), str):
+            continue
+        name = "".join(c for c in entry["name"].lower() if c.isalnum())
+        if name == folded and entry["id"] not in (6, 7) and 0 <= entry["id"] <= 255:
+            return entry["id"]
+    return -1
+
+
+def _apply_fields(card, entry: dict, is_replace: bool, messages: list, where: str, stars_section=None,
+                  attributes_section=None, effect_type=None):
     name = entry.get("name")
     if isinstance(name, str) and name:
         card.name = name
@@ -684,9 +714,12 @@ def _apply_fields(card, entry: dict, is_replace: bool, messages: list, where: st
     if value >= 0:
         card.level = _clamp(value, 0, 12)
     if "attribute" in entry:
-        value = _choice(entry["attribute"], ATTRIBUTE_NAMES)
+        value = _attribute_choice(entry["attribute"], attributes_section)
         if value >= 0:
-            card.attribute = _clamp(value, 0, 15)
+            card.attribute = _clamp(value, 0, 255)
+        else:
+            messages.append(f"{where}: \"attribute\" is a retail attribute, or an id/name this mod's own "
+                            f"\"attributes\" declares; left out")
     if "frame" in entry:
         value = _choice(entry["frame"], FRAME_NAMES + ["Type"])
         if not 0 <= value <= len(FRAME_NAMES):
@@ -750,7 +783,8 @@ def read_cards(project: Project, entries, messages: list):
         notes = _read_notes(entry, messages, where)
         if is_replace:
             was_monster = project.cards[base].type < TYPE_MAGIC
-            _apply_fields(project.cards[base], entry, True, messages, where, project.other.get("guardian_stars"))
+            _apply_fields(project.cards[base], entry, True, messages, where, project.other.get("guardian_stars"),
+                          project.other.get("attributes"))
             _default_stars(project, project.cards[base], entry, was_monster, base)
             if notes:
                 had = project.notes.get(base)
@@ -783,7 +817,7 @@ def read_cards(project: Project, entries, messages: list):
         effect = project.retail.cards.get(effect_id)
         was_monster = project.cards[cid].type < TYPE_MAGIC
         _apply_fields(project.cards[cid], entry, False, messages, where, project.other.get("guardian_stars"),
-                      effect.type if effect else None)
+                      project.other.get("attributes"), effect.type if effect else None)
         _default_stars(project, project.cards[cid], entry, was_monster, base)
         added = project.added[cid]
         added.drops = _json_bool(entry.get("drops"), True)

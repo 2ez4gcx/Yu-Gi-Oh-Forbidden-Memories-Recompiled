@@ -98,7 +98,7 @@ static int number(const char *mod, int index, int n, const JsonValue *entry, con
 /* An object's "type" and "attribute" (`where` names it in the notes):
  * 0 when one is wrong. */
 static int filter(const char *mod, int index, int n, const char *where, const JsonValue *object, signed char *type,
-                  signed char *attribute)
+                  signed short *attribute)
 {
     const JsonValue *value = Json_Member(object, "type");
     int v;
@@ -114,12 +114,12 @@ static int filter(const char *mod, int index, int n, const char *where, const Js
     if (value) {
         v = Json_TypeOf(value) == JSON_NUMBER ? (int)Json_Number(value, -1)
                                               : Cards_AttributeNamed(Json_String(value, ""));
-        if (v < 0 || v > 5) {
-            Mods_Note(mod, "cards[%d]: monster_effects[%d]: %s\"attribute\" must be Light, Dark, Earth, Water, "
-                      "Fire or Wind", index, n, where);
+        if (v < 0 || v > 15 || v == 6 || v == 7) {
+            Mods_Note(mod, "cards[%d]: monster_effects[%d]: %s\"attribute\" must be a retail or declared attribute",
+                      index, n, where);
             return 0;
         }
-        *attribute = (signed char)v;
+        *attribute = (signed short)v;
     }
     return 1;
 }

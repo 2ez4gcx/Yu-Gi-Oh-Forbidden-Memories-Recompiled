@@ -119,8 +119,8 @@ int Cards_Named(const char *text);
 /* A monster type by name ("Winged Beast"), or -1; and the type of a card. */
 int Cards_TypeNamed(const char *text);
 int Cards_Type(int id);
-/* An attribute by name ("Light", "Dark", "Earth", "Water", "Fire",
- * "Wind"), 0-5, or -1; and the attribute of a card. */
+/* An attribute by name (the six retail ones or one a mod's "attributes"
+ * declares), its id (0-5 or 8-255), or -1; and the attribute of a card. */
 int Cards_AttributeNamed(const char *text);
 int Cards_Attribute(int id);
 /* A monster's printed level (the number of stars), or -1 for no card. */

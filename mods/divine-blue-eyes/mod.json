@@ -1,0 +1,17 @@
+{
+  "id": "divine-blue-eyes",
+  "name": "Divine Blue-Eyes",
+  "version": "1.0",
+  "author": "yamyi",
+  "description": "Gives Blue-Eyes White Dragon the Divine attribute.",
+  "min_api": 12,
+  "enabled": true,
+  "attributes": {
+    "attributes": [
+      {"id": 8, "name": "Divine", "icon": "icons/divine.png"}
+    ]
+  },
+  "cards": [
+    {"replace": "Blue-Eyes White Dragon", "attribute": "Divine"}
+  ]
+}

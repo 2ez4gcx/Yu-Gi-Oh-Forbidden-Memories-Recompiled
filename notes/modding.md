@@ -70,6 +70,7 @@ editors write, is fine):
 | `passwords` | each card's password and starchip price on the Password screen, below |
 | `limits` | the numbers the game caps (ATK and DEF, life points, starchips, the chest, the records), below |
 | `guardian_stars` | the stars' names and icons, stars 11 to 15, and what each star gets against each other, below |
+| `attributes` | the six retail attribute names, and new monster attributes from the port's attribute bank, below |
 | `card_text_colors` | the color a card's name, description and guardian star are written in on its details, below |
 | `palette_ramps` | the game's eight text color ramps, and ramps of the mod's own for its code to draw with, below |
 | `starter` | the forty cards a new game begins with, one deck or a list of them, below |
@@ -115,6 +116,7 @@ checked as well, when it starts.
 | 9 or less | v0.2.0 | everything not listed below; added cards, duelists, starter pools, packs, the title's menus |
 | 10 | v0.2.1-preview.1 | `card_text_colors`; a card's `monster_effects` or `trap_threshold`; an equip's `bonus_attack`/`bonus_defense`; a pack's `image_style`; an added card (`copy`) of another kind than its base (a monster made a magic card, a magic card a monster or a trap), or whose `model` or `effect` is a card's name; the `MEMORIES_EVENT_MONSTER` event |
 | 11 | the release after v0.2.1-preview.1 | `assets`, `ui`, `card_layout`, `palette_ramps`; a card's `tags`, or a `frame` of `Gold`, `Green`, `Pink` or `Blue`; a monster effect's `for_each`; `{"remove": "all"}` in `fusions`; a ritual of other than three tributes, or with `tributes_from` `hand` or `both`; the title's `images`, a `scale` in `title` or `menu`; the `limits` `deck_copies`, `swords_turns`, `crush_card`, `spellbinding_circle`, `shadow_spell`, `rank_score`, `starchip_prize` and `new_game_starchips` |
+| 12 | this release | mod-defined card attributes (`attributes`) |
 
 The FM Editor writes `min_api` on save as the lowest one of these that has
 everything the mod uses, never lowering one written higher, and its Mod
@@ -1288,6 +1290,34 @@ opponents' names, and how the rules combine. Like cards, they need a restart.
 The [FM Editor](../tools/pc/fm_editor/README.md) (`python tools/pc/fm_editor`)
 reads these tables and the cards out of the player's own game files and
 writes a mod folder whose `mod.json` holds only what was changed.
+
+## Attributes: names and new attributes
+
+Cards keep their attribute in four bits. The game uses `Light`, `Dark`,
+`Earth`, `Water`, `Fire` and `Wind` (ids 0 through 5); ids 6 and 7 are
+reserved by its magic/trap presentation. A mod can rename the retail six and
+declare new monster attributes, ids 8 through 255. The names can then be
+used everywhere a card attribute is accepted: cards, an equip's `bonus_if`,
+and a monster effect's attribute filter.
+
+```json
+"attributes": {
+    "attributes": [
+        {"id": 0, "name": "Radiant"},
+        {"id": 8, "name": "Metal", "icon": "icons/metal.png"},
+        {"id": 9, "name": "Void"}
+    ]
+},
+"cards": [
+    {"replace": "Blue-eyes White Dragon", "attribute": "Metal"}
+]
+```
+
+Later mods replace a name for the same id. Attribute ids are deliberately
+fixed in a mod: cards and rule tables keep the nibble, so changing an id's
+meaning changes every card that uses it. Every declared attribute may also
+give `icon` a PNG to draw it from the attribute texture bank. Give it a numeric id in hand-written
+mods when sharing with older tools that do not yet know its name.
 
 ## Guardian Stars: names, icons, new stars and matchups
 

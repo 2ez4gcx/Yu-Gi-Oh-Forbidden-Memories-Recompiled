@@ -16,6 +16,7 @@
 #include "tables.h"
 #include "starter.h"
 #include "stars.h"
+#include "attributes.h"
 #include "packs.h"
 #include "pc/platform/ui_config.h"
 #include "pc/free_duel/duelists.h"
@@ -79,6 +80,9 @@ static unsigned char not_exodia[EXODIA_PIECE_COUNT];  /* a replaced piece withou
  * left out, FRAME_TYPE "Type" (cards.h Cards_FrameColor). */
 #define FRAME_TYPE 0xFF
 static unsigned char frames[CARD_TABLE_ID_END];
+/* The original table packs an attribute into four bits beside level.  Keep
+ * its retail values for guest code, but let PC cards carry any registry id. */
+static unsigned short attribute_ids[CARD_TABLE_ID_END];
 /* A card's "tags" (cards.h's Cards_HasTag): one bit a tag, in the order the
  * tags were first met; 32 is room for a mod pack, more are noted and left out. */
 #define MAX_TAGS 32
@@ -499,7 +503,6 @@ static const char *const type_names[] = {"Dragon", "Spellcaster", "Zombie", "War
                                          "Winged Beast", "Fiend", "Fairy", "Insect", "Dinosaur", "Reptile",
                                          "Fish", "Sea Serpent", "Machine", "Thunder", "Aqua", "Pyro", "Rock",
                                          "Plant", "Magic", "Trap", "Ritual", "Equip"};
-static const char *const attribute_names[] = {"Light", "Dark", "Earth", "Water", "Fire", "Wind"};
 /* The frames, in the order of their palettes (CARD_FRAME_*); "type" is the
  * card's own type's again. */
 static const char *const frame_names[] = {"Monster", "Magic", "Trap", "Ritual", "Purple", "Orange", "Type"};
@@ -645,16 +648,13 @@ int Cards_Type(int id)
 
 int Cards_AttributeNamed(const char *text)
 {
-    int attribute;
-    for (attribute = 0; text && attribute < (int)(sizeof(attribute_names) / sizeof(attribute_names[0])); attribute++) {
-        if (same_letters(text, attribute_names[attribute])) return attribute;
-    }
-    return -1;
+    Attributes_Build();
+    return Attributes_Find(text);
 }
 
 int Cards_Attribute(int id)
 {
-    return Cards_Valid(id) ? gDuel_abCardLevelAttr[id] >> 4 : -1;
+    return Cards_Valid(id) ? attribute_ids[id] : -1;
 }
 
 int Cards_Level(int id)
@@ -1194,6 +1194,7 @@ static void add_entry(const char *mod, const char *directory, int index, const J
     int ai_effect = 0, ai_effect_given = 0, spell_or_trap;
     unsigned int trap_threshold;
     unsigned char level_attr, frame;
+    unsigned short attribute;
     unsigned int tags;
     if (Json_TypeOf(entry) != JSON_OBJECT) {
         Mods_Note(mod, "cards[%d] is not an object", index);
@@ -1275,6 +1276,7 @@ static void add_entry(const char *mod, const char *directory, int index, const J
     }
     was_monster = (int)((stats >> 26) & 0x1F) < CARD_TYPE_MAGIC;
     level_attr = gDuel_abCardLevelAttr[base];
+    attribute = attribute_ids[base];
     /* A card's own ATK and DEF are nine bits of tens in its stats word
      * (gDuel_adwCardStats): 0 to 5110 in steps of 10. A mod's "limits" raise
      * what a monster may reach with its bonuses, not this; more would mean a
@@ -1353,8 +1355,16 @@ static void add_entry(const char *mod, const char *directory, int index, const J
     if ((value = (int)Json_Number(Json_Member(entry, "level"), -1)) >= 0) {
         level_attr = (unsigned char)((level_attr & 0xF0) | clamp(value, 0, 12));
     }
-    if ((value = choice(Json_Member(entry, "attribute"), attribute_names, 6)) >= 0) {
-        level_attr = (unsigned char)((level_attr & 0x0F) | (clamp(value, 0, 15) << 4));
+    if (Json_Member(entry, "attribute")) {
+        value = Attributes_Value(Json_Member(entry, "attribute"));
+        if (value < 0) {
+            Mods_Note(mod, "cards[%d]: \"attribute\" is an id 0-5 or 8-255, or a declared attribute name; left out", index);
+        } else {
+            attribute = (unsigned short)value;
+            /* Guest code still sees a legal nibble. The real value is in
+             * attribute_ids and all PC rule readers reach Cards_Attribute. */
+            level_attr = (unsigned char)((level_attr & 0x0F) | ((value < 6 ? value : 0) << 4));
+        }
     }
     /* Optional secondary fusion groups. A new card inherits its retail base when omitted.
      * Supplying fusion_groups gives the card its own membership instead. */
@@ -1552,6 +1562,7 @@ static void add_entry(const char *mod, const char *directory, int index, const J
         /* A monster with no star: star 0 is neutral from now on (stars.h). */
         if (((stats >> 26) & 0x1F) < CARD_TYPE_MAGIC && !(stats & (0xFu << 22))) Stars_NoteNoStar();
         gDuel_abCardLevelAttr[id] = level_attr;
+        attribute_ids[id] = attribute;
         frames[id] = frame;
         tag_masks[id] = tags;
         names[id] = name && *name ? encode_name(mod, name, n, id) : NULL;
@@ -1622,10 +1633,12 @@ void Cards_Build(void)
     int id, use;
     if (built) return;
     built = 1;
+    Attributes_Build();
     gCard_nCount = CARD_COUNT;
     memcpy(gDuel_adwCardStats, (const void *)(uintptr_t)RETAIL_STATS, CARD_COUNT * sizeof(int));
     memcpy(gCard_asNameSortKey, (const void *)(uintptr_t)RETAIL_SORT_KEYS, CARD_COUNT * sizeof(short));
     memcpy(gDuel_abCardLevelAttr, (const void *)(uintptr_t)RETAIL_LEVEL_ATTR, CARD_ID_END);
+    for (id = CARD_ID_FIRST; id <= CARD_COUNT; id++) attribute_ids[id] = gDuel_abCardLevelAttr[id] >> 4;
     for (id = 0; id <= CARD_COUNT; id++) gCard_awBaseId[id] = (unsigned short)id;
     context = calloc(1, sizeof(*context));
     if (!context) return;

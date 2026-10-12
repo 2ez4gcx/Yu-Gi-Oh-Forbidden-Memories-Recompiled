@@ -150,7 +150,11 @@ path_a:
     entry->field_36 = 0;
 
 shared_tail:
+#ifdef MEMORIES_PC
+    entry->field_3B = (u8)Cards_Attribute(card_id);
+#else
     entry->field_3B = (u8)(gDuel_abCardLevelAttr[card_id] >> 4);
+#endif
     entry->field_3A = (u8)(gDuel_abCardLevelAttr[card_id] & 0xF);
     entry->field_3C = 0;
 

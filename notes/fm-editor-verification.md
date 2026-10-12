@@ -66,6 +66,7 @@ the hard-mode AI adapter, GTE, ordering tables, PGXP and the scratch-sweep fixtu
 | Values | Player/opponent LP, stat cap, Crush Card threshold, spell penalties, Swords turns, rank score, all prize letters, deck copy limit and initial starchips, with retail comparison | Full `fixed/editor_values` run passes; 20 Exodia and 20 deck-out runs pass in `values-repeat-fixed` |
 | Guardian Stars | Edited Mars/Jupiter matchup produces 700 battle damage between equal-stat monsters | Passed in `fixed/editor_tables`; names/icons/custom stars/choice modes/bulk rules covered by editor/native tests |
 | Packs | Editor-created pack spends exactly 37 starchips and awards exactly three Blue-Eyes; disabled mod spends/awards nothing; guarantees, ownership limits, chest capacity, progress and state replay | Passed in `fixed/editor_tables`, `packs_game`, editor/native suites |
+| Tower (added 2026-10-11, below) | A three-floor tower with story, a tower-only duelist, rules, rewards and checkpoints, played in the game: menu button, floors won and lost, LOAD at the checkpoint, the CPU kept from fusing, the duelist let out into Free Duel, the tower cleared | Passed in `tests/pc/tower/tower_e2e.py` (25 checks); see [Tower mode](tower-mode.md#tests) |
 | Mod info | Metadata/settings export and game accepts the generated mod; save/reopen preserves the manifest | Passed in `editor_round_trip`, packaged/editor tests; does not assert every code-mod setting consumer |
 | Conflicts | Invalid manifests, loader compatibility, overlap detection/load ordering and navigation to conflicting edits | Passed in editor suite and native overlap test; this tab itself has no gameplay action |
 
@@ -158,3 +159,20 @@ the optional comparisons against an older baseline executable. Some editor
 features, such as map terrain import/export, advanced star choice/icon
 variants and importer workflows, have editor/native test evidence but no
 new live scenario for every variant in this run.
+
+## Addendum 2026-10-11: the Tower tab
+
+The editor has a fifteenth tab, **Tower** (`tower_tab.py`, `tower.py`): a
+mod's `"tower"` (notes/tower-mode.md) and its duelists' `"tower_only"`. The
+packaged `self-test` now selects all 15 tabs, builds a tower of one floor on
+the Tower tab and checks that the export carries it with `"min_api": 13`.
+`tests/test_tower.py` covers the tab (showing a tower, committing it untouched
+as written, editing a floor, adding, moving and removing floors, the
+tower-only list, the unlock conditions, turning the tower off, floors and
+fields nobody touched keeping the mod's own spelling), the story text form's
+round trip (line breaks, speakers with portraits, plain words that look like a
+speaker's), the deck text form, the checks against `tower_config.c`'s keys, and the manifest
+round trip. The in-game end-to-end run is `tests/pc/tower/tower_e2e.py`, with
+the tests' tower mod (`tests/pc/tower/tower-test`), written by hand in the
+form the tab writes.
+

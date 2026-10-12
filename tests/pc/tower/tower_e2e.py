@@ -39,7 +39,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / "tools/pc"))
-from yfm_control import Game, MODE  # noqa: E402
+from yfm_control import ControlError, Game, MODE  # noqa: E402
 
 MOD = ROOT / "tests/pc/tower/tower-test"
 MENU, DUEL, TOWER, FREE_DUEL, ANIMATED_BATTLE = 8, 3, 17, 6, 1
@@ -63,7 +63,7 @@ class Tower:
     """A game with the tower mod, and what its log says."""
 
     def __init__(self, exe: Path, out: Path, name: str, manifest: dict | None = None, fresh: bool = True,
-                 files=None):
+                 files=None, settings: dict | None = None):
         self.out = out / name
         if fresh:
             shutil.rmtree(self.out, ignore_errors=True)
@@ -76,7 +76,8 @@ class Tower:
         if files:
             files(mods / "tower-test")
         self.game = Game(executable=exe, out=self.out / "run", mods_dir=mods, env={"MEMORIES_TRACE": "mods"},
-                         settings={"mod.3d-monsters": 0, "mod.hand-camera": 0, "mod.tower-test": 1})
+                         settings=dict({"mod.3d-monsters": 0, "mod.hand-camera": 0, "mod.tower-test": 1},
+                                       **(settings or {})))
         self.read = 0
 
     def log(self) -> str:
@@ -648,6 +649,257 @@ def phase_stage(exe: Path, out: Path):
     t.quit()
 
 
+# --- leaving, a floor's opponent, drops, save states, cheats (notes/tower-mode.md) ------------
+
+ROUND3 = "round3"
+REX_RAPTOR = 9
+CHEST_CARDS = 722
+
+
+def shot3(t: Tower, out: Path, name: str):
+    folder = out / ROUND3
+    folder.mkdir(parents=True, exist_ok=True)
+    path = t.game.shot(name)
+    shutil.copy(path, folder / name)
+
+
+def chest_total(game: Game) -> int:
+    return sum(game.peek(SAVE_CHEST, CHEST_CARDS))
+
+
+def free_duel_flag(game: Game, duelist: int) -> bool:
+    flag = 0x6E0 + duelist
+    return bool(game.u8(0x801D0618 + (flag >> 3)) & (0x80 >> (flag & 7)))
+
+
+def plain_floor(duelist, **more) -> dict:
+    """A floor won at once: its opponent at 100 LP, no story, no reward."""
+    floor = {"duelist": duelist, "life_points": {"opponent": 100}}
+    floor.update(more)
+    return floor
+
+
+def win_checkpoint(t: Tower):
+    """From the status box: a checkpoint floor won, its save turned down
+    (NO), back on the status box."""
+    status = t.said("tower: status")
+    t.game.press("cross", hold=4, after=40)
+    to_duel(t)
+    win_quickly(t.game)
+    back_to_tower(t)
+    t.until_said("tower: save?")
+    t.game.press("down", hold=4, after=20)
+    t.game.press("cross", hold=4, after=40)
+    t.until_said("tower: status", count=status + 1, timeout=9000)
+    t.game.step(120)
+
+
+def win_floor(t: Tower):
+    """From the status box: DUEL, the floor won, back on the status box."""
+    status = t.said("tower: status")
+    t.game.press("cross", hold=4, after=40)
+    to_duel(t)
+    won = win_quickly(t.game)
+    back_to_tower(t)
+    t.until_said("tower: status", count=status + 1, timeout=9000)
+    t.game.step(120)
+    return won
+
+
+def phase_leave(exe: Path, out: Path):
+    """"on_leave": "checkpoint": a floor won past the checkpoint is not kept
+    when the tower is left, by LEAVE or by a jump to the title; "restart"
+    takes the climb to floor 1 even past a checkpoint."""
+    def leaving(rule, checkpoint):
+        def change(tower):
+            tower["on_leave"] = rule
+            tower.pop("intro", None)
+            tower["floors"] = [plain_floor("Simon Muran", checkpoint=checkpoint), plain_floor("Seto"),
+                               plain_floor("Simon Muran")]
+        return change
+    t = Tower(exe, out, "leave-checkpoint", manifest_variant(leaving("checkpoint", True)))
+    g = t.game
+    to_second_menu(g)
+    enter_tower(t)
+    t.until_said("tower: status")
+    g.step(120)
+    win_checkpoint(t)                       # floor 1, a checkpoint: its save turned down
+    win_floor(t)                            # floor 2, past it
+    shot3(t, out, "01-leave-checkpoint-floor-3.png")
+    check("on_leave checkpoint: floors 1 (a checkpoint) and 2 won, the status is at floor 3",
+          "tower: status (floor 3, checkpoint 2)" in t.log())
+    leave_tower(t)
+    enter_tower(t)
+    t.until_said("tower: status")
+    g.step(120)
+    shot3(t, out, "02-leave-checkpoint-back-at-2.png")
+    check("on_leave checkpoint: LEAVE and in again, the climb is back at the checkpoint, floor 2",
+          "tower: left; next floor 2, checkpoint 2" in t.log() and
+          t.log().rstrip().splitlines()[-1].endswith("tower: status (floor 2, checkpoint 2)"))
+    win_floor(t)                            # floor 2 again
+    g.goto("title")
+    g.step(60)
+    to_second_menu(g)
+    enter_tower(t)
+    t.until_said("tower: status")
+    g.step(120)
+    check("on_leave checkpoint: left by a jump to the title instead, the climb is back at floor 2 too",
+          t.log().count("tower: status (floor 2, checkpoint 2)") >= 3)
+    t.quit()
+
+    t = Tower(exe, out, "leave-restart", manifest_variant(leaving("restart", True)))
+    g = t.game
+    to_second_menu(g)
+    enter_tower(t)
+    t.until_said("tower: status")
+    g.step(120)
+    status = t.said("tower: status")
+    g.press("cross", hold=4, after=40)
+    to_duel(t)
+    win_quickly(g)
+    back_to_tower(t)
+    t.until_said("tower: save?")            # the checkpoint's save: NO
+    g.press("down", hold=4, after=20)
+    g.press("cross", hold=4, after=40)
+    t.until_said("tower: status", count=status + 1, timeout=9000)
+    g.step(120)
+    check("on_leave restart: floor 1 (a checkpoint) won, the status is at floor 2",
+          "tower: status (floor 2, checkpoint 2)" in t.log())
+    leave_tower(t)
+    enter_tower(t)
+    t.until_said("tower: status")
+    g.step(120)
+    shot3(t, out, "03-leave-restart-back-at-1.png")
+    check("on_leave restart: LEAVE and in again, floor 1 even past the checkpoint",
+          "tower: left; next floor 1, checkpoint 1" in t.log())
+    t.quit()
+
+
+def phase_unlock(exe: Path, out: Path):
+    """"unlock_opponent": false keeps a tower-only opponent out of Free Duel
+    once beaten; true puts a disc opponent (Rex Raptor) on the grid."""
+    def change(tower):
+        tower.pop("intro", None)
+        tower["floors"] = [plain_floor("tower-test:ghost", unlock_opponent=False),
+                           plain_floor(REX_RAPTOR, unlock_opponent=True), plain_floor("Seto")]
+    t = Tower(exe, out, "unlock", manifest_variant(change))
+    g = t.game
+    to_second_menu(g)
+    rex_before = free_duel_flag(g, REX_RAPTOR)
+    enter_tower(t)
+    t.until_said("tower: status")
+    g.step(120)
+    win_floor(t)
+    win_floor(t)
+    shot3(t, out, "04-unlock-both-won.png")
+    check(f"unlock_opponent true: Rex Raptor's Free Duel flag set when beaten (before {rex_before})",
+          not rex_before and free_duel_flag(g, REX_RAPTOR))
+    leave_tower(t)
+    cell = free_duel_cell(t, 2)
+    shutil.copy(t.out / "run/free-duel-page-2.png", out / ROUND3 / "05-unlock-false-ghost-hidden.png")
+    check(f"unlock_opponent false: the tower-only Ghost Simon beaten, still not on Free Duel's page 2 "
+          f"(cell 0 took {cell})", cell != GHOST)
+    t.quit()
+
+
+def phase_drops(exe: Path, out: Path):
+    """"drops": the tower's count of cards a won duel gives, over Game > Card
+    drops at 99."""
+    def change(tower):
+        tower.pop("intro", None)
+        tower["drops"] = 5
+        tower["floors"] = [plain_floor("Simon Muran"), plain_floor("Seto")]
+    t = Tower(exe, out, "drops", manifest_variant(change), settings={"card_drops": 99})
+    g = t.game
+    to_second_menu(g)
+    enter_tower(t)
+    t.until_said("tower: status")
+    g.step(120)
+    before = chest_total(g)
+    g.press("cross", hold=4, after=40)
+    to_duel(t)
+    win_quickly(g)
+    g.wait_until(lambda g: g.mode() == DUEL and over(g), 3000, what="the duel's end")
+    g.step(400)
+    shot3(t, out, "06-drops-results.png")
+    for page in "abc":                      # the results: rank, then the cards, a page each
+        g.press("cross", hold=4, after=10)
+        g.step(150)
+        shot3(t, out, f"06{page}-drops-results.png")
+    back_to_tower(t)
+    t.until_said("tower: status", count=2, timeout=9000)
+    after = chest_total(g)
+    check(f"drops 5 with Game > Card drops at 99: a won floor gives 5 cards ({after - before})", after - before == 5)
+    t.quit()
+
+
+def phase_guards(exe: Path, out: Path):
+    """"save_states": false and "cheats": false: no state saved or loaded on
+    the tower's screen or in its duel, Starting LP 9999 and Show CPU's hand
+    not applied there, no Debug jump out of its duel; all of it as usual
+    outside the tower."""
+    def change(tower):
+        tower["save_states"] = False
+        tower["cheats"] = False
+        tower["floors"] = [plain_floor("Simon Muran"), plain_floor("Seto")]
+    t = Tower(exe, out, "guards", manifest_variant(change),
+              settings={"cheat_life_points": 9999, "cheat_show_hand": 1})
+    g = t.game
+    to_second_menu(g)
+    outside = g.save(t.out / "outside.state")
+    check("save_states false: outside the tower a state saves as usual", outside.exists())
+    enter_tower(t)
+    g.step(150)
+    refused = []
+    for what, call in (("save on the intro's stage", lambda: g.save(t.out / "intro.state")),
+                       ("load on the intro's stage", lambda: g.load(outside))):
+        try:
+            call()
+            refused.append((what, False))
+        except ControlError:
+            refused.append((what, True))
+    shot3(t, out, "07-guards-intro-still-here.png")
+    t.until_said("tower: status")
+    g.step(120)
+    try:
+        g.save(t.out / "status.state")
+        refused.append(("save on the status", False))
+    except ControlError:
+        refused.append(("save on the status", True))
+    g.press("cross", hold=4, after=40)
+    to_duel(t)
+    g.duel_ready()
+    lp = g.duel()[0]["lp"]
+    shot3(t, out, "08-guards-duel-lp.png")
+    for what, call in (("save in the duel", lambda: g.save(t.out / "duel.state")),
+                       ("load in the duel", lambda: g.load(outside))):
+        try:
+            call()
+            refused.append((what, False))
+        except ControlError:
+            refused.append((what, True))
+    try:
+        g.goto("title")
+        jumped = True
+    except ControlError:
+        jumped = False
+    check(f"save_states false: refused in the tower ({refused}), the log says why",
+          all(ok for _, ok in refused) and "tower: refused (No save states here)" in t.log() and
+          not (t.out / "duel.state").exists() and not (t.out / "status.state").exists())
+    check(f"cheats false: the duel begins at 8000 though Starting LP is 9999 ({lp}); no jump out of it "
+          f"({'jumped' if jumped else 'refused'})", lp == 8000 and not jumped and g.mode() == DUEL)
+    # The duel won, the tower left: states and jumps as usual again.
+    status = t.said("tower: status")
+    win_quickly(g, ready=False)
+    back_to_tower(t)
+    t.until_said("tower: status", count=status + 1, timeout=9000)
+    leave_tower(t)
+    after = g.save(t.out / "after.state")
+    g.goto("library")
+    check("outside the tower again: a state saves and a jump goes", after.exists() and g.mode() != TOWER)
+    t.quit()
+
+
 def manifest_variant(change) -> dict:
     manifest = json.loads((MOD / "mod.json").read_text(encoding="utf-8"))
     change(manifest["tower"])
@@ -833,6 +1085,10 @@ def main():
               "control": lambda: phase_control(options.exe, options.out),
               "after_ending": lambda: phase_after_ending(options.exe, options.out),
               "stage": lambda: phase_stage(options.exe, options.out),
+              "leave": lambda: phase_leave(options.exe, options.out),
+              "unlock": lambda: phase_unlock(options.exe, options.out),
+              "drops": lambda: phase_drops(options.exe, options.out),
+              "guards": lambda: phase_guards(options.exe, options.out),
               "no_mod": lambda: phase_no_mod(options.exe, options.out, options.baseline)}
     for name, phase in phases.items():
         if options.only and name != options.only:

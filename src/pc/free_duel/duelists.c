@@ -11,6 +11,7 @@
  * duelist with its own deck is a "duelists" entry and a "decks" entry for it.
  */
 #include "duelists.h"
+#include "pc/tower/tower.h"
 #include "game/card_constants.h"
 #include "pc/cards/cards.h"
 #include "pc/cards/tables.h"
@@ -65,6 +66,8 @@ typedef struct {
     int wins;                      /* wins wanted: against `beat`, else in all */
     int copies;                    /* copies of `card` wanted */
     int story;                     /* a campaign story flag, or -1 for none */
+    int tower;                     /* "tower": a floor (1 up) won, 0 the whole tower; -1 none */
+    unsigned char tower_only;      /* "tower_only": not in Free Duel until the tower lets it out */
     unsigned char has_unlock;      /* else shown from the start */
     /* Read from the manifest, settled once every mod has been read. The AI
      * row a duelist is taken from may be another mod's, so like the unlock's
@@ -386,6 +389,11 @@ int Duelists_Unlocked(const void *state, int duelist)
      * conditions to is answered here instead, and the screen leaves its flag
      * alone (Duelists_HasUnlock). */
     if (!one || !one->has_unlock) return 1;
+    /* The tower's (pc/tower/tower.h): read from the save's progress in it,
+     * which the save's own records do not hold -- a tower duel is not a
+     * Free Duel and is never counted on the grid. */
+    if (one->tower_only && !Tower_FreesDuelist(duelist)) return 0;
+    if (one->tower >= 0 && !Tower_ConditionMet(one->tower)) return 0;
     return Duelists_ConditionsMet(state, one->beat, one->wins, one->story, one->card, one->copies);
 }
 
@@ -737,6 +745,7 @@ static void read_one_duelist(const char *mod, const char *mod_directory, const J
     memset(&one, 0, sizeof one);
     one.base = base;
     one.story = -1;
+    one.tower = -1;
     one.sight = -1;                /* the base's, until "ai" says otherwise */
     one.replace = target;
     one.slot = -1;
@@ -790,9 +799,37 @@ static void read_one_duelist(const char *mod, const char *mod_directory, const J
             one.story = (int)Json_Number(Json_Member(unlock, "story"), -1);
             if (one.wins < 0) one.wins = 0;
             if (one.copies < 0) one.copies = 0;
-            one.has_unlock = (unsigned char)(one.beat[0] || one.card[0] || one.wins > 0 || one.story >= 0);
+            {   /* "tower": true for the whole tower won, or a floor, 1 up
+                 * (pc/tower/tower.h). */
+                const JsonValue *tower = Json_Member(unlock, "tower");
+                if (Json_TypeOf(tower) == JSON_BOOL) {
+                    if (Json_Bool(tower, 0)) one.tower = 0;
+                } else if (Json_TypeOf(tower) == JSON_NUMBER && Json_Number(tower, -1) >= 1 &&
+                           Json_Number(tower, -1) <= 99) {
+                    one.tower = (int)Json_Number(tower, 0);
+                } else if (tower) {
+                    Mods_Note(mod, "duelists[%d]: unlock's \"tower\" is true (the whole tower won) or a floor, 1 to 99",
+                              index);
+                }
+            }
+            one.has_unlock = (unsigned char)(one.beat[0] || one.card[0] || one.wins > 0 || one.story >= 0 ||
+                                             one.tower >= 0);
             if (!one.has_unlock)
                 Mods_Note(mod, "duelists[%d]: unlock names no condition, so it is shown from the start", index);
+        }
+    }
+    {   /* "tower_only": a duelist of the tower's alone, kept off the Free
+         * Duel grid until the tower lets it out (a won floor names it as
+         * its opponent or in its "unlock_duelist"). An added duelist only:
+         * a stock one has its campaign. */
+        const JsonValue *only = Json_Member(entry, "tower_only");
+        if (only && Json_TypeOf(only) != JSON_BOOL) {
+            Mods_Note(mod, "duelists[%d]: tower_only is true or false, without quotes", index);
+        } else if (Json_Bool(only, 0) && target >= 0) {
+            Mods_Note(mod, "duelists[%d]: tower_only is for a duelist a mod adds; a replacement keeps its own", index);
+        } else if (Json_Bool(only, 0)) {
+            one.tower_only = 1;
+            one.has_unlock = 1;
         }
     }
     {   /* How a duel against it is scored, over what its block holds -- which

@@ -225,7 +225,7 @@ int main(int argc, char **argv)
     CrashTest_Init();
     /* Guest globals are linked at fixed addresses: map before touching any. */
     if (Memories_GuestMap() != 0) {
-        char why[600];
+        char why[1000];
         if (Platform_GuestMemoryHelp(why, sizeof(why))) Platform_ShowError("Yu-Gi-Oh! Forbidden Memories", why);
         return 1;
     }

@@ -344,13 +344,9 @@ static void *host_map_fixed(const MemoriesModHost *host, uintptr_t address, size
     /* On Windows compat/mman.h's VirtualAlloc, which refuses an address
      * that is already taken; the 64-bit game holds the mod arenas' range
      * from the start (image.c), and the mmap there gives it back first. */
-    got = mmap(wanted, size, PROT_READ | PROT_WRITE, MAP_FIXED_NOREPLACE | MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-    if (got == MAP_FAILED) return NULL;
-    if (got != wanted) {   /* a kernel older than MAP_FIXED_NOREPLACE takes it as a hint */
-        munmap(got, size);
-        return NULL;
-    }
-    return got;
+    got = Memories_MapFixed(wanted, size, PROT_READ | PROT_WRITE, MAP_FIXED_NOREPLACE | MAP_PRIVATE | MAP_ANONYMOUS,
+                            -1, 0);
+    return got == MAP_FAILED ? NULL : got;
 }
 
 static int (*card_resolver)(const char *);

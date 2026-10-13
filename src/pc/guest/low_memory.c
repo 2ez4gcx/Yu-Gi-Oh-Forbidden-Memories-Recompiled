@@ -44,9 +44,8 @@ static void *map_below_4gb(void)
 static int map(void)
 {
     void *wanted = (void *)(uintptr_t)MEMORIES_LOW_MEMORY_BASE, *got;
-    got = mmap(wanted, MEMORIES_LOW_MEMORY_SIZE, PROT_READ | PROT_WRITE,
-               MAP_FIXED_NOREPLACE | MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-    if (got != MAP_FAILED && got != wanted) munmap(got, MEMORIES_LOW_MEMORY_SIZE); /* taken as a hint */
+    got = Memories_MapFixed(wanted, MEMORIES_LOW_MEMORY_SIZE, PROT_READ | PROT_WRITE,
+                            MAP_FIXED_NOREPLACE | MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     if (got != wanted && (got = map_below_4gb()) != NULL) {
         fprintf(stderr, "memories-pc: the low memory region's address 0x%08x is taken; it is at %p instead\n",
                 MEMORIES_LOW_MEMORY_BASE, got);

@@ -44,11 +44,10 @@ int CardLayoutArt_FieldBackCell(int card_id, int *tpage, int *u, int *v, int *cl
 
 /* The current style's optional texture for the big card-viewer's rotating
  * "card turning" sprite (card_layout.h's CardLayout_BackImagePath), stretched
- * to the style's own "width" x "height" -- the same box "image" fills
- * (card_layout.h's CardLayout_Get(CARD_LAYOUT_FRAME), 140x196 unless the
- * style says: the card viewer's own native multi-part sprite sheet size),
- * so the back covers exactly as much of the view as the front does. *w/*h
- * on success are filled with whatever that style's box is (card_layout_art.c's
+ * to the style's own "width" x "height". *w/*h on success describe that
+ * replacement texture's source dimensions; the renderer maps each retail
+ * turning-sheet part into them while retaining the retail geometry that
+ * drives the turn animation. (card_layout_art.c's
  * BACK_MAX_SIDE caps each axis at 254, one short of POLY_FT4's own u8 UV
  * span limit to leave room for the padded edge this file's cells all keep
  * against the PS1 GPU's last-texel-drop quirk; a style whose box is bigger

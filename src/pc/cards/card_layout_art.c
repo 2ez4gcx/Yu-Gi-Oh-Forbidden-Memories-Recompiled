@@ -18,6 +18,8 @@
 #include <string.h>
 
 #define FRAME_BANK 13   /* 1-12 the 3D Monsters mod, 14 star icons, 15 glyphs, 0 is real VRAM */
+/* An 8bpp texture page starts on a 64-word boundary. */
+#define LAYOUT_TPAGE(x, y) (0x80 | (FRAME_BANK << 11) | ((x) / 64) | (((y) / 256) << 4))
 
 /* PS1 hardware never actually draws a textured quad's own far-right or
  * far-bottom texel: gl_picture.c's own texel_left_out says so directly
@@ -153,21 +155,15 @@ int CardLayoutArt_HandFrameCell(int card_id, int *tpage, int *u, int *v, int *cl
     return 1;
 }
 
-/* Slot 12, not 11: slot 10's own CLUT row (MENU_CLUT_Y below) and slot 10's
- * LIBRARY_CLUT_Y both memcpy a full 256-halfword palette starting at their
- * page's own column (MENU_PAGE_X/LIBRARY_PAGE_X = 256) -- 256 halfwords
- * spills a whole slot-width past slot 10's own 128, into slot 11's columns
- * at those two rows. Slot 11 sits in the same page-row band (PAGE_Y 256) as
- * slot 10 and FIELD_H (60) covers both of slot 10's clut rows, so slot 11's
- * own pixels there would be overwritten (found live, not guessed: this used
- * the original slot 11 and desynced rows 272 and 302 of its image from a
- * live menu icon/library icon build). Slot 12 starts at column 512, past
- * where that 256-wide spillover reaches (511), so it is actually clear. */
+/* Bank 13's lower half is shared by the small layout assets.  Their pages
+ * are intentionally not assigned by a bare slot number: an 8bpp CLUT is 256
+ * words wide while a page is only 128, so a palette occupies two slots.  The
+ * coordinates below are a non-overlapping map; keep it in sync with the
+ * table just above CardLayoutArt_StatLabelCell. */
 #define FIELD_W 52
 #define FIELD_H 60
-#define FIELD_SLOT 12
-#define FIELD_PAGE_X ((FIELD_SLOT % 8) * 128)
-#define FIELD_PAGE_Y ((FIELD_SLOT / 8) * 256)
+#define FIELD_PAGE_X 384
+#define FIELD_PAGE_Y 300
 #define FIELD_CLUT_Y (FIELD_PAGE_Y + FIELD_H + 1)  /* +1: row FIELD_PAGE_Y + FIELD_H is the padded bottom edge */
 static char field_path[1024];
 static char field_bank_path[1024];
@@ -220,7 +216,7 @@ int CardLayoutArt_FieldFrameCell(int card_id, int *tpage, int *u, int *v, int *c
                                       0, 0, FIELD_W, FIELD_H, path);
         }
     }
-    *tpage = 0x80 | (FRAME_BANK << 11) | ((FIELD_SLOT % 8) * 2) | ((FIELD_SLOT / 8) << 4);
+    *tpage = LAYOUT_TPAGE(FIELD_PAGE_X, FIELD_PAGE_Y);
     *u = 0;
     *v = 0;
     *clut = (FIELD_CLUT_Y << 6) | (FIELD_PAGE_X / 16);
@@ -229,14 +225,10 @@ int CardLayoutArt_FieldFrameCell(int card_id, int *tpage, int *u, int *v, int *c
     return 1;
 }
 
-/* Slot 13: same reasoning as FIELD_SLOT above -- clear of slot 10's two
- * 256-wide CLUT spillovers (they stop at column 511; slot 13 starts at
- * 640). */
 #define FIELD_BACK_W 52
 #define FIELD_BACK_H 60
-#define FIELD_BACK_SLOT 13
-#define FIELD_BACK_PAGE_X ((FIELD_BACK_SLOT % 8) * 128)
-#define FIELD_BACK_PAGE_Y ((FIELD_BACK_SLOT / 8) * 256)
+#define FIELD_BACK_PAGE_X 640
+#define FIELD_BACK_PAGE_Y 300
 #define FIELD_BACK_CLUT_Y (FIELD_BACK_PAGE_Y + FIELD_BACK_H + 1)  /* +1: row FIELD_BACK_PAGE_Y + FIELD_BACK_H is the padded bottom edge */
 static char field_back_path[1024];
 static char field_back_bank_path[1024];
@@ -293,7 +285,7 @@ int CardLayoutArt_FieldBackCell(int card_id, int *tpage, int *u, int *v, int *cl
                                       FIELD_BACK_CLUT_Y, 0, 0, FIELD_BACK_W, FIELD_BACK_H, path);
         }
     }
-    *tpage = 0x80 | (FRAME_BANK << 11) | ((FIELD_BACK_SLOT % 8) * 2) | ((FIELD_BACK_SLOT / 8) << 4);
+    *tpage = LAYOUT_TPAGE(FIELD_BACK_PAGE_X, FIELD_BACK_PAGE_Y);
     *u = 0;
     *v = 0;
     *clut = (FIELD_BACK_CLUT_Y << 6) | (FIELD_BACK_PAGE_X / 16);
@@ -302,7 +294,7 @@ int CardLayoutArt_FieldBackCell(int card_id, int *tpage, int *u, int *v, int *cl
     return 1;
 }
 
-/* Slot 14: same clear-of-slot-10 reasoning. Unlike every other cell here,
+/* Unlike every other cell here,
  * this one's own texel size is not fixed -- back_image stretches to the
  * style's own "width" x "height" (same box "image" fills), so the cached
  * build is keyed on size as well as path: a path alone is not enough to
@@ -316,9 +308,11 @@ int CardLayoutArt_FieldBackCell(int card_id, int *tpage, int *u, int *v, int *cl
  * sits one past that again, so the last row/column actually used is
  * bh + 1 (256 rows means valid relative rows 0-255; bh + 1 <= 255 needs
  * bh <= 254, and the same bound covers bw since both share this ceiling). */
-#define BACK_SLOT 14
-#define BACK_PAGE_X ((BACK_SLOT % 8) * 128)
-#define BACK_PAGE_Y ((BACK_SLOT / 8) * 256)
+#define BACK_PAGE_X 896
+#define BACK_PAGE_Y 256
+/* The back's pixel rectangle is only 70 words wide at its widest, leaving
+ * x=768..1023 free for its full 256-word CLUT below the image. */
+#define BACK_CLUT_X 768
 #define BACK_MAX_SIDE 254
 static char back_path[1040];
 static char back_bank_path[1040];
@@ -375,32 +369,28 @@ int CardLayoutArt_BackCell(int card_id, int *tpage, int *u, int *v, int *clut, i
             }
         }
         bank_pad_edge(bank, BACK_PAGE_X, BACK_PAGE_Y, bw, bh);
-        memcpy(&bank[(BACK_PAGE_Y + bh + 1) * SOFT_GPU_WIDTH + BACK_PAGE_X], back_clut, sizeof(back_clut));
+        memcpy(&bank[(BACK_PAGE_Y + bh + 1) * SOFT_GPU_WIDTH + BACK_CLUT_X], back_clut, sizeof(back_clut));
         snprintf(back_bank_path, sizeof(back_bank_path), "%s", key);
         back_built_w = bw;
         back_built_h = bh;
         if (back_png_w > 0 && back_png_h > 0) {
             TexturePack_BankSpritesUseOwner(TEXTURE_BANK_OWNER_LAYOUT_FRAME);
-            TexturePack_AddBankSprite(FRAME_BANK, BACK_PAGE_X, BACK_PAGE_Y, 1, BACK_PAGE_X, BACK_PAGE_Y + bh + 1, 0, 0,
+            TexturePack_AddBankSprite(FRAME_BANK, BACK_PAGE_X, BACK_PAGE_Y, 1, BACK_CLUT_X, BACK_PAGE_Y + bh + 1, 0, 0,
                                       bw, bh, path);
         }
     }
-    *tpage = 0x80 | (FRAME_BANK << 11) | ((BACK_SLOT % 8) * 2) | ((BACK_SLOT / 8) << 4);
+    *tpage = LAYOUT_TPAGE(BACK_PAGE_X, BACK_PAGE_Y);
     *u = 0;
     *v = 0;
-    *clut = ((BACK_PAGE_Y + back_built_h + 1) << 6) | (BACK_PAGE_X / 16);
+    *clut = ((BACK_PAGE_Y + back_built_h + 1) << 6) | (BACK_CLUT_X / 16);
     *w = back_built_w;
     *h = back_built_h;
     return 1;
 }
 
-/* Page 10 is unused by the 3x3 full frame and its digit strip.  Keep the
- * menu icon there, with its own palette, so a style's hand frame and icon
- * need not share colors. */
 #define MENU_SIDE 16
-#define MENU_SLOT 10
-#define MENU_PAGE_X ((MENU_SLOT % 8) * 128)
-#define MENU_PAGE_Y ((MENU_SLOT / 8) * 256)
+#define MENU_PAGE_X 384
+#define MENU_PAGE_Y 256
 #define MENU_CLUT_Y (MENU_PAGE_Y + MENU_SIDE + 1)  /* +1: row MENU_PAGE_Y + MENU_SIDE is the padded bottom edge */
 static char menu_path[1024];
 static char menu_bank_path[1024];
@@ -453,7 +443,7 @@ int CardLayoutArt_MenuIconCell(int card_id, int *tpage, int *u, int *v, int *clu
                                       0, 0, MENU_SIDE, MENU_SIDE, path);
         }
     }
-    *tpage = 0x80 | (FRAME_BANK << 11) | ((MENU_SLOT % 8) * 2) | ((MENU_SLOT / 8) << 4);
+    *tpage = LAYOUT_TPAGE(MENU_PAGE_X, MENU_PAGE_Y);
     *u = *v = 0;
     *clut = (MENU_CLUT_Y << 6) | (MENU_PAGE_X / 16);
     *w = *h = MENU_SIDE;
@@ -462,13 +452,12 @@ int CardLayoutArt_MenuIconCell(int card_id, int *tpage, int *u, int *v, int *clu
 
 #define LIBRARY_W 12
 #define LIBRARY_H 14
-#define LIBRARY_SLOT MENU_SLOT
-#define LIBRARY_PAGE_X MENU_PAGE_X
-#define LIBRARY_PAGE_Y MENU_PAGE_Y
-#define LIBRARY_U 32
-#define LIBRARY_V 32
-#define LIBRARY_X_WORD (LIBRARY_PAGE_X + LIBRARY_U / 2)
-#define LIBRARY_Y (LIBRARY_PAGE_Y + LIBRARY_V)
+#define LIBRARY_PAGE_X 640
+#define LIBRARY_PAGE_Y 280
+#define LIBRARY_U 0
+#define LIBRARY_V 0
+#define LIBRARY_X_WORD LIBRARY_PAGE_X
+#define LIBRARY_Y LIBRARY_PAGE_Y
 #define LIBRARY_CLUT_Y (LIBRARY_Y + LIBRARY_H + 1)  /* +1: row LIBRARY_Y + LIBRARY_H is the padded bottom edge */
 static char library_path[1024];
 static char library_bank_path[1024];
@@ -539,7 +528,7 @@ int CardLayoutArt_LibraryIconCell(int card_id, int *tpage, int *u, int *v, int *
                                       LIBRARY_W, LIBRARY_H, path);
         }
     }
-    *tpage = 0x80 | (FRAME_BANK << 11) | ((LIBRARY_SLOT % 8) * 2) | ((LIBRARY_SLOT / 8) << 4);
+    *tpage = LAYOUT_TPAGE(LIBRARY_PAGE_X, LIBRARY_PAGE_Y);
     *u = LIBRARY_U;
     *v = LIBRARY_V;
     *clut = (LIBRARY_CLUT_Y << 6) | (LIBRARY_PAGE_X / 16);
@@ -752,13 +741,24 @@ int CardLayoutArt_DigitCell(int digit, int dim, int *tpage, int *u, int *v, int 
     return 1;
 }
 
-/* Two independent pages keep ATK and DFD labels from needing compatible
- * palettes. A label is resampled into one 128x64 8bpp cell; its manifest's
- * width/height decide its on-card size, not this texture budget. */
+/* Bank 13 lower-half allocation (all coordinates are halfwords):
+ *
+ *   menu       pixels 384..391, y256..272; CLUT 384..639, y273
+ *   title      pixels 640..687, y256..270; CLUT 640..895, y271
+ *   library    pixels 640..645, y280..294; CLUT 640..895, y295
+ *   field      pixels 384..409, y300..360; CLUT 384..639, y361
+ *   field back pixels 640..665, y300..360; CLUT 640..895, y361
+ *   ATK label  pixels 384..447, y370..433; CLUT 384..639, y434
+ *   DFD label  pixels 640..703, y370..433; CLUT 640..895, y434
+ *   card back  pixels 896..1023, y256..510; CLUT 768..1023 below it
+ *
+ * Full 256-entry CLUT widths are called out because treating them as one
+ * 128-word page was the source of prior menu/label corruption. */
 #define STAT_LABEL_W 128
 #define STAT_LABEL_H 64
-#define STAT_LABEL_SLOT_ATK 11
-#define STAT_LABEL_SLOT_DFD 12
+#define STAT_LABEL_ATK_X 384
+#define STAT_LABEL_DFD_X 640
+#define STAT_LABEL_Y 370
 typedef struct {
     char path[1024], bank_path[1024];
     unsigned char *indices;
@@ -772,8 +772,7 @@ int CardLayoutArt_StatLabelCell(int dfd, int *tpage, int *u, int *v, int *clut, 
     char path[1024], why[128];
     uint16_t *bank, *page;
     StatLabelImage *image;
-    int slot = dfd ? STAT_LABEL_SLOT_DFD : STAT_LABEL_SLOT_ATK;
-    int page_x = (slot % 8) * 128, page_y = (slot / 8) * 256;
+    int page_x = dfd ? STAT_LABEL_DFD_X : STAT_LABEL_ATK_X, page_y = STAT_LABEL_Y;
     int clut_y = page_y + STAT_LABEL_H, x, y;
 
     if (!CardLayout_StatLabel(dfd, path, sizeof(path), &x, &y, w, h) || !(bank = SoftGpu_Bank(FRAME_BANK))) return 0;
@@ -806,7 +805,7 @@ int CardLayoutArt_StatLabelCell(int dfd, int *tpage, int *u, int *v, int *clut, 
                                       0, 0, STAT_LABEL_W, STAT_LABEL_H, path);
         }
     }
-    *tpage = 0x80 | (FRAME_BANK << 11) | ((slot % 8) * 2) | ((slot / 8) << 4);
+    *tpage = LAYOUT_TPAGE(page_x, page_y);
     *u = *v = 0;
     *clut = (clut_y << 6) | (page_x / 16);
     /* The caller's earlier CardLayout_StatLabel call has the on-card draw
@@ -821,15 +820,16 @@ int CardLayoutArt_StatLabelCell(int dfd, int *tpage, int *u, int *v, int *clut, 
 /* The retail name is a black indexed sprite. Copy its non-transparent texels
  * as a one-colour 8bpp mask so vertex RGB can colour it (multiplying the
  * original black pixels could never make them white). */
-#define TITLE_SLOT 13
 #define TITLE_W 96
 #define TITLE_H 14
+#define TITLE_PAGE_X 640
+#define TITLE_PAGE_Y 256
 int CardLayoutArt_TitleCell(int source_tpage, int source_u, int source_v, int source_w, int source_h,
                             int *tpage, int *u, int *v, int *clut, int *w, int *h)
 {
     uint16_t *bank = SoftGpu_Bank(FRAME_BANK);
     const uint16_t *vram = SoftGpu_Vram();
-    int page_x = (TITLE_SLOT % 8) * 128, page_y = (TITLE_SLOT / 8) * 256;
+    int page_x = TITLE_PAGE_X, page_y = TITLE_PAGE_Y;
     int clut_y = page_y + TITLE_H, depth = (source_tpage >> 7) & 3;
     int src_x = (source_tpage & 0xF) * 64, src_y = ((source_tpage >> 4) & 1) * 256;
     int x, y;
@@ -858,7 +858,7 @@ int CardLayoutArt_TitleCell(int source_tpage, int source_u, int source_v, int so
     }
     memset(&bank[clut_y * SOFT_GPU_WIDTH + page_x], 0, 256 * sizeof(uint16_t));
     bank[clut_y * SOFT_GPU_WIDTH + page_x + 1] = 0x7FFF;
-    *tpage = 0x80 | (FRAME_BANK << 11) | ((TITLE_SLOT % 8) * 2) | ((TITLE_SLOT / 8) << 4);
+    *tpage = LAYOUT_TPAGE(page_x, page_y);
     *u = *v = 0;
     *clut = (clut_y << 6) | (page_x / 16);
     *w = TITLE_W;
@@ -866,6 +866,25 @@ int CardLayoutArt_TitleCell(int source_tpage, int source_u, int source_v, int so
     LOG(LOG_CARD_LAYOUT, "title mask: bank=%d tpage=0x%x clut=0x%x from tpage=0x%x depth=%d uv=%d,%d",
         FRAME_BANK, *tpage, *clut, source_tpage, depth, source_u, source_v);
     return 1;
+}
+
+/* TexturePack_BankSpritesClear owns the HD registration lifetime, separately
+ * from this file's indexed-pixel cache.  Forget only the latter's "uploaded"
+ * markers when that registry is cleared: the next draw reuses decoded pixels
+ * but writes/registers them again instead of silently falling back to the
+ * software texture. */
+static void layout_bank_registrations_lost(void)
+{
+    hand_bank_path[0] = 0;
+    field_bank_path[0] = 0;
+    field_back_bank_path[0] = 0;
+    back_bank_path[0] = 0;
+    menu_bank_path[0] = 0;
+    library_bank_path[0] = 0;
+    bank_path[0] = 0;
+    digits_bank_path[0] = 0;
+    stat_labels[0].bank_path[0] = 0;
+    stat_labels[1].bank_path[0] = 0;
 }
 
 void CardLayoutArt_Prewarm(void)
@@ -879,9 +898,15 @@ void CardLayoutArt_Prewarm(void)
     if (CardLayout_Digits(digits, sizeof(digits), &dw, &dh, &dstep) && strcmp(digits_path, digits)) {
         digits_build(digits);
         return;
-    } else if (!digits[0]) TexturePack_BankSpritesClear(TEXTURE_BANK_OWNER_LAYOUT_DIGITS);
+    } else if (!digits[0]) {
+        TexturePack_BankSpritesClear(TEXTURE_BANK_OWNER_LAYOUT_DIGITS);
+        digits_bank_path[0] = 0;
+    }
     count = CardLayout_FramePaths(paths, FRAME_CACHE);
-    if (!count) TexturePack_BankSpritesClear(TEXTURE_BANK_OWNER_LAYOUT_FRAME);
+    if (!count) {
+        TexturePack_BankSpritesClear(TEXTURE_BANK_OWNER_LAYOUT_FRAME);
+        layout_bank_registrations_lost();
+    }
     for (i = 0; i < count; i++) {
         if (!image_for(paths[i], 0)) {
             image_for(paths[i], 1);

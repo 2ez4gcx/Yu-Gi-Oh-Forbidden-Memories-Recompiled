@@ -1082,7 +1082,26 @@ disagree. Three keys say it:
   `bool` the mod declares: the rule counts only while it is on, which is how a
   player gets a sub-option in the Mods window). A rule that names none applies
   to every card.
+- `default_styles`: defaults for cards that have no explicit `frame_style`,
+  no matching color-named style and no `frame_for` rule. Its optional
+  `kinds` object assigns a style to `monster`, `effect_monster`, `magic`
+  (also accepted as `spell`), `equip`, `ritual` (also `ritual_spell`) or
+  `trap`. `monster` includes ordinary and effect monsters unless the latter
+  has its more-specific `effect_monster` entry. Its optional `types` object
+  assigns a style by the card's printed type: `Dragon`, `Zombie`,
+  `Spellcaster`, `Magic`, `Trap`, `Ritual`, `Equip`, and every other type the
+  card editor accepts. A type default wins over a kind default because it is
+  more specific.
+
+  ```json
+  "default_styles": {
+    "kinds": {"monster": "normal", "magic": "spell", "trap": "trap"},
+    "types": {"Dragon": "xyz", "Zombie": "undead", "Equip": "equip"}
+  }
+  ```
+
 - `default_style`: the style of a card no rule picks (`gold` if left out).
+  It is the final fallback after `default_styles`.
 
 The class of a card is worked out by the engine from its type and its
 `monster_effects`, never written by a mod: `monster`, `effect_monster`,

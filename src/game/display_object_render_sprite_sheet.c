@@ -81,7 +81,8 @@ static void submit_menu_icon(const SpritePrim *sprite, s32 tpage, s32 ot, s32 de
  * only keeps 5 bits of tpage, the same limit every other custom cell in
  * this codebase already works around the same way: a quad through
  * GsSortPoly instead, whose own tpage field is a full word. */
-static void submit_screen_cell(const SpritePrim *sprite, s32 x, s32 y, s32 w, s32 h, s32 tpage, s32 u, s32 v,
+static void submit_screen_cell(const SpritePrim *sprite, s32 x, s32 y, s32 w, s32 h,
+                               s32 tpage, s32 u, s32 v, s32 tex_w, s32 tex_h,
                                s32 clut, s32 ot, s32 depth)
 {
     POLY_FT4 quad;
@@ -97,9 +98,9 @@ static void submit_screen_cell(const SpritePrim *sprite, s32 x, s32 y, s32 w, s3
     quad.y0 = quad.y1 = (short)y;
     quad.y2 = quad.y3 = (short)(y + h);
     quad.u0 = quad.u2 = (u8)u;
-    quad.u1 = quad.u3 = (u8)(u + w);
+    quad.u1 = quad.u3 = (u8)(u + tex_w);
     quad.v0 = quad.v1 = (u8)v;
-    quad.v2 = quad.v3 = (u8)(v + h);
+    quad.v2 = quad.v3 = (u8)(v + tex_h);
     GsSortPoly(&quad, (GsOT *G32)ot, (u16)depth);
 }
 #endif
@@ -291,7 +292,18 @@ retry:
                 }
                 pw = ((p->size >> 2) & 0x78) + 8;
                 ph = ((p->size >> 6) & 0x78) + 8;
-                submit_screen_cell(sprite, x + pdx, y + pdy, pw, ph, back_tpage, back_u + pdx, back_v + pdy,
+                /* Keep the retail sheet's geometry: it is also the card
+                 * turn animation's geometry.  The replacement picture may
+                 * be a different size, so map this part's source rectangle
+                 * into that picture independently.  Rounding both edges,
+                 * rather than scaling a width alone, keeps neighbouring
+                 * parts contiguous and never reads beyond back_w/back_h. */
+                s32 sx0 = pdx * back_w / 144;
+                s32 sy0 = pdy * back_h / 200;
+                s32 sx1 = (pdx + pw) * back_w / 144;
+                s32 sy1 = (pdy + ph) * back_h / 200;
+                submit_screen_cell(sprite, x + pdx, y + pdy, pw, ph,
+                                   back_tpage, back_u + sx0, back_v + sy0, sx1 - sx0, sy1 - sy0,
                                    back_clut, ot, depth);
             }
             return;

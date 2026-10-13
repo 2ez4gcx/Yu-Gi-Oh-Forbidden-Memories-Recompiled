@@ -51,6 +51,17 @@ static char fake_tag[FAKE_CARD_COUNT][16];
 int Cards_FrameOverride(int id) { return (unsigned)id < FAKE_CARD_COUNT ? fake_frame_color[id] : -1; }
 const char *Cards_FrameStyle(int id) { return (unsigned)id < FAKE_CARD_COUNT ? fake_frame_style[id] : ""; }
 int Cards_Type(int id) { return (unsigned)id < FAKE_CARD_COUNT ? fake_card_type[id] : CARD_TYPE_DRAGON; }
+int Cards_TypeNamed(const char *text)
+{
+    static const char *const names[] = {"Dragon", "Spellcaster", "Zombie", "Warrior", "Beast-Warrior", "Beast",
+                                        "Winged Beast", "Fiend", "Fairy", "Insect", "Dinosaur", "Reptile", "Fish",
+                                        "Sea Serpent", "Machine", "Thunder", "Aqua", "Pyro", "Rock", "Plant", "Magic",
+                                        "Trap", "Ritual", "Equip"};
+    int i;
+    for (i = 0; text && i < (int)(sizeof(names) / sizeof(names[0])); i++)
+        if (!strcmp(text, names[i])) return i;
+    return -1;
+}
 int Cards_Class(int id)
 {
     int type = Cards_Type(id);
@@ -474,6 +485,44 @@ static void styles_card_named_frame(void)
     CHECK(!CardLayout_StyleOf(2, &(CardLayoutStyle){0}) && notes == 1);
 }
 
+/* `default_styles` supplies defaults only when a card did not name a style,
+ * choose a palette style, or match a frame_for rule.  Type is more specific
+ * than kind, so a Dragon may differ from the wider monster default. */
+static void styles_by_default_kind_and_type(void)
+{
+    reset();
+    add_mod("x", "/mods/x",
+            "{\"id\": \"x\", \"card_layout\": {\"frame_styles\": {"
+            "\"global\": {\"image\": \"global.png\", \"hand_color\": \"gold\"},"
+            "\"kind_monster\": {\"image\": \"monster.png\", \"hand_color\": \"purple\"},"
+            "\"kind_magic\": {\"image\": \"magic.png\", \"hand_color\": \"green\"},"
+            "\"kind_ritual\": {\"image\": \"ritual.png\", \"hand_color\": \"blue\"},"
+            "\"kind_trap\": {\"image\": \"trap.png\", \"hand_color\": \"pink\"},"
+            "\"kind_equip\": {\"image\": \"equip.png\", \"hand_color\": \"green\"},"
+            "\"dragon\": {\"image\": \"dragon.png\", \"hand_color\": \"purple\"},"
+            "\"zombie\": {\"image\": \"zombie.png\", \"hand_color\": \"orange\"},"
+            "\"type_equip\": {\"image\": \"type_equip.png\", \"hand_color\": \"orange\"},"
+            "\"specific\": {\"image\": \"specific.png\", \"hand_color\": \"pink\"}},"
+            "\"default_styles\": {\"kinds\": {\"monster\": \"kind_monster\", \"magic\": \"kind_magic\","
+            "\"ritual\": \"kind_ritual\", \"equip\": \"kind_equip\", \"trap\": \"kind_trap\"},"
+            "\"types\": {\"Dragon\": \"dragon\", \"Zombie\": \"zombie\", \"Equip\": \"type_equip\"}},"
+            "\"default_style\": \"global\"}}",
+            1, "full_bleed", 1);
+    CHECK(style_of(1, "/mods/x/dragon.png") == CARD_FRAME_PURPLE);
+    fake_card_type[2] = CARD_TYPE_ZOMBIE;
+    CHECK(style_of(2, "/mods/x/zombie.png") == CARD_FRAME_ORANGE);
+    fake_card_type[3] = CARD_TYPE_MAGIC;
+    CHECK(style_of(3, "/mods/x/magic.png") == CARD_FRAME_MAGIC);
+    fake_card_type[4] = CARD_TYPE_EQUIP;
+    CHECK(style_of(4, "/mods/x/type_equip.png") == CARD_FRAME_ORANGE);
+    fake_card_type[5] = CARD_TYPE_RITUAL;
+    CHECK(style_of(5, "/mods/x/ritual.png") == CARD_FRAME_RITUAL);
+    fake_card_type[6] = CARD_TYPE_TRAP;
+    CHECK(style_of(6, "/mods/x/trap.png") == CARD_FRAME_TRAP);
+    snprintf(fake_frame_style[7], sizeof(fake_frame_style[7]), "%s", "specific");
+    CHECK(style_of(7, "/mods/x/specific.png") == CARD_FRAME_TRAP);
+}
+
 /* A layout can provide palette-only fallback styles.  They keep the normal
  * large-card plate, which lets a mod reserve its custom picture for only
  * the explicitly named cards. */
@@ -745,6 +794,7 @@ int main(void)
     styles_rule_setting();
     styles_card_frame_and_default();
     styles_card_named_frame();
+    styles_by_default_kind_and_type();
     styles_can_preserve_retail_frame();
     styles_hand_frame();
     styles_menu_icon();

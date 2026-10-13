@@ -245,6 +245,50 @@ static int rule_applies(const LayoutSource *source, const JsonValue *rule, int c
     return 1;
 }
 
+/* `default_styles.kinds` is deliberately friendlier than the internal class
+ * names: "monster" includes ordinary and effect monsters; "magic" and
+ * "ritual" are accepted alongside their precise class spellings.  A precise
+ * effect_monster/ritual_spell entry wins over the broader alias. */
+static const char *default_style_for_kind(const JsonValue *layout, int cls)
+{
+    const JsonValue *kinds = Json_Member(Json_Member(layout, "default_styles"), "kinds");
+    const char *name;
+
+    if (!kinds) return NULL;
+    if (cls == CARD_CLASS_EFFECT_MONSTER &&
+        (name = Json_String(Json_Member(kinds, "effect_monster"), NULL))) return name;
+    if ((cls == CARD_CLASS_MONSTER || cls == CARD_CLASS_EFFECT_MONSTER) &&
+        (name = Json_String(Json_Member(kinds, "monster"), NULL))) return name;
+    if (cls == CARD_CLASS_SPELL) {
+        if ((name = Json_String(Json_Member(kinds, "magic"), NULL))) return name;
+        if ((name = Json_String(Json_Member(kinds, "spell"), NULL))) return name;
+    }
+    if (cls == CARD_CLASS_EQUIP && (name = Json_String(Json_Member(kinds, "equip"), NULL))) return name;
+    if (cls == CARD_CLASS_RITUAL_SPELL) {
+        if ((name = Json_String(Json_Member(kinds, "ritual"), NULL))) return name;
+        if ((name = Json_String(Json_Member(kinds, "ritual_spell"), NULL))) return name;
+    }
+    if (cls == CARD_CLASS_TRAP && (name = Json_String(Json_Member(kinds, "trap"), NULL))) return name;
+    return NULL;
+}
+
+/* Type keys use the normal card-type spellings: Dragon, Zombie, Magic,
+ * Trap, Ritual, Equip, etc.  Cards_TypeNamed already accepts case, spaces
+ * and punctuation variations, so a manifest author need not duplicate the
+ * engine's type-number table. */
+static const char *default_style_for_type(const JsonValue *layout, int card)
+{
+    const JsonValue *types = Json_Member(Json_Member(layout, "default_styles"), "types");
+    const JsonValue *entry;
+    int type = Cards_Type(card);
+
+    for (entry = Json_At(types, 0); entry; entry = Json_Next(entry)) {
+        const char *name = Json_String(entry, NULL);
+        if (name && Cards_TypeNamed(Json_Name(entry)) == type) return name;
+    }
+    return NULL;
+}
+
 /* The frame style of `card`, into `out` (with its picture's path when
  * `want_image`); 0, nothing, when the layout's style is unusable (the card is
  * then drawn as retail does). */
@@ -298,12 +342,15 @@ static int resolve_style(const LayoutSource *source, int card, CardLayoutStyle *
     }
     /* A card's explicit named style is strongest.  Unlike its "frame"
      * palette color it can name any style a layout provides.  Next comes a
-     * color's same-named style, then rules, then the default. */
+     * color's same-named style, then explicit frame_for rules, then a
+     * type/kind default and finally the global default. */
     if (card_style && *card_style) name = card_style;
     if (!name && override >= 0 && Json_Member(styles, color_names[override])) name = color_names[override];
     for (rule = Json_At(Json_Member(source->layout, "frame_for"), 0); !name && rule; rule = Json_Next(rule)) {
         if (rule_applies(source, rule, card, cls)) name = Json_String(Json_Member(rule, "style"), NULL);
     }
+    if (!name) name = default_style_for_type(source->layout, card);
+    if (!name) name = default_style_for_kind(source->layout, cls);
     if (!name) name = Json_String(Json_Member(source->layout, "default_style"), "gold");
     style = Json_Member(styles, name);
     if (!style) {

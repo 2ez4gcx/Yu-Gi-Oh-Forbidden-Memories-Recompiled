@@ -226,7 +226,8 @@ custom frame too:
 
 The selected style controls the big-card image and its small-card palette
 color (`hand_color`), plus its optional flat duel-hand image (`hand_image`). It wins over `frame`, then the layout's `frame_for`
-rules and `default_style`. A copy inherits its base's named style; a later
+rules, its `default_styles` kind/type defaults, and finally `default_style`.
+A copy inherits its base's named style; a later
 replacement keeps it when left out, and `null` clears it back to the layout
 rules. The named style must exist in the active layout; otherwise the game
 uses its retail frame and notes the missing style in the Mods window.

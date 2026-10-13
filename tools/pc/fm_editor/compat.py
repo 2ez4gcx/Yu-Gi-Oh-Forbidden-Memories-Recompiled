@@ -19,7 +19,7 @@ from pathlib import Path
 from .gamedata import FRAME_COLOR_NAMES, TYPE_MAGIC
 from .model import type_named
 
-HOST_API = 12
+HOST_API = 13
 
 # The release each mod API first shipped in, for the hints. An API past the
 # last listed is newer than every release.
@@ -189,9 +189,9 @@ def features(manifest: dict, project=None) -> list:
         newer = sorted(key for key in limits if key not in OLD_LIMITS)
         if newer:
             add(11, "the values " + ", ".join(newer))
-    # --- API 12 -------------------------------------------------------------
+    # --- API 13 -------------------------------------------------------------
     if "attributes" in manifest:
-        add(12, "mod-defined card attributes (\"attributes\")")
+        add(13, "mod-defined card attributes (\"attributes\")")
     return out
 
 

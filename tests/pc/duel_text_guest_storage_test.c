@@ -8,11 +8,14 @@ extern void func_80037DA4(DuelEffectChannel *);
 extern void func_800384E4(DuelEffectChannel *);
 /* These branches are deliberately not used by the stream advance case. */
 int Cards_BaseId(int id) { (void)id; abort(); }
+int Cards_Type(int id) { (void)id; abort(); }
+const u8 *Cards_TypeNameText(int type) { (void)type; abort(); }
 const u8 *Cards_NameText(int id) { (void)id; abort(); }
 const u8 *Cards_DescriptionText(int id) { (void)id; abort(); }
 int Stars_CardSingle(int id) { (void)id; abort(); }
 int Stars_NoStarUsed(void) { abort(); }
 void Stars_MarkIcon(int id) { (void)id; abort(); }
+void TypeIcons_MarkIcon(int type) { (void)type; abort(); }
 const u8 *Text_Resolve(int id, const u8 *retail) { (void)id; (void)retail; abort(); }
 void func_80036C14(DuelEffectChannel *p, s32 id) { (void)p; (void)id; abort(); }
 /* Color rendering is covered by its own native contract; keep these hooks

@@ -110,6 +110,12 @@ static int filter(const char *mod, int index, int n, const char *where, const Js
             return 0;
         }
         v = (int)raw;
+        /* The filter is a byte whose 0xFF is "any" (MonsterEffect.type). */
+        if (v == 0xFF) {
+            Mods_Note(mod, "cards[%d]: monster_effects[%d]: %s\"type\" 255 cannot filter a monster effect", index,
+                      n, where);
+            return 0;
+        }
         *type = (signed char)v;
     }
     value = Json_Member(object, "attribute");

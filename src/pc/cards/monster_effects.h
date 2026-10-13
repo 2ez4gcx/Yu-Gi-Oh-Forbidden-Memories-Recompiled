@@ -56,7 +56,8 @@ enum {
 
 typedef struct MonsterEffect {
     unsigned char when, action, target;
-    signed char type;                /* a boost's or destroy's type filter: -1 any */
+    signed char type;                /* a boost's or destroy's type filter: -1 any; read as an
+                                        unsigned char, so a custom type 128-254 is stored negative */
     signed short attribute;          /* attribute-bank id, -1 any */
     unsigned short card;             /* MONSTER_DO_MAGIC: the retail magic card */
     short attack, defense;           /* MONSTER_DO_BOOST */

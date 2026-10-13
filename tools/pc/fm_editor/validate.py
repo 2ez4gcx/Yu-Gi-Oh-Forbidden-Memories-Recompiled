@@ -184,7 +184,8 @@ def _check_card(project: Project, cid: int, out: list):
             add("warning", "the saved attack threshold only applies to an attack-destruction trap effect")
     if "monster_effects" in extra:
         attribute_resolve = lambda value: manifest._attribute_choice(value, project.other.get("attributes"))
-        for problem in monster_effects.problems(extra["monster_effects"], project.resolve, attribute_resolve):
+        for problem in monster_effects.problems(extra["monster_effects"], project.resolve, attribute_resolve,
+                                                project.type_names):
             add("error", problem)
         if extra["monster_effects"] and not card.is_monster():
             add("warning", "monster effects only work for a monster on the field; this card is not one")

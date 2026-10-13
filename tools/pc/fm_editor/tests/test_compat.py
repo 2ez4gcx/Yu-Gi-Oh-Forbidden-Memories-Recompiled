@@ -9,7 +9,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from fm_editor import compat, gamedata as g, manifest, validate
+from fm_editor import compat, gamedata as g, manifest, monster_effects, validate
 from fm_editor.model import Project
 from fm_editor.tests.fixtures import Fixture
 
@@ -167,6 +167,21 @@ class FeatureTest(unittest.TestCase):
 
     def test_api_16_attributes(self):
         self.assertEqual(self.needs({"attributes": {"attributes": [{"id": 8, "name": "Metal"}]}}), 16)
+
+    def test_monster_effect_filter_on_a_custom_type(self):
+        # monster_effects.c filter(): a declared monster type filters, 255
+        # (the filter's "any" byte) and an undeclared id do not.
+        p = Project(fixture().game())
+        manifest.apply(p, {"card_types": {"types": [{"id": 200, "name": "Titan"}, {"id": 255, "name": "Omega"}]}})
+        boost = {"when": "face_up", "do": "boost", "attack": 100}
+        for ok in ({**boost, "type": "Titan"}, {**boost, "type": 200}, {**boost, "type": "Dragon"},
+                   {**boost, "for_each": {"type": "titan"}}):
+            with self.subTest(effect=ok):
+                self.assertEqual(monster_effects.problems([ok], p.resolve, type_names=p.type_names), [])
+        self.assertEqual(monster_effects.normalize({**boost, "type": 200}, p.resolve, type_names=p.type_names)["type"], "Titan")
+        for bad in ({**boost, "type": "Omega"}, {**boost, "type": 201}, {**boost, "type": "Magic"}):
+            with self.subTest(effect=bad):
+                self.assertTrue(monster_effects.problems([bad], p.resolve, type_names=p.type_names))
 
     def test_reasons_are_the_highest_apis(self):
         api, reasons = compat.required({"card_text_colors": {}, "ui": {}, "limits": {"swords_turns": 5}})

@@ -1333,7 +1333,7 @@ declare a new one. IDs `20` Magic, `21` Trap, `22` Ritual and `23` Equip keep
 their mechanics even when renamed. A new ID is always a monster: it can be
 used for a card's `type`, terrain bonuses, equip targets and bonuses, ritual
 requirements, and monster-effect filters just like the twenty retail monster
-types. It gets the ordinary monster frame. An optional `icon` is a relative
+types (all but `255`, which a monster effect's `type` filter cannot name). It gets the ordinary monster frame. An optional `icon` is a relative
 PNG path inside the mod; it draws only for that custom type in the card
 viewer, deck/list, trade and duel interfaces. It is placed in a dedicated
 sprite bank, so it never replaces `assets/monster_type/dragon.png` or the

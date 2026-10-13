@@ -116,6 +116,7 @@ void Library_UpdateCardUsedFlag(int flag) { (void)flag; }
 int Memories_Rand(void) { return 0; }
 void Starter_Build(void) {}
 void Packs_Build(void) {}
+void Tower_Build(void) {}
 const UiConfig *UiConfig_Load(void) { return NULL; }
 unsigned Packs_Signature(void) { return 0; }
 void Tables_Build(void) {}
@@ -227,9 +228,10 @@ static void rename_retail(void)
  * still sees keeps the Dragon compatibility value (cards.c). */
 static void custom_range(void)
 {
-    static const int ids[] = {24, 31, 32, 127, 255};
-    static const char *const names[] = {"Cyberse", "Psychic", "Fortress", "Phantom", "Omega"};
-    char manifest[2048];
+    static const int ids[] = {24, 31, 32, 127, 200, 255};
+    static const char *const names[] = {"Cyberse", "Psychic", "Fortress", "Phantom", "Titan", "Omega"};
+    const MonsterEffect *effects;
+    char manifest[4096];
     size_t i, n;
     setup();
     make_dir("mods/range");
@@ -241,6 +243,15 @@ static void custom_range(void)
     for (i = 0; i < sizeof(ids) / sizeof(ids[0]); i++)
         n += (size_t)snprintf(manifest + n, sizeof(manifest) - n, "%s{\"replace\":%d,\"type\":%d}",
                               i ? "," : "", (int)(10 + i), ids[i]);
+    /* Monster effects filtered on a custom type: 200 is stored as a
+     * negative byte and still matches only Titan; 255 is the filter's
+     * "any" byte, so it cannot be one. */
+    n += (size_t)snprintf(manifest + n, sizeof(manifest) - n,
+                          ",{\"replace\":20,\"monster_effects\":["
+                          "{\"when\":\"face_up\",\"do\":\"boost\",\"attack\":100,\"type\":\"Titan\"},"
+                          "{\"when\":\"face_up\",\"do\":\"boost\",\"attack\":100,\"type\":\"Omega\"},"
+                          "{\"when\":\"face_up\",\"do\":\"boost\",\"attack\":100,"
+                          "\"for_each\":{\"type\":\"Titan\"}}]}");
     snprintf(manifest + n, sizeof(manifest) - n, "]}");
     write_text("mods/range/mod.json", manifest);
     {
@@ -259,6 +270,9 @@ static void custom_range(void)
         assert(raw_type(card) == CARD_TYPE_DRAGON);
         assert(extended_types[card] == ids[i]);
     }
+    assert(Cards_MonsterEffects(20, &effects) == 2);
+    assert(effects[0].type != -1 && (unsigned char)effects[0].type == 200);
+    assert(effects[1].type == -1 && (unsigned char)effects[1].each_type == 200);
     printf("card_types custom range: ok\n");
 }
 

@@ -4,7 +4,7 @@
 entry, so the editor keeps it there (card_extra, or an added card's extra)."""
 from __future__ import annotations
 
-from .gamedata import ATTRIBUTE_NAMES, TYPE_NAMES, TYPE_MAGIC
+from .gamedata import ATTRIBUTE_NAMES, TYPE_NAMES, TYPE_MAGIC, is_monster_type
 
 # The game's names, in the order of its enums, and the editor's for them.
 WHEN = ("summon", "flip", "draw", "combat", "destroyed", "destroy_opponent", "face_up")
@@ -91,9 +91,11 @@ def _name(names, value) -> str | None:
     return key if key in names else None
 
 
-def normalize(effect: dict, resolve=None, attribute_resolve=None) -> dict | None:
+def normalize(effect: dict, resolve=None, attribute_resolve=None, type_names=None) -> dict | None:
     """The entry with its names in the game's spelling, or None when the
-    game would leave it out. `resolve` turns a card reference into an id."""
+    game would leave it out. `resolve` turns a card reference into an id;
+    `type_names` is the mod's type bank (Project.type_names), for its own
+    monster types."""
     if not isinstance(effect, dict):
         return None
     when, do = _name(WHEN, effect.get("when")), _name(DO, effect.get("do"))
@@ -117,7 +119,7 @@ def normalize(effect: dict, resolve=None, attribute_resolve=None) -> dict | None
                 out[key] = value
         if do == "boost" and "attack" not in out and "defense" not in out:
             return None
-        if not _filter(effect, out, attribute_resolve):
+        if not _filter(effect, out, attribute_resolve, type_names):
             return None
     else:
         amount = effect.get("amount")
@@ -132,21 +134,28 @@ def normalize(effect: dict, resolve=None, attribute_resolve=None) -> dict | None
         if whose is None:
             return None
         out["for_each"] = {"whose": whose}
-        if not _filter(each, out["for_each"], attribute_resolve):
+        if not _filter(each, out["for_each"], attribute_resolve, type_names):
             return None
     return out
 
 
-def _filter(source: dict, out: dict, attribute_resolve=None) -> bool:
+def _filter(source: dict, out: dict, attribute_resolve=None, type_names=None) -> bool:
     """`source`'s "type" and "attribute" into `out` by name; False when the
     game would not take one (monster_effects.c filter())."""
-    # Names in any case and spacing, as cards.c same_letters() takes them.
+    names = type_names or TYPE_NAMES
+    # Names in any case and spacing, as cards.c same_letters() takes them;
+    # a renamed retail type keeps its disc spelling too.
     if "type" in source:
         t = source["type"]
-        t = _letters_index(t, TYPE_NAMES) if isinstance(t, str) else t
-        if not isinstance(t, int) or isinstance(t, bool) or not 0 <= t < TYPE_MAGIC:
+        if isinstance(t, str):
+            found = _letters_index(t, [name or "" for name in names])
+            t = found if found is not None else _letters_index(t, TYPE_NAMES)
+        # 255 is the game's "any" byte (MonsterEffect.type), so no filter.
+        if not isinstance(t, int) or isinstance(t, bool) or not is_monster_type(t) or t == 0xFF:
             return False
-        out["type"] = TYPE_NAMES[t]
+        if t >= TYPE_MAGIC and not (t < len(names) and names[t]):
+            return False
+        out["type"] = names[t] if t < len(names) and names[t] else TYPE_NAMES[t]
     if "attribute" in source:
         a = source["attribute"]
         a = attribute_resolve(a) if attribute_resolve else (_letters_index(a, ATTRIBUTE_NAMES) if isinstance(a, str) else a)
@@ -157,7 +166,7 @@ def _filter(source: dict, out: dict, attribute_resolve=None) -> bool:
     return True
 
 
-def problems(effects, resolve=None, attribute_resolve=None) -> list:
+def problems(effects, resolve=None, attribute_resolve=None, type_names=None) -> list:
     """What the game would say of a card's "monster_effects"."""
     if effects is None:
         return []
@@ -171,7 +180,7 @@ def problems(effects, resolve=None, attribute_resolve=None) -> list:
         if taken == MAX_EFFECTS:
             out.append(f"at most {MAX_EFFECTS} monster effects; the rest (from effect {n + 1}) are left out")
             break
-        if normalize(effect, resolve, attribute_resolve) is None:
+        if normalize(effect, resolve, attribute_resolve, type_names) is None:
             out.append(f"monster effect {n + 1} is not one the game takes ({describe_raw(effect)})")
         else:
             taken += 1

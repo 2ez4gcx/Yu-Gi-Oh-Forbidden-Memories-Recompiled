@@ -5,6 +5,7 @@
 #include "pc/mods/json.h"
 #include "pc/mods/mods.h"
 #include "pc/platform/paths.h"
+#include "pc/compat/fs.h"
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>

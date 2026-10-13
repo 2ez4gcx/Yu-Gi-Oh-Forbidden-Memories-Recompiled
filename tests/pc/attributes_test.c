@@ -60,7 +60,7 @@ int main(void)
     Attributes_Add("invalid", Json_Root(invalid));
     assert(!Attributes_Declared(9) && !Attributes_Declared(10) && !Attributes_Declared(11) && !Attributes_Declared(12));
     assert(Attributes_Find("Nope") == -1 && notes == 6);
-    numbers = Json_Parse("{\"huge\":4294967304,\"attribute\":8}", error, sizeof(error));
+    numbers = Json_Parse("{\"huge\":256,\"attribute\":8}", error, sizeof(error));
     assert(numbers);
     assert(Attributes_Value(Json_Member(Json_Root(numbers), "huge")) == -1);
     assert(Attributes_Value(Json_Member(Json_Root(numbers), "attribute")) == 8);

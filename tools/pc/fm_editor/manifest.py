@@ -639,33 +639,83 @@ def _clamp(value, low, high):
     return max(low, min(high, value))
 
 
-def _attribute_choice(value, section) -> int:
-    """The retail choices plus names declared by the API-12 attributes key.
-    A ``value`` that resolves to a 6-255 id (a number, a digit string, or a
-    declared name) is only accepted when this mod's own "attributes" section
-    actually declares that id -- same as the engine's Attributes_Value
-    (attributes.c) requires. Accepting an undeclared id here would write a
-    card that the engine later refuses to apply (Attributes_Value, same
-    file) and that falls back to reading past the retail attribute strip in
-    the card-detail renderer (func_80028B08.c)."""
+def _attribute_letters(value: str) -> bytes:
+    """attributes.c same_letters(): punctuation skipped, ASCII folded only.
+
+    The runtime compares UTF-8 bytes rather than Unicode case-folded
+    characters. Keep that deliberately narrow rule here so the editor never
+    resolves a declaration differently from the game.
+    """
+    return bytes(c for c in value.encode("utf-8")
+                 if 48 <= c <= 57 or 65 <= c <= 90 or 97 <= c <= 122 or c >= 0x80).lower()
+
+
+def _attribute_name_has_letters(value: str) -> bool:
+    return bool(_attribute_letters(value))
+
+
+def _attribute_numeric_name(value: str) -> bool:
+    folded = _attribute_letters(value)
+    return bool(folded) and all(48 <= c <= 57 for c in folded)
+
+
+def _attribute_registry(section):
+    """The declarations Attributes_Add() would accept from this manifest.
+
+    The editor loads one mod manifest at a time, so this deliberately models
+    that manifest's registry, including its declaration order. Runtime mods
+    may additionally provide declarations from earlier active mods.
+    """
+    names = list(ATTRIBUTE_NAMES) + [""] * (256 - len(ATTRIBUTE_NAMES))
+    declared = set()
     entries = section.get("attributes") if isinstance(section, dict) else None
-    declared = {entry["id"] for entry in entries
-               if isinstance(entry, dict) and isinstance(entry.get("id"), int)} if isinstance(entries, list) else set()
-    found = _choice(value, ATTRIBUTE_NAMES)
-    if 0 <= found < len(ATTRIBUTE_NAMES):
-        return found
-    if found >= 0:
-        return found if found not in (6, 7) and found in declared else -1
-    if not isinstance(value, str) or not isinstance(entries, list):
-        return -1
-    folded = "".join(c for c in value.lower() if c.isalnum())
+    if not isinstance(entries, list):
+        return names, declared
     for entry in entries:
-        if not isinstance(entry, dict) or not isinstance(entry.get("id"), int) or not isinstance(entry.get("name"), str):
+        if not isinstance(entry, dict):
             continue
-        name = "".join(c for c in entry["name"].lower() if c.isalnum())
-        if name == folded and entry["id"] not in (6, 7) and 0 <= entry["id"] <= 255:
-            return entry["id"]
-    return -1
+        ident, name = entry.get("id"), entry.get("name")
+        if type(ident) is not int or not isinstance(name, str) or not name:
+            continue
+        if not 0 <= ident <= 255 or ident in (6, 7):
+            continue
+        if not _attribute_name_has_letters(name) or _attribute_numeric_name(name):
+            continue
+        duplicate = any(i != ident and _attribute_letters(name) == _attribute_letters(retail)
+                        for i, retail in enumerate(ATTRIBUTE_NAMES))
+        duplicate = duplicate or any(i != ident and existing and _attribute_letters(name) == _attribute_letters(existing)
+                                     for i, existing in enumerate(names))
+        if duplicate:
+            continue
+        names[ident] = name
+        declared.add(ident)
+    return names, declared
+
+
+def _attribute_choice(value, section) -> int:
+    """The runtime-valid retail or declared attribute represented by value."""
+    names, declared = _attribute_registry(section)
+    found = -1
+    if type(value) is int:
+        found = value
+    elif isinstance(value, str):
+        # Attributes_Find uses strtol(..., 10) before names. Python's int()
+        # accepts trailing whitespace, which strtol does not, so keep the
+        # spelling rule explicit.
+        if re.fullmatch(r"[ \t\n\r\f\v]*[+-]?[0-9]+", value):
+            found = int(value, 10)
+        else:
+            folded = _attribute_letters(value)
+            for i, name in enumerate(ATTRIBUTE_NAMES):
+                if folded == _attribute_letters(name) or folded == _attribute_letters(names[i]):
+                    found = i
+                    break
+            if found < 0:
+                for i in range(len(ATTRIBUTE_NAMES), len(names)):
+                    if names[i] and folded == _attribute_letters(names[i]):
+                        found = i
+                        break
+    return found if 0 <= found < len(ATTRIBUTE_NAMES) or found in declared else -1
 
 
 def _apply_fields(card, entry: dict, is_replace: bool, messages: list, where: str, stars_section=None,

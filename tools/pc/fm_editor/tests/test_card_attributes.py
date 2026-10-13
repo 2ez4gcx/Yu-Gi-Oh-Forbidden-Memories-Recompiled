@@ -1,10 +1,8 @@
-"""A mod's "attribute" on a card (manifest.py _attribute_choice): the six
-retail names always work; an id or name past them only takes if this mod's
-own "attributes" section declares it, same as the engine's Attributes_Value
-(src/pc/cards/attributes.c) requires. An id manifest.py let through without
-that declaration used to write a card the engine would refuse at load, which
-then fell back to reading past the retail attribute strip in the card-detail
-renderer (src/game/func_80028B08.c) -- a stray texel where an icon belongs.
+"""A mod's card attributes use the declarations attributes.c would accept.
+
+The editor reads one manifest, so a custom id/name must be declared by that
+manifest. The runtime additionally receives declarations from earlier active
+mods; resolving that combined mod order is outside this standalone editor.
 
     python -m unittest discover -s tools/pc/fm_editor/tests -t tools/pc
 """
@@ -77,6 +75,42 @@ class CardAttributeTest(unittest.TestCase):
         messages = manifest.apply(p, manifest_json)
         self.assertEqual(p.cards[BASE].attribute, before)
         self.assertTrue(messages)
+
+    def test_runtime_rejected_declaration_cannot_apply(self):
+        p = project()
+        before = p.cards[BASE].attribute
+        messages = manifest.apply(p, {"id": "m", "attributes": {"attributes": [{"id": 8, "name": "Light"}]},
+                                      "cards": [{"replace": BASE, "attribute": 8}]})
+        self.assertEqual(p.cards[BASE].attribute, before)
+        self.assertTrue(messages)
+
+    def test_numeric_and_boolean_declarations_are_rejected(self):
+        p = project()
+        before = p.cards[BASE].attribute
+        messages = manifest.apply(p, {"id": "m", "attributes": {"attributes": [
+            {"id": 8, "name": "8-"}, {"id": True, "name": "Boolean"}]},
+            "cards": [{"replace": BASE, "attribute": 8}]})
+        self.assertEqual(p.cards[BASE].attribute, before)
+        self.assertTrue(messages)
+
+    def test_runtime_name_normalization_and_retail_aliases(self):
+        p = project()
+        section = {"attributes": [
+            {"id": 0, "name": "Radiant"}, {"id": 8, "name": "Metal"},
+            {"id": 9, "name": "r-a-d-i-a-n-t"}]}
+        messages = manifest.apply(p, {"id": "m", "attributes": section,
+                                      "cards": [{"replace": BASE, "attribute": "m-e-t-a-l"}]})
+        self.assertEqual(p.cards[BASE].attribute, 8)
+        self.assertEqual(manifest._attribute_choice(9, section), -1)
+        self.assertFalse(messages)
+
+    def test_utf8_names_do_not_use_python_unicode_casefolding(self):
+        p = project()
+        messages = manifest.apply(p, {"id": "m", "attributes": {"attributes": [
+            {"id": 8, "name": "É"}, {"id": 9, "name": "é"}]},
+            "cards": [{"replace": BASE, "attribute": "é"}]})
+        self.assertEqual(p.cards[BASE].attribute, 9)
+        self.assertFalse(messages)
 
 
 if __name__ == "__main__":

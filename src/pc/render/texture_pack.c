@@ -119,13 +119,25 @@ static int bank_sprite_count;
 static unsigned bank_sprite_owner;
 static int bank_cached = -1; /* the current primitive normally stays in one sprite */
 
-/* The next level: half of `from` (rounded up), each texel the average of
- * those it covers, colors weighted by their alpha so that transparent
- * texels' colors do not bleed into the edges. */
+/* The next level: half of `from` (rounded down, floor(size >> 1), at least
+ * 1), each texel the average of those it covers, colors weighted by their
+ * alpha so that transparent texels' colors do not bleed into the edges.
+ * Rounding down, not up, matters past this function: bind_pack_entry
+ * uploads this whole chain as real GL mip levels (glTexImage2D one call a
+ * level), and OpenGL only calls a texture "mipmap complete" -- samplable
+ * through GL_NEAREST_MIPMAP_NEAREST at all -- when every level's size is
+ * exactly max(1, floor(level 0's size >> level)). Rounding up here instead
+ * (as this used to) agrees with that formula at every level of a
+ * power-of-two image (halving one always lands back on a whole number, so
+ * the two roundings never differ), which is why a 512x1024 or 1024x2048
+ * frame image rendered fine while this mod's own 1035x1519 and 1036x1520
+ * ones, needing no power of two, did not: some level's size came out one
+ * texel over what the driver expected, the whole texture was incomplete,
+ * and incomplete-texture reads are defined to return nothing. */
 static int bank_halve(BankImage *image, int from)
 {
-    int width = image->width[from], height = image->height[from], half_w = (width + 1) / 2,
-        half_h = (height + 1) / 2, x, y;
+    int width = image->width[from], height = image->height[from],
+        half_w = width > 1 ? width / 2 : 1, half_h = height > 1 ? height / 2 : 1, x, y;
     const unsigned char *in = image->level[from];
     unsigned char *out = malloc((size_t)half_w * half_h * 4);
     if (!out) return 0;

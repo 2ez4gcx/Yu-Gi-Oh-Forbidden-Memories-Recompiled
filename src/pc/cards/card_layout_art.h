@@ -27,6 +27,41 @@
  * purely decorative. */
 int CardLayoutArt_FrameTile(int col, int row, int *tpage, int *clut, int *w, int *h);
 
+/* The current card style's optional 52x60 duel hand/flat-field frame. The
+ * returned cell is ready for a SpritePrim; 0 leaves the retail sprite alone. */
+int CardLayoutArt_HandFrameCell(int card_id, int *tpage, int *u, int *v, int *clut, int *w, int *h);
+
+/* The current style's optional 52x60 texture for the 3D duel-field card
+ * quad (func_80015EF4's POLY_GT4; card_layout.h's CardLayout_FieldFramePath,
+ * which falls back to the hand frame). 0 leaves retail's Cards_FrameColor
+ * palette-row recolor in place. */
+int CardLayoutArt_FieldFrameCell(int card_id, int *tpage, int *u, int *v, int *clut, int *w, int *h);
+
+/* The current style's optional 52x60 face-down texture for the flat hand/
+ * field sprite (card_layout.h's CardLayout_FieldBackPath). 0 leaves
+ * retail's own generic card-back sprite alone. */
+int CardLayoutArt_FieldBackCell(int card_id, int *tpage, int *u, int *v, int *clut, int *w, int *h);
+
+/* The current style's optional texture for the big card-viewer's rotating
+ * "card turning" sprite (card_layout.h's CardLayout_BackImagePath), stretched
+ * to the style's own "width" x "height" -- the same box "image" fills
+ * (card_layout.h's CardLayout_Get(CARD_LAYOUT_FRAME), 140x196 unless the
+ * style says: the card viewer's own native multi-part sprite sheet size),
+ * so the back covers exactly as much of the view as the front does. *w/*h
+ * on success are filled with whatever that style's box is (card_layout_art.c's
+ * BACK_MAX_SIDE caps each axis at 254, one short of POLY_FT4's own u8 UV
+ * span limit to leave room for the padded edge this file's cells all keep
+ * against the PS1 GPU's last-texel-drop quirk; a style whose box is bigger
+ * gets neither this -- a logged note instead, and retail's own swirl
+ * stays). 0 leaves retail's own swirl sprite alone. */
+int CardLayoutArt_BackCell(int card_id, int *tpage, int *u, int *v, int *clut, int *w, int *h);
+
+/* The current style's optional 16x16 Build Deck/Trade type icon. */
+int CardLayoutArt_MenuIconCell(int card_id, int *tpage, int *u, int *v, int *clut, int *w, int *h);
+
+/* The current style's optional 12x14 Library-grid cell. */
+int CardLayoutArt_LibraryIconCell(int card_id, int *tpage, int *u, int *v, int *clut, int *w, int *h);
+
 /* The layout's ATK/DFD digits (card_layout.h's CardLayout_Digits): one PNG,
  * DIGIT_COLS x DIGIT_ROWS cells of DIGIT_CELL_W x DIGIT_CELL_H texels, digit
  * d in column d % 5, row d / 5, and the same ten greyed (`dim`: the stat
@@ -40,6 +75,15 @@ int CardLayoutArt_FrameTile(int col, int row, int *tpage, int *clut, int *w, int
 #define CARD_LAYOUT_DIGIT_CELL_W 40
 #define CARD_LAYOUT_DIGIT_CELL_H 48
 int CardLayoutArt_DigitCell(int digit, int dim, int *tpage, int *u, int *v, int *clut, int *w, int *h);
+
+/* The current style's optional static ATK (dfd = 0) or DFD (dfd != 0)
+ * label, read from card_layout.h's CardLayout_StatLabel. */
+int CardLayoutArt_StatLabelCell(int dfd, int *tpage, int *u, int *v, int *clut, int *w, int *h);
+
+/* Copies the current retail title glyphs into a white, transparent mask in a
+ * layout bank. The caller can then use vertex colour for a real title tint. */
+int CardLayoutArt_TitleCell(int source_tpage, int source_u, int source_v, int source_w, int source_h,
+                            int *tpage, int *u, int *v, int *clut, int *w, int *h);
 
 /* Once a frame (cards.c's Cards_Frame): builds, one a call and only now and
  * then, any frame image of the active layout not built yet, so the cost of

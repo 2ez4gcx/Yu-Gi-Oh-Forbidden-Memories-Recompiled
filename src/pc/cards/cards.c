@@ -79,6 +79,11 @@ static unsigned char not_exodia[EXODIA_PIECE_COUNT];  /* a replaced piece withou
  * left out, FRAME_TYPE "Type" (cards.h Cards_FrameColor). */
 #define FRAME_TYPE 0xFF
 static unsigned char frames[CARD_TABLE_ID_END];
+/* A card can name an arbitrary card_layout frame style, unlike "frame",
+ * which is deliberately limited to the six palette rows the small cards
+ * have.  The layout resolves the name at draw time, after all mods load. */
+#define FRAME_STYLE_NAME_LENGTH 32
+static char frame_style_names[CARD_TABLE_ID_END][FRAME_STYLE_NAME_LENGTH];
 /* A card's "tags" (cards.h's Cards_HasTag): one bit a tag, in the order the
  * tags were first met; 32 is room for a mod pack, more are noted and left out. */
 #define MAX_TAGS 32
@@ -142,6 +147,10 @@ int Cards_HasModel(int id) { return Cards_Valid(id) && retail_monster(Cards_Mode
 int Cards_FrameOverride(int id)
 {
     return Cards_Valid(id) && frames[id] && frames[id] != FRAME_TYPE ? frames[id] - 1 : -1;
+}
+const char *Cards_FrameStyle(int id)
+{
+    return Cards_Valid(id) ? frame_style_names[id] : "";
 }
 int Cards_Class(int id)
 {
@@ -1194,6 +1203,7 @@ static void add_entry(const char *mod, const char *directory, int index, const J
     int ai_effect = 0, ai_effect_given = 0, spell_or_trap;
     unsigned int trap_threshold;
     unsigned char level_attr, frame;
+    char frame_style[FRAME_STYLE_NAME_LENGTH];
     unsigned int tags;
     if (Json_TypeOf(entry) != JSON_OBJECT) {
         Mods_Note(mod, "cards[%d] is not an object", index);
@@ -1388,6 +1398,22 @@ static void add_entry(const char *mod, const char *directory, int index, const J
             frame = (unsigned char)(value == CARD_FRAME_COUNT ? FRAME_TYPE : value + 1);
         }
     }
+    /* A named style is the card-side half of card_layout's frame_styles.
+     * It inherits just as "frame" does; null or "" deliberately returns a
+     * card to the layout's class/tag/default rules. */
+    snprintf(frame_style, sizeof(frame_style), "%s", frame_style_names[base]);
+    if (Json_Member(entry, "frame_style")) {
+        const JsonValue *style_value = Json_Member(entry, "frame_style");
+        const char *style = Json_String(style_value, NULL);
+        if (Json_TypeOf(style_value) == JSON_NULL) {
+            frame_style[0] = 0;
+        } else if (!style || !*style || strlen(style) >= sizeof(frame_style)) {
+            Mods_Note(mod, "cards[%d]: \"frame_style\" must be a style name, at most %d letters, or null", index,
+                      FRAME_STYLE_NAME_LENGTH - 1);
+        } else {
+            snprintf(frame_style, sizeof(frame_style), "%s", style);
+        }
+    }
     /* Left out, the tags are the base's; "tags": [] clears them. */
     tags = tag_masks[base];
     if (Json_Member(entry, "tags")) {
@@ -1553,6 +1579,7 @@ static void add_entry(const char *mod, const char *directory, int index, const J
         if (((stats >> 26) & 0x1F) < CARD_TYPE_MAGIC && !(stats & (0xFu << 22))) Stars_NoteNoStar();
         gDuel_abCardLevelAttr[id] = level_attr;
         frames[id] = frame;
+        snprintf(frame_style_names[id], sizeof(frame_style_names[id]), "%s", frame_style);
         tag_masks[id] = tags;
         names[id] = name && *name ? encode_name(mod, name, n, id) : NULL;
         descriptions[id] = description && *description ? encode_description(mod, description, id) : NULL;

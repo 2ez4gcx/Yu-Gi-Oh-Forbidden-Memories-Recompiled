@@ -10,15 +10,99 @@
 #include "sprite_primitive.h"
 #include "display_object_packet_submit.h"
 #include "display_object_render_sprite_sheet.h"
-#ifdef MEMORIES_PC
-#include "pc/cards/pack_shop.h"
-#endif
-
 /* Caching this pointer shortens retail; each use must reload field_4C. */
 #define SPRITE_SHEET_HEADER(object) \
     ((SpriteSheetHeader *G32)(object)->field_4C)
 #define GS_SPRITE_VIEW(sprite) ((GsSPRITE *)(sprite))
 #define DISPLAY_OBJECT_COLOR_BYTES(object) ((u8 *)&(object)->field_0C)
+
+#ifdef MEMORIES_PC
+#include <string.h>
+#include "pc/cards/pack_shop.h"
+#include "pc/cards/card_layout_art.h"
+#include "duel_card_viewer.h"
+#include "duel_effect_resource_record.h"
+#include "pc/debug/log.h"
+#define CARD_LAYOUT_MENU_ICON_MARKER 0xFE
+
+/* case 1 below (DisplayObject_SubmitPacket's own dispatch,
+ * display_object_helpers.c) is GsSortFastSprite, whose own packet
+ * (libgs.c's sort_plain_sprite) keeps only the low 5 bits of a sprite's
+ * tpage: page location alone, with depth and bank coming from GPU state a
+ * prior DrawMode left set, not from the sprite itself. Exactly right for
+ * retail's own type icon (always real VRAM, always the state the menu
+ * already set up); wrong for a style's own menu_icon, in its own bank at
+ * 8bpp, whose bank and depth bits that mask silently drops, sampling
+ * whatever page the GPU already had rather than the icon's own texels. A
+ * textured quad's tpage field has room for all of it -- the same device
+ * card_layout's frame tiles use (func_80028B08.c's CardLayout_DrawCell) --
+ * so a style's own icon is submitted as one instead of as a GsSPRITE. */
+static void submit_menu_icon(const SpritePrim *sprite, s32 tpage, s32 ot, s32 depth)
+{
+    POLY_FT4 quad;
+    setPolyFT4(&quad);
+    /* pad1/pad2 are the upper half of a bank-sampling polygon's own fade
+     * (soft_gpu.h's SoftGpu_FadeOf) -- a stack local leaves them whatever
+     * the stack held, which CardLayout_DrawCell (func_80028B08.c) already
+     * has to zero for the same reason. Left alone, a stray 0x8000 bit
+     * fades the icon into whatever is behind it at a random amount. */
+    quad.pad1 = quad.pad2 = 0;
+    quad.r0 = GS_SPRITE_VIEW(sprite)->r;
+    quad.g0 = GS_SPRITE_VIEW(sprite)->g;
+    quad.b0 = GS_SPRITE_VIEW(sprite)->b;
+    quad.tpage = (u16)tpage;
+    quad.clut = getClut(sprite->cxcy.h.cx, sprite->cxcy.h.cy);
+    quad.x0 = quad.x2 = sprite->xy.h.x;
+    quad.x1 = quad.x3 = (short)(sprite->xy.h.x + sprite->extent.wh.w.word);
+    quad.y0 = quad.y1 = sprite->xy.h.y;
+    quad.y2 = quad.y3 = (short)(sprite->xy.h.y + sprite->extent.wh.h);
+    quad.u0 = quad.u2 = sprite->uv.b.lo;
+    quad.u1 = quad.u3 = (u8)(sprite->uv.b.lo + sprite->extent.wh.w.word);
+    quad.v0 = quad.v1 = sprite->uv.b.hi;
+    quad.v2 = quad.v3 = (u8)(sprite->uv.b.hi + sprite->extent.wh.h);
+    GsSortPoly(&quad, (GsOT *G32)ot, (u16)depth);
+}
+
+/* The card viewer's rotating "card turning" sprite is screen-space
+ * (DISPLAY_OBJECT_FLAG_SCREEN_SPACE, confirmed live), and every sample taken
+ * this session -- through its slide-in and settled states alike -- showed
+ * sprite->rotate == 0. func_800283F4.c's own "open" animation sets
+ * object->field_20.b.field_21, never field_22, and field_22 (shifted <<4)
+ * is what DisplayObject_RenderSpriteSheet's own sprite->rotate actually
+ * reads a few lines above; nothing here ever changes it. So this needs no
+ * GTE projection at all to place a quad correctly: x, y are already final
+ * screen coordinates, the same way GsSortFastSprite's own "no rotate, no
+ * scale" fast path treats them (confirmed by two wrong guesses that both
+ * routed through RotTransPers and both ended up mispositioned). One call a
+ * SpriteSheetPart, at that part's own (x + dx, y + dy) and size, the exact
+ * geometry retail's own loop below computes for it -- just sampling this
+ * cell's own bank instead of retail's page. GsSortFastSprite's packet
+ * (what DisplayObject_SubmitPacket would otherwise route this through)
+ * only keeps 5 bits of tpage, the same limit every other custom cell in
+ * this codebase already works around the same way: a quad through
+ * GsSortPoly instead, whose own tpage field is a full word. */
+static void submit_screen_cell(const SpritePrim *sprite, s32 x, s32 y, s32 w, s32 h, s32 tpage, s32 u, s32 v,
+                               s32 clut, s32 ot, s32 depth)
+{
+    POLY_FT4 quad;
+    setPolyFT4(&quad);
+    quad.pad1 = quad.pad2 = 0;
+    quad.r0 = GS_SPRITE_VIEW(sprite)->r;
+    quad.g0 = GS_SPRITE_VIEW(sprite)->g;
+    quad.b0 = GS_SPRITE_VIEW(sprite)->b;
+    quad.tpage = (u16)tpage;
+    quad.clut = (u16)clut;
+    quad.x0 = quad.x2 = (short)x;
+    quad.x1 = quad.x3 = (short)(x + w);
+    quad.y0 = quad.y1 = (short)y;
+    quad.y2 = quad.y3 = (short)(y + h);
+    quad.u0 = quad.u2 = (u8)u;
+    quad.u1 = quad.u3 = (u8)(u + w);
+    quad.v0 = quad.v1 = (u8)v;
+    quad.v2 = quad.v3 = (u8)(v + h);
+    GsSortPoly(&quad, (GsOT *G32)ot, (u16)depth);
+}
+#endif
 
 /* Emits one sprite per sheet part. The object's position is offset by the
  * viewport unless it is screen-space (flag 8). With the clip-test flag (4)
@@ -46,6 +130,13 @@ void DisplayObject_RenderSpriteSheet(DisplayObject *object, s32 ot, s32 depth)
     s32 tpage;
     u16 cx;
 
+#ifdef MEMORIES_PC
+    /* Retail never sets GsDOFF on a sprite-sheet object, so this check is a
+     * no-op there; it exists for card_layout's fallback handling, which
+     * sets it (func_80028B08.c) once its replacement frame is fully drawn,
+     * to retire the opaque retail frame underneath. */
+    if (object->attribute & GsDOFF) return;
+#endif
     state = (SpriteSheetState *)SCRATCHPAD_ADDR(0x1F8003A4);
     x = (s16)object->field_30.h.field_30;
     y = (s16)object->field_30.h.field_32;
@@ -93,6 +184,29 @@ retry:
     part = (SpriteSheetPart *)(sheet + sizeof(SpriteSheetHeader));
     sprite->cxcy.h.cx = work->cx;
     sprite->cxcy.h.cy = work->cy;
+#ifdef MEMORIES_PC
+    /* Build Deck/Trade's 16x16 type icon (duel_card_type_icon.c) carries
+     * its card id in selector bytes.  It otherwise follows the retail
+     * object's tint, position and scale exactly; only its texture changes. */
+    if (object->field_6A == CARD_LAYOUT_MENU_ICON_MARKER) {
+        int tpage, u, v, clut, w, h;
+        int card_id = object->field_67 | (object->field_6B << 8);
+        if (CardLayoutArt_MenuIconCell(card_id, &tpage, &u, &v, &clut, &w, &h)) {
+            sprite->attribute = work->attribute & ~0x08000000;
+            sprite->tpage = tpage;
+            sprite->cxcy.h.cx = (clut & 0x3F) * 16;
+            sprite->cxcy.h.cy = clut >> 6;
+            sprite->uv.b.lo = u;
+            sprite->uv.b.hi = v;
+            sprite->extent.wh.w.word = w;
+            sprite->extent.wh.h = h;
+            sprite->xy.h.x = x;
+            sprite->xy.h.y = y;
+            submit_menu_icon(sprite, tpage, ot, depth);
+            return;
+        }
+    }
+#endif
     state->flip = 0;
     state->mirror = 0;
     state->screen = work->attribute & 0x08000000;
@@ -126,6 +240,56 @@ retry:
        (pack_shop.h); its back, turning, is drawn. */
     if (PackShop_HidesFrame(object)) {
         return;
+    }
+    /* The card viewer's own rotating "card turning" sprite
+     * (func_800283F4.c's DuelEffect_UpdateCardViewerState; Library, Build
+     * Deck and the duel effect card viewer all share it) -- checked by
+     * pointer identity against gDuel_pCardViewerCard rather than a
+     * repurposed field, since this object (unlike the menu icon's own
+     * dedicated one above) already uses field_6A for retail's own variant,
+     * and (unlike entry->object_04, the other half of the same pair)
+     * field_67 is never set on it -- its card id is read from D_800EA0E8[3]
+     * instead, the one resource slot func_800283F4.c and card_browse.c's
+     * VIEWER_SLOT both ever pass this object's own constructor
+     * (func_800291E0). A style's own back_image replaces retail's swirl
+     * outright; "" leaves it alone. */
+    if (object == gDuel_pCardViewerCard) {
+        s32 back_tpage, back_u, back_v, back_clut, back_w, back_h;
+        s32 card_id = (s16)D_800EA0E8[3].field_30;
+        if (CardLayoutArt_BackCell(card_id, &back_tpage, &back_u, &back_v, &back_clut, &back_w, &back_h)) {
+            /* Retail's own card-view back is six SpriteSheetPart pieces
+             * tiling one logical image, not one texture (confirmed live:
+             * their own (dx, dy) to (dx + w, dy + h) boxes cover exactly
+             * (0, 0)-(144, 200) with no gaps or overlap, matching
+             * tools/pc/hd_assets_pack.py's own BACK_SIZE). A single
+             * replacement quad can never stand in for that correctly (two
+             * tries, both confirmed wrong live) -- each piece's own dx, dy
+             * is read directly as this cell's own texel offset instead
+             * (CardLayoutArt_BackCell builds it at that same 144x200, the
+             * card_layout.h default "image" and "back_image" now share),
+             * so this walks the same pieces retail's own loop below would,
+             * at the same on-screen position and size, just sampling a
+             * different bank. */
+            s32 pi;
+            for (pi = 0; pi < count; pi++) {
+                SpriteSheetPart *p = &part[pi];
+                s32 pdx, pdy, pw, ph;
+                if (state->flags & 0x10) {
+                    pdx = (u8)p->dx | ((p->cell & 0xC000) >> 6);
+                    if (pdx & 0x200) pdx |= ~0x1FF;
+                    pdy = (u8)p->dy | ((p->size & 0xC000) >> 6);
+                    if (pdy & 0x200) pdy |= ~0x1FF;
+                } else {
+                    pdx = p->dx;
+                    pdy = p->dy;
+                }
+                pw = ((p->size >> 2) & 0x78) + 8;
+                ph = ((p->size >> 6) & 0x78) + 8;
+                submit_screen_cell(sprite, x + pdx, y + pdy, pw, ph, back_tpage, back_u + pdx, back_v + pdy,
+                                   back_clut, ot, depth);
+            }
+            return;
+        }
     }
 #endif
     do {

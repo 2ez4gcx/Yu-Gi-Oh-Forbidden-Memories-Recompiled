@@ -120,40 +120,101 @@ static int full_bleed_of(const LayoutSource *source)
     return source->mod >= 0 && Mods_Setting(Mods_Id(source->mod), "full_bleed", 0) != 0;
 }
 
-/* "<key>": {"x": ..., "y": ...}, each defaulting to retail's own place. */
-static void point(const JsonValue *layout, const char *key, int *x, int *y, int dx, int dy)
+/* `part` ("x": ..., "y": ...), each defaulting to retail's own place. */
+static void point(const JsonValue *part, int *x, int *y, int dx, int dy)
 {
-    const JsonValue *part = Json_Member(layout, key);
     *x = (int)Json_Number(Json_Member(part, "x"), dx);
     *y = (int)Json_Number(Json_Member(part, "y"), dy);
 }
 
-/* "<key>": {"x": ..., "y": ..., "width": ..., "height": ...}, same defaults
+/* `part` ("x": ..., "y": ..., "width": ..., "height": ...), same defaults
  * convention as a "title" mod's image (title_config.h's TitleImage). */
-static void rect(const JsonValue *layout, const char *key, int *x, int *y, int *w, int *h,
-                 int dx, int dy, int dw, int dh)
+static void rect(const JsonValue *part, int *x, int *y, int *w, int *h, int dx, int dy, int dw, int dh)
 {
-    const JsonValue *part = Json_Member(layout, key);
     *x = (int)Json_Number(Json_Member(part, "x"), dx);
     *y = (int)Json_Number(Json_Member(part, "y"), dy);
     *w = (int)Json_Number(Json_Member(part, "width"), dw);
     *h = (int)Json_Number(Json_Member(part, "height"), dh);
 }
 
+/* `part` ("color": {"r": ..., "g": ..., "b": ...}), each 0x80 (no change)
+ * absent -- CardLayoutPlacement's own tint convention. */
+static void tint(const JsonValue *part, int *r, int *g, int *b)
+{
+    const JsonValue *color = Json_Member(part, "color");
+    *r = (int)Json_Number(Json_Member(color, "r"), 0x80);
+    *g = (int)Json_Number(Json_Member(color, "g"), 0x80);
+    *b = (int)Json_Number(Json_Member(color, "b"), 0x80);
+}
+
+/* A style's own "<key>" sub-object, when the currently active style has
+ * one, else the layout's shared one -- so a mod with one custom frame can
+ * keep stating atk/def/stars/attribute/art at the top level as before, but
+ * a mod with several (each its own window) can give each style its own
+ * instead of them all fighting over one shared box. A style's "<key>" is
+ * taken whole, not merged field by field with the layout's: a style that
+ * gives "atk" at all owns the point entirely, missing fields falling back
+ * to the hardcoded retail default, never to the layout's own "atk". */
+static const JsonValue *layout_part(const JsonValue *style_node, const JsonValue *layout, const char *key)
+{
+    const JsonValue *part = style_node ? Json_Member(style_node, key) : NULL;
+    return part ? part : Json_Member(layout, key);
+}
+
+/* A digit strip owns the positions of the numeric values it draws. The
+ * earlier style/layout-level `atk` and `def` entries remain a fallback for
+ * existing manifests. */
+static const JsonValue *digit_stat_part(const JsonValue *style_node, const JsonValue *layout, const char *key)
+{
+    const JsonValue *digits = layout_part(style_node, layout, "digits");
+    const JsonValue *part = Json_Member(digits, key);
+    return part ? part : layout_part(style_node, layout, key);
+}
+
 int CardLayout_Digits(char *path, size_t size, int *w, int *h, int *step)
 {
     LayoutSource source = find_source();
+    const JsonValue *styles;
+    const JsonValue *style_node;
     const JsonValue *digits;
 
     path[0] = 0;
     if (source.mod < 0 || !full_bleed_of(&source)) return 0;
-    digits = Json_Member(source.layout, "digits");
+    /* Match the other layout elements: an active frame style owns its
+     * digits image, with the old card_layout-level object retained as the
+     * fallback for existing mods. */
+    styles = Json_Member(source.layout, "frame_styles");
+    style_node = styles && *current.name ? Json_Member(styles, current.name) : NULL;
+    digits = layout_part(style_node, source.layout, "digits");
     mod_file(source.mod, Json_String(Json_Member(digits, "image"), NULL), "\"digits\"", path, size);
     if (!path[0]) return 0;
     *w = (int)Json_Number(Json_Member(digits, "width"), 10);
     *h = (int)Json_Number(Json_Member(digits, "height"), 12);
     *step = (int)Json_Number(Json_Member(digits, "step"), *w);
     return *w > 0 && *h > 0 && *step > 0;
+}
+
+int CardLayout_StatLabel(int dfd, char *path, size_t size, int *x, int *y, int *w, int *h)
+{
+    LayoutSource source = find_source();
+    const JsonValue *styles, *style, *label;
+
+    path[0] = 0;
+    if (source.mod < 0 || !full_bleed_of(&source)) return 0;
+    styles = Json_Member(source.layout, "frame_styles");
+    style = styles && *current.name ? Json_Member(styles, current.name) : NULL;
+    /* Labels are deliberately style-owned: unlike a digit strip, a label
+     * belongs to a particular frame's stat panel and must not leak to a
+     * different style that has differently shaped boxes. */
+    label = Json_Member(style, dfd ? "dfd_label" : "atk_label");
+    mod_file(source.mod, Json_String(Json_Member(label, "image"), NULL),
+             dfd ? "\"dfd_label\"" : "\"atk_label\"", path, size);
+    if (!path[0]) return 0;
+    *x = (int)Json_Number(Json_Member(label, "x"), 0);
+    *y = (int)Json_Number(Json_Member(label, "y"), 0);
+    *w = (int)Json_Number(Json_Member(label, "width"), 16);
+    *h = (int)Json_Number(Json_Member(label, "height"), 8);
+    return *w > 0 && *h > 0;
 }
 
 /* Why a layout's frame choice could not be made, said once a layout. */
@@ -192,11 +253,15 @@ static int resolve_style(const LayoutSource *source, int card, CardLayoutStyle *
     int cls = Cards_Class(card);
     const JsonValue *styles = Json_Member(source->layout, "frame_styles");
     const JsonValue *style = NULL, *hand;
-    const char *name = NULL;
+    const char *name = NULL, *image;
     const JsonValue *rule;
     int override = Cards_FrameOverride(card);
+    const char *card_style = Cards_FrameStyle(card);
 
     memset(out, 0, sizeof(*out));
+    /* The retail viewer's card plate occupies 140x196 units.  A style may
+     * deliberately choose another size, but its omitted width/height must
+     * not make the replacement cover neighbouring viewer panels. */
     out->width = 140;
     out->height = 196;
     out->spell_layout = cls == CARD_CLASS_SPELL || cls == CARD_CLASS_EQUIP || cls == CARD_CLASS_RITUAL_SPELL ||
@@ -222,6 +287,7 @@ static int resolve_style(const LayoutSource *source, int card, CardLayoutStyle *
         if (kind == CARD_FRAME_RITUAL && (!own || !*own || (magic && !strcmp(own, magic)))) kind = CARD_FRAME_MAGIC;
         frame = frame_for_kind(source->layout, kind);
         out->color = kind;
+        out->full_bleed = 1;
         snprintf(out->name, sizeof(out->name), "%s", frame_kind_names[kind]);
         out->width = (int)Json_Number(Json_Member(frame, "width"), 140);
         out->height = (int)Json_Number(Json_Member(frame, "height"), 196);
@@ -230,10 +296,11 @@ static int resolve_style(const LayoutSource *source, int card, CardLayoutStyle *
                      sizeof(out->image));
         return 1;
     }
-    /* A card with a frame color of its own (a cards mod's "frame") takes the
-     * style of that color's name when the layout has one; otherwise the
-     * first rule that applies; otherwise the layout's "default_style". */
-    if (override >= 0 && Json_Member(styles, color_names[override])) name = color_names[override];
+    /* A card's explicit named style is strongest.  Unlike its "frame"
+     * palette color it can name any style a layout provides.  Next comes a
+     * color's same-named style, then rules, then the default. */
+    if (card_style && *card_style) name = card_style;
+    if (!name && override >= 0 && Json_Member(styles, color_names[override])) name = color_names[override];
     for (rule = Json_At(Json_Member(source->layout, "frame_for"), 0); !name && rule; rule = Json_Next(rule)) {
         if (rule_applies(source, rule, card, cls)) name = Json_String(Json_Member(rule, "style"), NULL);
     }
@@ -252,11 +319,30 @@ static int resolve_style(const LayoutSource *source, int card, CardLayoutStyle *
         return 0;
     }
     snprintf(out->name, sizeof(out->name), "%s", name);
+    image = Json_String(Json_Member(style, "image"), NULL);
+    /* A style with a picture is full-bleed by default.  Fallback styles may
+     * deliberately omit it: they still select a hand palette, but preserve
+     * the retail large-card plate for every card that does not opt in. */
+    out->full_bleed = Json_Bool(Json_Member(style, "full_bleed"), image && *image);
     out->width = (int)Json_Number(Json_Member(style, "width"), 140);
     out->height = (int)Json_Number(Json_Member(style, "height"), 196);
     if (want_image)
-        mod_file(source->mod, Json_String(Json_Member(style, "image"), NULL), "\"frame_styles\" style", out->image,
+    {
+        mod_file(source->mod, image, "\"frame_styles\" style", out->image,
                  sizeof(out->image));
+        mod_file(source->mod, Json_String(Json_Member(style, "hand_image"), NULL), "\"frame_styles\" hand_image",
+                 out->hand_image, sizeof(out->hand_image));
+        mod_file(source->mod, Json_String(Json_Member(style, "field_image"), NULL), "\"frame_styles\" field_image",
+                 out->field_image, sizeof(out->field_image));
+        mod_file(source->mod, Json_String(Json_Member(style, "field_back_image"), NULL),
+                 "\"frame_styles\" field_back_image", out->field_back_image, sizeof(out->field_back_image));
+        mod_file(source->mod, Json_String(Json_Member(style, "back_image"), NULL), "\"frame_styles\" back_image",
+                 out->back_image, sizeof(out->back_image));
+        mod_file(source->mod, Json_String(Json_Member(style, "menu_icon"), NULL), "\"frame_styles\" menu_icon",
+                 out->menu_icon, sizeof(out->menu_icon));
+        mod_file(source->mod, Json_String(Json_Member(style, "library_icon"), NULL), "\"frame_styles\" library_icon",
+                 out->library_icon, sizeof(out->library_icon));
+    }
     return 1;
 }
 
@@ -265,6 +351,78 @@ int CardLayout_StyleOf(int card_id, CardLayoutStyle *style)
     LayoutSource source = find_source();
     if (!full_bleed_of(&source)) return 0;
     return resolve_style(&source, card_id, style, 0);
+}
+
+const char *CardLayout_HandFramePath(int card_id)
+{
+    static char path[1024];
+    LayoutSource source = find_source();
+    CardLayoutStyle style;
+
+    path[0] = 0;
+    if (full_bleed_of(&source) && resolve_style(&source, card_id, &style, 1))
+        snprintf(path, sizeof(path), "%s", style.hand_image);
+    return path;
+}
+
+const char *CardLayout_FieldFramePath(int card_id)
+{
+    static char path[1024];
+    LayoutSource source = find_source();
+    CardLayoutStyle style;
+
+    path[0] = 0;
+    if (full_bleed_of(&source) && resolve_style(&source, card_id, &style, 1))
+        snprintf(path, sizeof(path), "%s", *style.field_image ? style.field_image : style.hand_image);
+    return path;
+}
+
+const char *CardLayout_FieldBackPath(int card_id)
+{
+    static char path[1024];
+    LayoutSource source = find_source();
+    CardLayoutStyle style;
+
+    path[0] = 0;
+    if (full_bleed_of(&source) && resolve_style(&source, card_id, &style, 1))
+        snprintf(path, sizeof(path), "%s", style.field_back_image);
+    return path;
+}
+
+const char *CardLayout_BackImagePath(int card_id)
+{
+    static char path[1024];
+    LayoutSource source = find_source();
+    CardLayoutStyle style;
+
+    path[0] = 0;
+    if (full_bleed_of(&source) && resolve_style(&source, card_id, &style, 1))
+        snprintf(path, sizeof(path), "%s", style.back_image);
+    return path;
+}
+
+const char *CardLayout_MenuIconPath(int card_id)
+{
+    static char path[1024];
+    LayoutSource source = find_source();
+    CardLayoutStyle style;
+
+    path[0] = 0;
+    if (full_bleed_of(&source) && resolve_style(&source, card_id, &style, 1))
+        snprintf(path, sizeof(path), "%s", style.menu_icon);
+    return path;
+}
+
+const char *CardLayout_LibraryIconPath(int card_id)
+{
+    static char path[1024];
+    LayoutSource source = find_source();
+    CardLayoutStyle style;
+
+    path[0] = 0;
+    if (full_bleed_of(&source) && resolve_style(&source, card_id, &style, 1))
+        snprintf(path, sizeof(path), "%s", style.library_icon);
+    return path;
 }
 
 void CardLayout_SetCard(int card_id)
@@ -284,7 +442,19 @@ void CardLayout_SetCard(int card_id)
 int CardLayout_FullBleed(void)
 {
     LayoutSource source = find_source();
-    return full_bleed_of(&source);
+    return full_bleed_of(&source) && current.full_bleed;
+}
+
+int CardLayout_TitleStyled(int card_id)
+{
+    LayoutSource source = find_source();
+    CardLayoutStyle style;
+    const JsonValue *styles, *style_node;
+
+    if (!full_bleed_of(&source) || !resolve_style(&source, card_id, &style, 0)) return 0;
+    styles = Json_Member(source.layout, "frame_styles");
+    style_node = styles && *style.name ? Json_Member(styles, style.name) : NULL;
+    return layout_part(style_node, source.layout, "title") != NULL;
 }
 
 const char *CardLayout_FramePath(void)
@@ -322,26 +492,32 @@ int CardLayout_FramePaths(char (*paths)[1024], int max)
 
 CardLayoutPlacement CardLayout_Get(CardLayoutElement element)
 {
-    CardLayoutPlacement p = {1, 0, 0, 0, 0};
+    CardLayoutPlacement p = {1, 0, 0, 0, 0, 0x80, 0x80, 0x80};
     LayoutSource source = find_source();
-    int full_bleed = full_bleed_of(&source);
+    int full_bleed = full_bleed_of(&source) && current.full_bleed;
     int spell = CardLayout_IsSpell();
+    const JsonValue *styles = Json_Member(source.layout, "frame_styles");
+    const JsonValue *style_node = styles && *current.name ? Json_Member(styles, current.name) : NULL;
+    const JsonValue *part;
 
     switch (element) {
     case CARD_LAYOUT_FRAME: {
         /* The current card's frame style, "width" x "height" (140x196 unless
-         * the style says) -- the whole box CardLayout_DrawFrame (func_80028B08.c) draws its
-         * texture into; 140x196 with no mod's own size given is this
-         * feature's own first measured value, kept as the sensible
-         * default, not a retail equivalent (retail has no unified frame
-         * concept to default to). */
+         * the style says): the retail viewer's own card-plate footprint.
+         * A style's optional back_image uses this same box. */
         p.visible = !full_bleed;
         p.w = current.width;
         p.h = current.height;
         break;
     }
     case CARD_LAYOUT_TITLE:
-        p.visible = !full_bleed;
+        /* The retail title sprite already contains the card's current,
+         * localized name. A full-bleed frame keeps it only when the style
+         * (or shared layout) explicitly supplies a title placement. */
+        part = layout_part(style_node, source.layout, "title");
+        p.visible = !full_bleed || part != NULL;
+        point(part, &p.x, &p.y, 0xC, 0xE);
+        tint(part, &p.r, &p.g, &p.b);
         break;
     case CARD_LAYOUT_DESCRIPTION:
         /* Always visible, independent of full_bleed: the description
@@ -353,39 +529,52 @@ CardLayoutPlacement CardLayout_Get(CardLayoutElement element)
     case CARD_LAYOUT_LEVEL_STARS:
         /* Magic/trap/ritual never reach this call (func_80028B08.c's own
          * obj->field_68 < 0x14 gate, unrelated to full_bleed): none of the
-         * three have a level to draw stars for, in retail or full-bleed. */
-        if (full_bleed) point(source.layout, "stars", &p.x, &p.y, 0x77, 0x20);
-        else { p.x = 0x77; p.y = 0x20; }
+         * three have a level to draw stars for, in retail or full-bleed.
+         * Position and tint read from the mod's "stars" key either way --
+         * only the centring math downstream (func_80028B08.c) still checks
+         * full_bleed, since a retail-shaped plate has no box to centre in. */
+        part = layout_part(style_node, source.layout, "stars");
+        point(part, &p.x, &p.y, 0x77, 0x20);
+        tint(part, &p.r, &p.g, &p.b);
         break;
     case CARD_LAYOUT_ATTRIBUTE:
-        /* Monster/purple/orange: the mod's "attribute" rect. Magic/trap/
-         * ritual: "spell"."icon" instead -- a different place for the same
-         * element (func_80028B08.c still draws retail's own elemental
-         * texture there, unchanged; those three kinds just have no
-         * meaningful one, same as they have no ATK/DEF/level). */
-        if (full_bleed) {
-            if (spell) rect(Json_Member(source.layout, "spell"), "icon", &p.x, &p.y, &p.w, &p.h, 0x6E, 0xD, 0, 0);
-            else rect(source.layout, "attribute", &p.x, &p.y, &p.w, &p.h, 0x6E, 0xD, 0, 0);
-        } else { p.x = 0x6E; p.y = 0xD; }
+        /* Monster/purple/orange: the mod's (or the style's own) "attribute"
+         * rect. Magic/trap/ritual: "spell"."icon" instead -- a different
+         * place for the same element (func_80028B08.c still draws retail's
+         * own elemental texture there, unchanged; those three kinds just
+         * have no meaningful one, same as they have no ATK/DEF/level).
+         * Position and tint apply with no full-bleed mod too; width/height
+         * (the stretch into a custom frame's own cutout) stay retail's 0x0
+         * outside one -- a fallback style has no custom art there to
+         * stretch into. */
+        if (spell) part = Json_Member(layout_part(style_node, source.layout, "spell"), "icon");
+        else part = layout_part(style_node, source.layout, "attribute");
+        rect(part, &p.x, &p.y, &p.w, &p.h, 0x6E, 0xD, 0, 0);
+        tint(part, &p.r, &p.g, &p.b);
+        if (!full_bleed) { p.w = 0; p.h = 0; }
         break;
     case CARD_LAYOUT_ATK:
         /* Spell: never reached (same gate as CARD_LAYOUT_LEVEL_STARS). */
-        if (full_bleed) point(source.layout, "atk", &p.x, &p.y, 0x61, 0x9D);
-        else { p.x = 0x61; p.y = 0x9D; }
+        part = digit_stat_part(style_node, source.layout, "atk");
+        point(part, &p.x, &p.y, 0x61, 0x9D);
+        tint(part, &p.r, &p.g, &p.b);
         break;
     case CARD_LAYOUT_DEF:
-        if (full_bleed) point(source.layout, "def", &p.x, &p.y, 0x61, 0xAB);
-        else { p.x = 0x61; p.y = 0xAB; }
+        part = digit_stat_part(style_node, source.layout, "def");
+        point(part, &p.x, &p.y, 0x61, 0xAB);
+        tint(part, &p.r, &p.g, &p.b);
         break;
     case CARD_LAYOUT_ART:
-        /* w/h at 0 (retail) unless full-bleed and the mod gives a rect:
-         * func_80028B08.c reads w != 0 as "stretch the art", so an empty
-         * "art" key here (no mod, or full_bleed off) correctly draws
-         * nothing special. Spell reads "spell"."art" instead of "art" --
-         * magic/trap/ritual's own art box, not monster's. */
+        /* w/h at 0 (retail) unless full-bleed and the mod (or the style
+         * itself) gives a rect: func_80028B08.c reads w != 0 as "stretch
+         * the art", so an empty "art" key here (no mod, or full_bleed off)
+         * correctly draws nothing special. Spell reads "spell"."art"
+         * instead of "art" -- magic/trap/ritual's own art box, not
+         * monster's. */
         if (full_bleed) {
-            if (spell) rect(Json_Member(source.layout, "spell"), "art", &p.x, &p.y, &p.w, &p.h, 0, 0, 0, 0);
-            else rect(source.layout, "art", &p.x, &p.y, &p.w, &p.h, 0, 0, 0, 0);
+            if (spell) part = Json_Member(layout_part(style_node, source.layout, "spell"), "art");
+            else part = layout_part(style_node, source.layout, "art");
+            rect(part, &p.x, &p.y, &p.w, &p.h, 0, 0, 0, 0);
         }
         break;
     default:
@@ -395,9 +584,10 @@ CardLayoutPlacement CardLayout_Get(CardLayoutElement element)
     if (element >= 0 && element < CARD_LAYOUT_ELEMENT_COUNT &&
         (!last_set[element] || last[element].visible != p.visible ||
          last[element].x != p.x || last[element].y != p.y ||
-         last[element].w != p.w || last[element].h != p.h)) {
-        LOG(LOG_CARD_LAYOUT, "%s: visible=%d x=%d y=%d w=%d h=%d (full_bleed=%d kind=%s)",
-            element_names[element], p.visible, p.x, p.y, p.w, p.h, full_bleed, current.name);
+         last[element].w != p.w || last[element].h != p.h ||
+         last[element].r != p.r || last[element].g != p.g || last[element].b != p.b)) {
+        LOG(LOG_CARD_LAYOUT, "%s: visible=%d x=%d y=%d w=%d h=%d color=%d,%d,%d (full_bleed=%d kind=%s)",
+            element_names[element], p.visible, p.x, p.y, p.w, p.h, p.r, p.g, p.b, full_bleed, current.name);
         last[element] = p;
         last_set[element] = 1;
     }

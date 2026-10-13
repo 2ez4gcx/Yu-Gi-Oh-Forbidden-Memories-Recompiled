@@ -1,0 +1,196 @@
+{
+  "id": "xyz-blue-eyes",
+  "name": "XYZ Blue-Eyes Frame",
+  "version": "1.0.0",
+  "author": "Yamyi",
+  "description": "Gives Blue-Eyes White Dragon a custom dark-metal XYZ frame, duel hand frame, menu icon and Library icon.",
+  "min_api": 11,
+  "enabled": true,
+  "restart": true,
+  "settings": [
+    {
+      "key": "full_bleed",
+      "label": "Enable XYZ frames",
+      "type": "bool",
+      "default": 1,
+      "description": "Use the custom XYZ frame artwork for Blue-Eyes White Dragon."
+    }
+  ],
+  "card_layout": {
+    "frame_styles": {
+      "XYZ": {
+        "image": "frames/xyz_frame.png",
+        "hand_image": "frames/xyz_hand.png",
+        "menu_icon": "frames/xyz_menu_icon.png",
+        "library_icon": "frames/xyz_library_icon.png",
+        "field_back_image":"frames/xyz_back.png",
+        "back_image":"frames/xyz_back.png",
+        "hand_color": "purple",
+        "title": {
+          "x": 12,
+          "y": 14,
+          "color": {
+            "r": 255,
+            "g": 255,
+            "b": 255
+          }
+        },
+        "atk_label": {
+          "image": "frames/xyz_atk_label.png",
+          "x": 70,
+          "y": 155,
+          "width": 18,
+          "height": 8
+        },
+        "dfd_label": {
+          "image": "frames/xyz_dfd_label.png",
+          "x": 70,
+          "y": 167,
+          "width": 18,
+          "height": 8
+        },
+        "digits": {
+          "image": "frames/xyz_digits.png",
+          "atk": {
+            "x": 104,
+            "y": 159
+          },
+          "def": {
+            "x": 104,
+            "y": 172
+          },
+          "width": 8,
+          "height": 10,
+          "step": 10
+        }
+      },
+      "synchro": {
+        "image": "frames/synchro_frame.png",
+        "hand_image": "frames/xyz_hand.png",
+        "menu_icon": "frames/xyz_menu_icon.png",
+        "library_icon": "frames/xyz_library_icon.png",
+        "hand_color": "purple",
+        "atk_label": {
+          "image": "frames/xyz_atk_label.png",
+          "x": 70,
+          "y": 152,
+          "width": 18,
+          "height": 8
+        },
+        "dfd_label": {
+          "image": "frames/xyz_dfd_label.png",
+          "x": 70,
+          "y": 167,
+          "width": 18,
+          "height": 8
+        },
+        "digits": {
+          "image": "frames/xyz_digits.png",
+          "atk": {
+            "x": 104,
+            "y": 159
+          },
+          "def": {
+            "x": 104,
+            "y": 170
+          },
+          "width": 10,
+          "height": 12,
+          "step": 10
+        }
+      },
+      "pendulum": {
+        "image": "frames/pendulum_frame.png",
+        "hand_image": "frames/xyz_hand.png",
+        "menu_icon": "frames/xyz_menu_icon.png",
+        "library_icon": "frames/xyz_library_icon.png",
+        "hand_color": "purple",
+        "atk_label": {
+          "image": "frames/xyz_atk_label.png",
+          "x": 70,
+          "y": 152,
+          "width": 18,
+          "height": 8
+        },
+        "dfd_label": {
+          "image": "frames/xyz_dfd_label.png",
+          "x": 70,
+          "y": 167,
+          "width": 18,
+          "height": 8
+        },
+        "digits": {
+          "image": "frames/xyz_digits.png",
+          "atk": {
+            "x": 104,
+            "y": 159
+          },
+          "def": {
+            "x": 108,
+            "y": 170
+          },
+          "width": 10,
+          "height": 12,
+          "step": 10
+        }
+      },
+      "link": {
+        "image": "frames/link_frame.png",
+        "hand_image": "frames/xyz_hand.png",
+        "menu_icon": "frames/xyz_menu_icon.png",
+        "library_icon": "frames/xyz_library_icon.png",
+        "hand_color": "purple",
+        "atk_label": {
+          "image": "frames/xyz_atk_label.png",
+          "x": 70,
+          "y": 152,
+          "width": 18,
+          "height": 8
+        },
+        "dfd_label": {
+          "image": "frames/xyz_dfd_label.png",
+          "x": 70,
+          "y": 167,
+          "width": 18,
+          "height": 8
+        },
+        "digits": {
+          "image": "frames/xyz_digits.png",
+          "atk": {
+            "x": 104,
+            "y": 159
+          },
+          "def": {
+            "x": 108,
+            "y": 170
+          },
+          "width": 10,
+          "height": 12,
+          "step": 10
+        }
+      }
+    }
+  },
+  "cards": [
+    {
+      "replace": "Blue-eyes Ultimate Dragon",
+      "frame_style": "XYZ"
+    },
+    {
+      "replace": "001" ,
+      "frame_style": "XYZ"
+    },
+    {
+      "replace": "Gate Guardian",
+      "frame_style": "synchro"
+    },
+    {
+      "replace": "Perfectly Ultimate Great Moth",
+      "frame_style": "pendulum"
+    },
+    {
+      "replace": "Meteor B. Dragon",
+      "frame_style": "link"
+    }
+  ]
+}

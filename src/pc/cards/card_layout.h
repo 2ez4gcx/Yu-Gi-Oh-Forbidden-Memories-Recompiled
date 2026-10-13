@@ -45,10 +45,20 @@ typedef struct {
      * (CardLayout_DrawFrame's draw rect). Every other element keeps these
      * 0 -- retail's own sprite resource already fixes its draw size. */
     int w, h;
+    /* A multiply tint over whatever the element already draws (its own
+     * "color": {"r", "g", "b"}, each 0-255), in the GPU's own neutral-at-0x80
+     * convention (func_80028B08.c's win->field_0C): 0x80 each with no mod,
+     * or a mod's element with no "color" of its own, leaves the retail/style
+     * color exactly as it was -- not an independent paint, a filter on it. */
+    int r, g, b;
 } CardLayoutPlacement;
 
 CardLayoutPlacement CardLayout_Get(CardLayoutElement element);
-/* True when the frame/title plate is hidden: the one thing that tells a
+/* Whether `card_id`'s resolved full-bleed style explicitly has a `title`
+ * entry. Unlike CardLayout_Get this is a pure lookup: render replay can ask
+ * it after the game has moved on to another card without changing state. */
+int CardLayout_TitleStyled(int card_id);
+/* True when the current style's frame/title plate is hidden: the one thing that tells a
  * call site "there's no plate behind what I'm about to draw anymore"
  * without it having to infer that from an unrelated element. False with no
  * "card_layout" mod applied. */
@@ -60,19 +70,25 @@ int CardLayout_FullBleed(void);
  * through CardLayoutArt_FrameTile) simply does not draw a frame. */
 const char *CardLayout_FramePath(void);
 
-/* Every distinct frame image the active full-bleed layout can draw (one per
+/* Every distinct frame image the active layout can draw (one per
  * card kind, kinds sharing an image counted once), joined with the mod's
  * directory, into `paths`; 0 when no mod's layout is on. For
  * CardLayoutArt_Prewarm. */
 int CardLayout_FramePaths(char (*paths)[1024], int max);
 
-/* The full-bleed layout's own ATK/DFD digits ("digits": {"image", "width",
+/* The full-bleed layout's own ATK/DFD digits (the active `frame_styles` entry's
+ * "digits", falling back to card_layout's "digits": {"image", "width",
  * "height", "step"}): `path` is the image (joined with the mod's directory,
  * card_layout_art.h's digit strip), `w`x`h` one digit's draw size in the
  * card's own units, `step` the distance between two digits' left edges.
  * 0, with `path` empty, when the layout gives none (or full-bleed is off):
  * the retail digits are drawn then. */
 int CardLayout_Digits(char *path, size_t size, int *w, int *h, int *step);
+
+/* An optional, active-style-only static ATK or DFD label. `dfd` is non-zero
+ * for the defense label. The PNG's own texture is drawn at x/y and w/h in
+ * card units; 0 means that style does not supply that label. */
+int CardLayout_StatLabel(int dfd, char *path, size_t size, int *x, int *y, int *w, int *h);
 
 /* A card's frame style: what the layout draws for it, picked once for the
  * card view's big frame and the hand's small one alike, so they cannot
@@ -84,20 +100,56 @@ int CardLayout_Digits(char *path, size_t size, int *w, int *h, int *step);
 typedef struct {
     int color;
     int spell_layout;
+    int full_bleed;
     int width, height;
     char name[32];
     char image[1024];
+    char hand_image[1024];
+    char field_image[1024];
+    char field_back_image[1024];
+    char back_image[1024];
+    char menu_icon[1024];
+    char library_icon[1024];
 } CardLayoutStyle;
 
 /* The style the layout gives `card_id`, into `style` (its `image` empty); 1,
  * or 0 when the anime frame is off or the layout has none to give (retail's
  * frame colors then). A layout says it in "frame_styles" (name -> {"image",
- * "hand_color", "width", "height"}), "frame_for" (rules, first that applies
+ * "hand_color", "width", "height", "full_bleed"}), "frame_for" (rules, first that applies
  * wins: {"class" | "tag", "setting", "style"}) and "default_style"; a
  * card's own "frame" color takes the style named for it first. A layout
  * with a "frame" per kind and no "frame_styles" is read as before: the kind
  * of the card, and a ritual spell with no picture of its own wears magic's. */
 int CardLayout_StyleOf(int card_id, CardLayoutStyle *style);
+/* A style's optional "hand_image", joined with the layout mod's directory
+ * and reduced to the duel sprite's 52x60 texels. It replaces the duel's
+ * flat hand/field-card frame; "" leaves the retail sprite in place. */
+const char *CardLayout_HandFramePath(int card_id);
+/* A style's optional "field_image", for the 3D duel-field card quad
+ * (func_80015EF4's POLY_GT4, upright on the battlefield -- distinct from
+ * the flat hand sprite above). Falls back to "hand_image" when a style
+ * gives no "field_image" of its own, since both are the same 52x60 texels;
+ * "" (neither set) leaves retail's Cards_FrameColor palette-row recolor in
+ * place. */
+const char *CardLayout_FieldFramePath(int card_id);
+/* A style's optional "field_back_image", for the same flat hand/field sprite
+ * above while the card is face down (duel_card_frame_draw.c's field_69
+ * branch). A real card's own hand is never face down to its owner, so this
+ * is reached only by a face-down or mid-flip field card; no fallback to
+ * "hand_image"/"field_image" -- an unset "" leaves retail's own generic
+ * card-back sprite in place rather than showing the style's front art on
+ * what is supposed to be its back. */
+const char *CardLayout_FieldBackPath(int card_id);
+/* A style's optional "back_image", for the big card-viewer's own rotating
+ * "card turning" sprite (Library, Build Deck and the duel effect card
+ * viewer all share DuelEffect_UpdateCardViewerState,
+ * display_object_render_sprite_sheet.c's DisplayObject_RenderSpriteSheet).
+ * No fallback; "" leaves retail's own swirl in place. */
+const char *CardLayout_BackImagePath(int card_id);
+/* The style's optional 16x16 Build Deck/Trade icon. */
+const char *CardLayout_MenuIconPath(int card_id);
+/* The style's optional 12x14 Library-grid cell image. */
+const char *CardLayout_LibraryIconPath(int card_id);
 
 /* Which card the next CardLayout_Get/CardLayout_FramePath/CardLayout_IsSpell
  * answer for: its frame (monster/magic/trap/ritual/purple/orange, cards.h

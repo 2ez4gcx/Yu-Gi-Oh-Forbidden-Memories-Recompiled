@@ -101,6 +101,12 @@ int Cards_HasTag(int id, const char *tag);
 /* The color a mod's "frame" chose for `id`, CARD_FRAME_*, or -1 (left out,
  * or "Type"). */
 int Cards_FrameOverride(int id);
+/* An optional named frame style selected by a card's "frame_style".  The
+ * style itself belongs to the active card_layout mod; this is merely the
+ * card-side link, so a cards mod can request a newly defined style without
+ * having to overload one of the six palette colors or add a throwaway tag.
+ * "" means that the layout's frame_for/default_style rules choose it. */
+const char *Cards_FrameStyle(int id);
 /* The frame color `id` is drawn in when it is not its type's (-1: its
  * type's, which is what the disc does). With the anime frame on this is the
  * color of the frame style the layout picked (card_layout.h); otherwise a

@@ -16,6 +16,7 @@
 #include "pc/cards/pack_shop.h"
 #include "pc/cards/card_layout.h"
 #include "pc/cards/card_layout_art.h"
+#include "pc/text/hd_text.h"
 #include "pc/debug/log.h"
 #endif
 /*
@@ -181,7 +182,7 @@ static void CardLayout_DrawCell(s32 x, s32 y, s32 w, s32 h, s32 tpage, s32 u, s3
                                ot, art_mode, EXT);
 }
 
-static void CardLayout_DrawFrame(s32 x, s32 y, s32 w, s32 h, s32 ot, s32 mode, u32 rgb, Func80028B08Extra *EXT)
+static int CardLayout_DrawFrame(s32 x, s32 y, s32 w, s32 h, s32 ot, s32 mode, u32 rgb, Func80028B08Extra *EXT)
 {
     int col, row, tpage, clut, tile_w, tile_h;
 
@@ -192,10 +193,11 @@ static void CardLayout_DrawFrame(s32 x, s32 y, s32 w, s32 h, s32 ot, s32 mode, u
             s32 x0 = x + w * col / CARD_LAYOUT_FRAME_COLS, x1 = x + w * (col + 1) / CARD_LAYOUT_FRAME_COLS;
             s32 y0 = y + h * row / CARD_LAYOUT_FRAME_ROWS, y1 = y + h * (row + 1) / CARD_LAYOUT_FRAME_ROWS;
 
-            if (!CardLayoutArt_FrameTile(col, row, &tpage, &clut, &tile_w, &tile_h)) return;
+            if (!CardLayoutArt_FrameTile(col, row, &tpage, &clut, &tile_w, &tile_h)) return 0;
             CardLayout_DrawCell(x0, y0, x1 - x0, y1 - y0, tpage, 0, 0, clut, tile_w, tile_h, ot, mode, rgb, EXT);
         }
     }
+    return 1;
 }
 
 /* A full-bleed mod's own digits (card_layout.h's CardLayout_Digits): the
@@ -225,6 +227,49 @@ static int CardLayout_DrawDigits(s32 base_x, s32 base_y, s32 cx, s32 cy, const u
         x += step;
     }
     return 1;
+}
+
+/* A frame style's static ATK/DFD caption. It is separate from the digit
+ * strip so a style can use any art and move either caption independently. */
+static void CardLayout_DrawStatLabel(s32 base_x, s32 base_y, s32 dfd, s32 ot, s32 mode, u32 rgb, Func80028B08Extra *EXT)
+{
+    char path[1024];
+    s32 x, y, w, h, tpage, u, v, clut, cell_w, cell_h;
+
+    if (!CardLayout_StatLabel(dfd, path, sizeof(path), &x, &y, &w, &h) ||
+        !CardLayoutArt_StatLabelCell(dfd, &tpage, &u, &v, &clut, &cell_w, &cell_h)) return;
+    CardLayout_DrawCell(base_x + x, base_y + y, w, h, tpage, u, v, clut, cell_w, cell_h, ot, mode, rgb, EXT);
+}
+
+/* With HD Text disabled the retail title plate's ink is black, so a title
+ * style uses this white indexed mask. HD mode keeps the original primitive
+ * instead: gl_picture.c turns that atlas's ink white at high resolution. */
+static int CardLayout_DrawTitleMask(const SpritePrim *src, s32 x, s32 y, s32 ot, s32 mode, u32 rgb,
+                                    Func80028B08Extra *EXT)
+{
+    s32 tpage, u, v, clut, w, h;
+    if (!CardLayoutArt_TitleCell(src->tpage, src->uv.b.lo, src->uv.b.hi,
+                                 src->extent.wh.w.word, src->extent.wh.h,
+                                 &tpage, &u, &v, &clut, &w, &h)) return 0;
+    CardLayout_DrawCell(x, y, src->extent.wh.w.word, src->extent.wh.h,
+                        tpage, u, v, clut, w, h, ot, mode, rgb, EXT);
+    return 1;
+}
+
+/* `rgb`'s own three channels, each scaled by `r`/`g`/`b` (CardLayoutPlacement's
+ * convention: 0x80 is 1x, so a mod with no "color" of its own leaves `rgb`
+ * unchanged) and clamped to a byte -- a filter over whatever the card's own
+ * fade tint (win->field_0C) already is, not a replacement for it, the same
+ * way the GPU's own vertex-color multiply works. */
+static u32 CardLayout_Tint(u32 rgb, s32 r, s32 g, s32 b)
+{
+    s32 tr = (s32)(u8)rgb * r / 0x80;
+    s32 tg = (s32)(u8)(rgb >> 8) * g / 0x80;
+    s32 tb = (s32)(u8)(rgb >> 16) * b / 0x80;
+    if (tr > 0xFF) tr = 0xFF;
+    if (tg > 0xFF) tg = 0xFF;
+    if (tb > 0xFF) tb = 0xFF;
+    return (u32)tr | ((u32)tg << 8) | ((u32)tb << 16);
 }
 #endif
 
@@ -371,12 +416,20 @@ void func_80028B08(DisplayObject *obj, s32 arg1) {
     white = 0xF8;
     PRM->cxcy.h.cy = white;
 #ifdef MEMORIES_PC
-    /* A "card_layout" mod with no title plate: white/m/k above are still
-     * real code either way -- they are read again below, submitted or
-     * not. */
-    if (title_layout.visible)
+    /* A full-bleed style opts into this existing localized title sprite with
+     * `title: {"x", "y"}`. No name PNG or per-card manifest entry is needed. */
+    PRM->xy.h.x = win->field_30.h.field_30 + title_layout.x;
+    PRM->xy.h.y = win->field_30.h.field_32 + title_layout.y;
+    PRM->rgb = CardLayout_Tint(win->field_0C, title_layout.r, title_layout.g, title_layout.b);
+    if (!HdText_Enabled() && CardLayout_FullBleed() && title_layout.visible &&
+        CardLayout_DrawTitleMask(PRM, PRM->xy.h.x, PRM->xy.h.y, arg1, arg, PRM->rgb, EXT)) {
+        /* The low-resolution white mask was submitted. */
+    } else
 #endif
     DisplayObject_SubmitPacket(PRM, CTX, arg1, arg, EXT);
+#ifdef MEMORIES_PC
+    PRM->rgb = win->field_0C;
+#endif
 
     EXT->field_4 = 0;
     rec = &D_800EA0E8[obj->field_67];
@@ -462,6 +515,12 @@ void func_80028B08(DisplayObject *obj, s32 arg1) {
              * attack screen dims (rec->field_3C's 0x80 ATK, 0x40 DEF: the
              * retail digits' grey palette row) is drawn from the strip's
              * greyed digits. */
+            if (CardLayout_FullBleed()) {
+                CardLayout_DrawStatLabel(win->field_30.h.field_30, win->field_30.h.field_32,
+                                         0, arg1, arg, win->field_0C, EXT);
+                CardLayout_DrawStatLabel(win->field_30.h.field_30, win->field_30.h.field_32,
+                                         1, arg1, arg, win->field_0C, EXT);
+            }
             if (CardLayout_FullBleed() &&
                 CardLayout_DrawDigits(win->field_30.h.field_30, win->field_30.h.field_32,
                                       atk_layout.x, atk_layout.y, buf1, digits, (rec->field_3C & 0x80) != 0,
@@ -471,6 +530,10 @@ void func_80028B08(DisplayObject *obj, s32 arg1) {
                                       arg1, arg, win->field_0C, EXT);
             } else {
 
+            /* A fallback style's own "color" (card_layout.h's CardLayoutPlacement):
+             * a filter on the card's own fade tint, not a replacement for it,
+             * so the box still dims/fades with the rest of the card. */
+            PRM->rgb = CardLayout_Tint(win->field_0C, atk_layout.r, atk_layout.g, atk_layout.b);
             PRM->uv.b.hi = (PRM->uv.b.hi & 0x80) + 0x10;
             PRM->xy.h.x = win->field_30.h.field_30 + atk_left;
             PRM->xy.h.y = win->field_30.h.field_32 + atk_top;
@@ -484,6 +547,7 @@ void func_80028B08(DisplayObject *obj, s32 arg1) {
                 PRM->xy.h.x = PRM->xy.h.x + step;
             }
 
+            PRM->rgb = CardLayout_Tint(win->field_0C, def_layout.r, def_layout.g, def_layout.b);
             PRM->xy.h.x = win->field_30.h.field_30 + def_left;
             PRM->xy.h.y = win->field_30.h.field_32 + def_top;
             PRM->cxcy.h.cy = 0xF8;
@@ -495,6 +559,7 @@ void func_80028B08(DisplayObject *obj, s32 arg1) {
                 DisplayObject_SubmitPacket(PRM, CTX, arg1, arg, EXT);
                 PRM->xy.h.x = PRM->xy.h.x + step;
             }
+            PRM->rgb = win->field_0C;
             }
         }
 #else
@@ -549,12 +614,13 @@ void func_80028B08(DisplayObject *obj, s32 arg1) {
 #ifdef MEMORIES_PC
         PRM->xy.h.x = sa + star_layout.x;
         PRM->xy.h.y = win->field_30.h.field_32 + star_layout.y;
-        if (CardLayout_FullBleed()) {
-            /* star_layout.x is the row's centre, not retail's first-star
-             * anchor: up to 12 stars at a fixed 9px each would run past the
-             * frame's edge from a fixed anchor, so centre them instead. */
-            PRM->xy.h.x = sa + star_layout.x + 9 * (s32)rec->field_3A / 2 - 9;
-        }
+        /* `stars.x` is deliberately a literal offset from the card window,
+         * matching the retail 0x77 coordinate.  Do not add a level-based
+         * centring term here: it would make one JSON position mean different
+         * things for different cards (and only when full-bleed is enabled).
+         * The normal right-to-left drawing loop below remains responsible for
+         * the row's width, exactly as it is in the original game. */
+        PRM->rgb = CardLayout_Tint(win->field_0C, star_layout.r, star_layout.g, star_layout.b);
 #endif
         *(u32 *)&PRM->extent = sb;
         PRM->uv.b.lo = 0;
@@ -577,6 +643,7 @@ void func_80028B08(DisplayObject *obj, s32 arg1) {
 #ifdef MEMORIES_PC
     PRM->xy.h.x = win->field_30.h.field_30 + attr_layout.x;
     PRM->xy.h.y = win->field_30.h.field_32 + attr_layout.y;
+    PRM->rgb = CardLayout_Tint(win->field_0C, attr_layout.r, attr_layout.g, attr_layout.b);
 #endif
     *(u32 *)&PRM->extent = 0x00100010;
     lo = rec->field_3B << 4;
@@ -608,8 +675,29 @@ void func_80028B08(DisplayObject *obj, s32 arg1) {
         LOG(LOG_CARD_LAYOUT, "DrawFrame: x=%d y=%d w=%d h=%d ot=%d mode=0x%x",
             win->field_30.h.field_30, win->field_30.h.field_32, frame_layout.w, frame_layout.h,
             (int)arg1, (unsigned)arg);
-        CardLayout_DrawFrame(win->field_30.h.field_30, win->field_30.h.field_32,
-                             frame_layout.w, frame_layout.h, arg1, arg, win->field_0C, EXT);
+        /* The retail sprite-sheet frame is opaque and is submitted after
+         * these tiles, so it would cover a successfully loaded custom
+         * frame. Keep it during the opening animation (when an image may
+         * still fail to decode), then turn only that sprite off once all
+         * custom tiles are available -- and back on the moment they stop
+         * being available (a new "image" still decoding, a save state
+         * loaded mid-animation, a mod swapped out): this runs every frame
+         * the viewer is open, so GsDOFF must track this frame's own result,
+         * never just latch on, or a `win` object a later card reuses could
+         * inherit a stale "hidden" bit with nothing behind it to show. */
+        /* Keep the replacement in the same draw bucket as the other card
+         * contents.  The viewer deliberately puts that bucket one step in
+         * front of the retail plate; moving only the replacement back to the
+         * plate's depth changes the ordering shared by Build Deck previews
+         * and lets cards cross the right-hand panel.  The frame is submitted
+         * last, so within this bucket it remains behind the art and text. */
+        if (CardLayout_DrawFrame(win->field_30.h.field_30, win->field_30.h.field_32,
+                                 frame_layout.w, frame_layout.h, arg1, arg, win->field_0C, EXT))
+            win->attribute |= GsDOFF;
+        else
+            win->attribute &= ~GsDOFF;
+    } else {
+        win->attribute &= ~GsDOFF;
     }
 #endif
 }

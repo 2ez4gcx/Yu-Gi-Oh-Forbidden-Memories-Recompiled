@@ -33,7 +33,7 @@ int HdText_Cell(int bank, int page_x, int page_y, int large, int u, int v, int f
  * so a texel u, v is at atlas u + (u - title_u). */
 void HdText_TitleUploaded(int card, int x, int y);
 int HdText_Title(int page_x, int page_y, int u, int v, int factor, int *atlas_u, int *atlas_v, int *title_u,
-                 int *title_v);
+                 int *title_v, int *card);
 
 /* HD numbers and labels (with HD text, HdText_Enabled): the duel's digits
  * (life points, deck counts, the field cards' ATK and DEF, the card view's,

@@ -21,6 +21,9 @@ sha256 v0.1.2 linux 2ef326fad001284a6dddbc1cfc33561a16d61d8656a180a586eba42275ab
 baseline v0.2.0
 sha256 v0.2.0 windows bf1db67397f60f6f12b845c21ce82cef3051e6b67d4f82e284e8c9bf359824ab
 sha256 v0.2.0 linux c6dfa734174ef1432ba5cb4b085f3a59a6d4e53bdd4763db249f2e4c897fde68
+baseline v0.3.0
+sha256 v0.3.0 windows 40f1fedd363c0db193f8d67dff48c49ebc375f5aa903279fd70d7c622ccb63a6
+sha256 v0.3.0 linux 4b205351fb753882660174986ce7cdc92279d89c382b809be27678344cd89d73
 
 # The Cheats menu's functions now say whether they did anything (0 before a
 # game is loaded); a caller built against v0.1.2's void ignores eax.
@@ -98,3 +101,17 @@ accept v0.2.0 record TitleLine names its colour field color
 # such entry), so no mod can have used it.
 accept v0.1.2 export name was the C library macros' parameter, never a name the game lent
 accept v0.2.0 export name was the C library macros' parameter, never a name the game lent
+
+# Custom monster attributes (API 12): a monster effect's attribute filter
+# goes past 127 (ATTRIBUTES_MAX 255), so MonsterEffect's `attribute` and
+# `each_attribute` widened from signed char to short. Both grew in place,
+# into the byte clang already padded them to for the field after (`card`,
+# then the struct's own trailing pad): every other field keeps its offset,
+# and sizeof/align are unchanged (20, 4, both builds). A v0.3.0 mod only
+# reads these through Cards_MonsterEffects's `const MonsterEffect *` (the
+# SDK has no call a mod can use to write one of the engine's own), and a
+# narrow signed-char read of the new short's low byte, little-endian, still
+# gives -1 or 0-127 exactly as before; a value of 128-255 is new and no
+# v0.3.0 mod could have compiled a comparison against one. Same reasoning
+# as DuelResultDisplayState's starchip_prize above.
+accept v0.3.0 record MonsterEffect widened attribute and each_attribute into their own trailing pad byte

@@ -113,6 +113,9 @@ s32 Duel_GetTerrainBoost(s32 cardType)
     /* A mod's bonus for this terrain and type (tables.h). */
     s32 bonus;
 
+    if (cardType < 0) {
+        return 0; /* Cards_Type's answer for no card */
+    }
     if (Tables_TerrainBonus(gDuel_bTerrain[0], cardType, &bonus)) {
         return bonus;
     }

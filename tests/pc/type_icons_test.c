@@ -117,6 +117,10 @@ static void loaded_cells(void)
         assert(tpage == (PAGE | (BANK << 11)));
         assert(u >= 0 && u < 256 && v >= 0 && v < 256);
         assert((clut >> 6) >= CLUT_Y);
+        /* duel_ui.c's palettes fill rows 480-511 at x 0-255: no type's
+         * palette row reaches them (types 248-255 take a second column). */
+        assert((clut >> 6) < 480);
+        assert(ids[i] < 248 ? (clut & 0x3F) == CLUT_X >> 4 : (clut & 0x3F) == (CLUT_X + 16) >> 4);
         if (!i) {
             /* Type cells deliberately occupy bank 14's free page at word
              * 64, not bank 13's card-layout frame area or the star cells

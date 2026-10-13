@@ -14,8 +14,14 @@
 #define BANK 14
 #define PAGE 1
 #define SIDE CARD_ICON_SIDE
+/* One palette row per type from row 256, x 64-79; rows 480-511 hold
+ * duel_ui.c's picture palettes (x 0-255), so the last 8 types' rows go
+ * in a second column at x 80-95 instead. */
 #define CLUT_Y 256
 #define CLUT_X 64
+#define CLUT_ROWS 224
+#define CLUT_COLUMN_X(slot) (CLUT_X + ((slot) / CLUT_ROWS) * 16)
+#define CLUT_ROW(slot) (CLUT_Y + (slot) % CLUT_ROWS)
 
 static unsigned char made[TYPE_LIMIT];
 /* A bad PNG must not be decoded and logged on every icon draw.  This is a
@@ -47,7 +53,7 @@ int TypeIcons_IconCell(unsigned code, int *tpage, int *u, int *v, int *clut_x, i
     int type = (int)(code & 0xFFu) + CARD_TYPE_EQUIP + 1;
     int clut;
     if ((code & 0xFF00u) != TYPE_ICON_CODE || !TypeIcons_Cell(type, tpage, u, v, &clut)) return 0;
-    *clut_x = CLUT_X;
+    *clut_x = (clut & 0x3F) << 4;
     *clut_y = clut >> 6;
     return 1;
 }
@@ -84,8 +90,8 @@ static void register_hd_icon(int type, int slot, const char *path)
     if (hd_made[type] || (hd_tried[type] && !cooled_down(retry_clock, hd_failed_at[type]))) return;
     hd_tried[type] = 1;
     TexturePack_BankSpritesUseOwner(TEXTURE_BANK_OWNER_TYPE_ICONS);
-    if (TexturePack_AddBankSprite(BANK, PAGE * 64, 0, 0, CLUT_X, CLUT_Y + slot, (slot & 15) * SIDE, (slot >> 4) * SIDE,
-                                  SIDE, SIDE, path)) {
+    if (TexturePack_AddBankSprite(BANK, PAGE * 64, 0, 0, CLUT_COLUMN_X(slot), CLUT_ROW(slot), (slot & 15) * SIDE,
+                                  (slot >> 4) * SIDE, SIDE, SIDE, path)) {
         hd_made[type] = 1;
     } else {
         hd_failed_at[type] = retry_clock;
@@ -115,7 +121,7 @@ int TypeIcons_Cell(int type, int *tpage, int *u, int *v, int *clut)
             failed_at[type] = retry_clock;
             return 0;
         }
-        memcpy(&bank[(CLUT_Y + type - 24) * SOFT_GPU_WIDTH + CLUT_X], palette, sizeof(palette));
+        memcpy(&bank[CLUT_ROW(type - 24) * SOFT_GPU_WIDTH + CLUT_COLUMN_X(type - 24)], palette, sizeof(palette));
         store(bank, type, pixels);
         slot = type - 24;
         made[type] = 1;
@@ -125,7 +131,7 @@ int TypeIcons_Cell(int type, int *tpage, int *u, int *v, int *clut)
     *tpage = PAGE | (BANK << 11);
     *u = (slot & 15) * SIDE;
     *v = (slot >> 4) * SIDE;
-    *clut = ((CLUT_Y + slot) << 6) | (CLUT_X >> 4);
+    *clut = (CLUT_ROW(slot) << 6) | (CLUT_COLUMN_X(slot) >> 4);
     register_hd_icon(type, slot, path);
     return 1;
 }

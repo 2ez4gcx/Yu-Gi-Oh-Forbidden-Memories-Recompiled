@@ -422,6 +422,39 @@ static void monster_effect_type_overflow(void)
     assert(effect_notes == before + 1);
 }
 
+/* Cards_Reference reads Json_Number's long before Cards_Valid's int: a
+ * reference far past int range must not wrap into a valid card id (card 1,
+ * from 2^32 + 1 narrowed to 1 on a typical 64-bit build). */
+static void reference_overflow(void)
+{
+    char error[128];
+    JsonDocument *doc = Json_Parse("4294967297", error, sizeof(error));
+    assert(doc);
+    assert(Cards_Reference(Json_Root(doc)) == -1);
+    Json_Free(doc);
+}
+
+/* add_entry's own "copy"/"replace" id resolution has the same int-narrowing
+ * shape as Cards_Reference, just not through it: an oversized id must be
+ * refused, not silently narrowed into card 1 and applied to it. */
+static void copy_id_overflow(void)
+{
+    BuildContext context = {0};
+    char error[128];
+    const JsonValue *entry;
+    int i, before_count = gCard_nCount;
+    unsigned before_stats = (unsigned)gDuel_adwCardStats[0];
+    JsonDocument *doc = Json_Parse(
+        "[{\"copy\":4294967297,\"id\":\"overflow-copy\",\"attack\":3000},"
+        "{\"replace\":4294967297,\"attack\":3000}]",
+        error, sizeof(error));
+    assert(doc);
+    for (i = 0, entry = Json_At(Json_Root(doc), 0); entry; i++, entry = Json_Next(entry))
+        add_entry("i", ".", i, entry, &context);
+    assert(gCard_nCount == before_count);              /* no copy added */
+    assert((unsigned)gDuel_adwCardStats[0] == before_stats);   /* card 1 (2^32+1 narrowed) untouched */
+}
+
 /* Copies of magic cards made monsters (as a replace may be): a monster's
  * type, ATK and DEF, stars as a replaced card gets them, out of the magic
  * card's tables; made a Trap without a trap's effect, still refused. */
@@ -602,6 +635,8 @@ int main(void)
     monster_effect_entries();
     monster_effect_for_each();
     monster_effect_type_overflow();
+    reference_overflow();
+    copy_id_overflow();
     copies_made_monsters();
     card_effect_entries();
     puts("cards stars, magic and trap conversions: ok");

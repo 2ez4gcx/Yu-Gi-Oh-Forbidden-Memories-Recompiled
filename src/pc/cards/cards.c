@@ -34,6 +34,7 @@
 #include "pc/compat/posix.h"
 #include "game/card_constants.h"
 #include <ctype.h>
+#include <limits.h>
 #include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -599,10 +600,16 @@ static int retail_by_name(const char *text)
 int Cards_Reference(const JsonValue *value)
 {
     const char *text;
+    long raw;
     int id;
     if (!value || Json_TypeOf(value) == JSON_NULL) return 0;
     if (Json_TypeOf(value) == JSON_NUMBER) {
-        id = (int)Json_Number(value, 0);
+        /* Json_Number is long; Cards_Valid's id is int. Checked before the
+         * narrow, not after: a ref far past int range (e.g. 2^32 + 1) wraps
+         * to a small, perfectly valid id instead of failing Cards_Valid. */
+        raw = Json_Number(value, 0);
+        if (raw < INT_MIN || raw > INT_MAX) return -1;
+        id = (int)raw;
         return Cards_Valid(id) ? id : -1;
     }
     text = Json_String(value, NULL);
@@ -1203,7 +1210,11 @@ static void add_entry(const char *mod, const char *directory, int index, const J
     if (Json_TypeOf(copy) == JSON_STRING && !isdigit((unsigned char)*Json_String(copy, "")) ) {
         base = retail_by_name(Json_String(copy, ""));
     } else {
-        base = (int)Json_Number(copy, 0);
+        /* Checked before the narrow to int, not after (Cards_Reference,
+         * just above, same reasoning): a "copy"/"replace" far past int
+         * range would otherwise wrap into 1..CARD_COUNT and pass below. */
+        long raw = Json_Number(copy, 0);
+        base = raw < INT_MIN || raw > INT_MAX ? 0 : (int)raw;
     }
     if (base < 1 || base > CARD_COUNT) {
         Mods_Note(mod, "cards[%d]: \"%s\" must name a card of the disc, 1 to %d", index, replace ? "replace" : "copy",

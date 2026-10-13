@@ -492,6 +492,12 @@ int CardLayout_FullBleed(void)
     return full_bleed_of(&source) && current.full_bleed;
 }
 
+int CardLayout_Active(void)
+{
+    LayoutSource source = find_source();
+    return full_bleed_of(&source);
+}
+
 int CardLayout_TitleStyled(int card_id)
 {
     LayoutSource source = find_source();

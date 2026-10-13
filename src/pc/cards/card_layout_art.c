@@ -164,6 +164,9 @@ int CardLayoutArt_HandFrameCell(int card_id, int *tpage, int *u, int *v, int *cl
 #define FIELD_H 60
 #define FIELD_PAGE_X 384
 #define FIELD_PAGE_Y 300
+#define FIELD_TPAGE_Y (FIELD_PAGE_Y & ~255)
+#define FIELD_U (FIELD_PAGE_X & 63)
+#define FIELD_V (FIELD_PAGE_Y & 255)
 #define FIELD_CLUT_Y (FIELD_PAGE_Y + FIELD_H + 1)  /* +1: row FIELD_PAGE_Y + FIELD_H is the padded bottom edge */
 static char field_path[1024];
 static char field_bank_path[1024];
@@ -212,13 +215,13 @@ int CardLayoutArt_FieldFrameCell(int card_id, int *tpage, int *u, int *v, int *c
         snprintf(field_bank_path, sizeof(field_bank_path), "%s", path);
         if (field_png_w > 0 && field_png_h > 0) {
             TexturePack_BankSpritesUseOwner(TEXTURE_BANK_OWNER_LAYOUT_FRAME);
-            TexturePack_AddBankSprite(FRAME_BANK, FIELD_PAGE_X, FIELD_PAGE_Y, 1, FIELD_PAGE_X, FIELD_CLUT_Y,
-                                      0, 0, FIELD_W, FIELD_H, path);
+            TexturePack_AddBankSprite(FRAME_BANK, FIELD_PAGE_X - FIELD_U, FIELD_TPAGE_Y, 1,
+                                      FIELD_PAGE_X, FIELD_CLUT_Y, FIELD_U, FIELD_V, FIELD_W, FIELD_H, path);
         }
     }
     *tpage = LAYOUT_TPAGE(FIELD_PAGE_X, FIELD_PAGE_Y);
-    *u = 0;
-    *v = 0;
+    *u = FIELD_U;
+    *v = FIELD_V;
     *clut = (FIELD_CLUT_Y << 6) | (FIELD_PAGE_X / 16);
     *w = FIELD_W;
     *h = FIELD_H;
@@ -229,6 +232,9 @@ int CardLayoutArt_FieldFrameCell(int card_id, int *tpage, int *u, int *v, int *c
 #define FIELD_BACK_H 60
 #define FIELD_BACK_PAGE_X 640
 #define FIELD_BACK_PAGE_Y 300
+#define FIELD_BACK_TPAGE_Y (FIELD_BACK_PAGE_Y & ~255)
+#define FIELD_BACK_U (FIELD_BACK_PAGE_X & 63)
+#define FIELD_BACK_V (FIELD_BACK_PAGE_Y & 255)
 #define FIELD_BACK_CLUT_Y (FIELD_BACK_PAGE_Y + FIELD_BACK_H + 1)  /* +1: row FIELD_BACK_PAGE_Y + FIELD_BACK_H is the padded bottom edge */
 static char field_back_path[1024];
 static char field_back_bank_path[1024];
@@ -281,13 +287,14 @@ int CardLayoutArt_FieldBackCell(int card_id, int *tpage, int *u, int *v, int *cl
         snprintf(field_back_bank_path, sizeof(field_back_bank_path), "%s", path);
         if (field_back_png_w > 0 && field_back_png_h > 0) {
             TexturePack_BankSpritesUseOwner(TEXTURE_BANK_OWNER_LAYOUT_FRAME);
-            TexturePack_AddBankSprite(FRAME_BANK, FIELD_BACK_PAGE_X, FIELD_BACK_PAGE_Y, 1, FIELD_BACK_PAGE_X,
-                                      FIELD_BACK_CLUT_Y, 0, 0, FIELD_BACK_W, FIELD_BACK_H, path);
+            TexturePack_AddBankSprite(FRAME_BANK, FIELD_BACK_PAGE_X - FIELD_BACK_U, FIELD_BACK_TPAGE_Y, 1,
+                                      FIELD_BACK_PAGE_X, FIELD_BACK_CLUT_Y, FIELD_BACK_U, FIELD_BACK_V,
+                                      FIELD_BACK_W, FIELD_BACK_H, path);
         }
     }
     *tpage = LAYOUT_TPAGE(FIELD_BACK_PAGE_X, FIELD_BACK_PAGE_Y);
-    *u = 0;
-    *v = 0;
+    *u = FIELD_BACK_U;
+    *v = FIELD_BACK_V;
     *clut = (FIELD_BACK_CLUT_Y << 6) | (FIELD_BACK_PAGE_X / 16);
     *w = FIELD_BACK_W;
     *h = FIELD_BACK_H;
@@ -454,8 +461,10 @@ int CardLayoutArt_MenuIconCell(int card_id, int *tpage, int *u, int *v, int *clu
 #define LIBRARY_H 14
 #define LIBRARY_PAGE_X 640
 #define LIBRARY_PAGE_Y 280
-#define LIBRARY_U 0
-#define LIBRARY_V 0
+#define LIBRARY_TPAGE_X (LIBRARY_PAGE_X & ~63)
+#define LIBRARY_TPAGE_Y (LIBRARY_PAGE_Y & ~255)
+#define LIBRARY_U (LIBRARY_PAGE_X & 63)
+#define LIBRARY_V (LIBRARY_PAGE_Y & 255)
 #define LIBRARY_X_WORD LIBRARY_PAGE_X
 #define LIBRARY_Y LIBRARY_PAGE_Y
 #define LIBRARY_CLUT_Y (LIBRARY_Y + LIBRARY_H + 1)  /* +1: row LIBRARY_Y + LIBRARY_H is the padded bottom edge */
@@ -523,7 +532,7 @@ int CardLayoutArt_LibraryIconCell(int card_id, int *tpage, int *u, int *v, int *
         }
         if (library_png_w > 0 && library_png_h > 0) {
             TexturePack_BankSpritesUseOwner(TEXTURE_BANK_OWNER_LAYOUT_FRAME);
-            TexturePack_AddBankSprite(FRAME_BANK, LIBRARY_PAGE_X, LIBRARY_PAGE_Y, 1,
+            TexturePack_AddBankSprite(FRAME_BANK, LIBRARY_TPAGE_X, LIBRARY_TPAGE_Y, 1,
                                       LIBRARY_PAGE_X, LIBRARY_CLUT_Y, LIBRARY_U, LIBRARY_V,
                                       LIBRARY_W, LIBRARY_H, path);
         }
@@ -773,6 +782,8 @@ int CardLayoutArt_StatLabelCell(int dfd, int *tpage, int *u, int *v, int *clut, 
     uint16_t *bank, *page;
     StatLabelImage *image;
     int page_x = dfd ? STAT_LABEL_DFD_X : STAT_LABEL_ATK_X, page_y = STAT_LABEL_Y;
+    int tpage_x = page_x & ~63, tpage_y = page_y & ~255;
+    int tex_u = page_x & 63, tex_v = page_y & 255;
     int clut_y = page_y + STAT_LABEL_H, x, y;
 
     if (!CardLayout_StatLabel(dfd, path, sizeof(path), &x, &y, w, h) || !(bank = SoftGpu_Bank(FRAME_BANK))) return 0;
@@ -801,12 +812,13 @@ int CardLayoutArt_StatLabelCell(int dfd, int *tpage, int *u, int *v, int *clut, 
         snprintf(image->bank_path, sizeof(image->bank_path), "%s", path);
         if (image->png_w > 0 && image->png_h > 0) {
             TexturePack_BankSpritesUseOwner(TEXTURE_BANK_OWNER_LAYOUT_FRAME);
-            TexturePack_AddBankSprite(FRAME_BANK, page_x, page_y, 1, page_x, clut_y,
-                                      0, 0, STAT_LABEL_W, STAT_LABEL_H, path);
+            TexturePack_AddBankSprite(FRAME_BANK, tpage_x, tpage_y, 1, page_x, clut_y,
+                                      tex_u, tex_v, STAT_LABEL_W, STAT_LABEL_H, path);
         }
     }
     *tpage = LAYOUT_TPAGE(page_x, page_y);
-    *u = *v = 0;
+    *u = tex_u;
+    *v = tex_v;
     *clut = (clut_y << 6) | (page_x / 16);
     /* The caller's earlier CardLayout_StatLabel call has the on-card draw
      * dimensions. These outputs describe the full source cell for its UVs;
@@ -903,7 +915,10 @@ void CardLayoutArt_Prewarm(void)
         digits_bank_path[0] = 0;
     }
     count = CardLayout_FramePaths(paths, FRAME_CACHE);
-    if (!count) {
+    /* An icon/hand-only style has no FramePaths() entry but still owns HD
+     * bank sprites.  Clear that owner only when the layout itself has been
+     * disabled, not merely because it supplies no large frame image. */
+    if (!count && !CardLayout_Active()) {
         TexturePack_BankSpritesClear(TEXTURE_BANK_OWNER_LAYOUT_FRAME);
         layout_bank_registrations_lost();
     }

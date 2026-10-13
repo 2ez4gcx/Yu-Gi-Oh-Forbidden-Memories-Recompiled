@@ -63,6 +63,9 @@ int CardLayout_TitleStyled(int card_id);
  * without it having to infer that from an unrelated element. False with no
  * "card_layout" mod applied. */
 int CardLayout_FullBleed(void);
+/* Whether an applied layout is currently enabled.  Unlike FramePaths(), this
+ * remains true for a palette/icon-only layout with no large frame image. */
+int CardLayout_Active(void);
 /* The frame texture's path on disk (the layout mod's own "frame" image,
  * already joined with its directory and validated the way a "title" mod's
  * image is -- card_layout_art.c just opens it), or "" when no mod applies

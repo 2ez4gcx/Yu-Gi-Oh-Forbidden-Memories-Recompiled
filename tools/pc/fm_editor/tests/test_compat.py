@@ -127,6 +127,22 @@ class FeatureTest(unittest.TestCase):
         self.assertIn((660, manifest.EQUIP_TYPE, 24, True, 1),
                       manifest.equip_rules(p, [{"card": 660, "add": ["Cyberse"]}], []))
 
+    def test_type_name_with_no_glyph_is_never_registered(self):
+        # encode_type_name (cards.c) rejects the whole declaration, not just
+        # the letters it cannot show: the editor's model must agree, or a
+        # card assigned to this id here would point at nothing at runtime.
+        p = Project(fixture().game())
+        messages = manifest.apply(p, {"card_types": {"types": [{"id": 24, "name": "\U0001F600"}]}})
+        self.assertIsNone(p.type_names[24])
+        self.assertTrue(any("no glyph" in message for message in messages))
+
+    def test_type_reference_accepts_hex_like_the_runtime(self):
+        # choice() (cards.c) falls back to Json_Number for an unmatched
+        # string, which reads "0x18" as hex the same as any other number.
+        p = Project(fixture().game())
+        manifest.apply(p, {"card_types": {"types": [{"id": 24, "name": "Cyberse"}]}})
+        self.assertEqual(manifest._type_choice(p, "0x18"), 24)
+
     def test_reasons_are_the_highest_apis(self):
         api, reasons = compat.required({"card_text_colors": {}, "ui": {}, "limits": {"swords_turns": 5}})
         self.assertEqual(api, 11)

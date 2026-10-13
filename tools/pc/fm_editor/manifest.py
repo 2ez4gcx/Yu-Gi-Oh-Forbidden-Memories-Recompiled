@@ -613,8 +613,10 @@ def _choice(value, names):
         for i, name in enumerate(names):
             if name and value.lower() == name.lower():
                 return i
-        if value.strip().lstrip("-").isdigit():
-            return int(value)
+        # choice() falls back to Json_Number for an unmatched string, which
+        # reads "0x18" as hex the same as a plain number (json.c); _number
+        # already does that.
+        return _number(value)
     return -1
 
 
@@ -652,6 +654,13 @@ def read_card_types(project: Project, section, messages: list):
             messages.append(f"{where}: id is 0-23 or 24-255 with a non-empty name; left out")
             continue
         normalized = "".join(c.lower() for c in name if c.isascii() and c.isalnum())
+        # Match encode_type_name(): a name with no glyph the game can show
+        # is never registered, the same as an empty one -- the editor's
+        # model must not hold a type the runtime would refuse to build, or
+        # a card assigned to it here would point at nothing there.
+        if not normalized:
+            messages.append(f'{where}: "{name}" has no glyph the game can display; declaration left out')
+            continue
         # Match add_card_types_section(): a later declaration may replace its
         # own ID, but must not shadow another active spelling or a retail
         # alias retained after that retail type was renamed.

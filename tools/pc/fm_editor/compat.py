@@ -19,15 +19,17 @@ from pathlib import Path
 from .gamedata import FRAME_COLOR_NAMES, TYPE_MAGIC
 from .model import type_named
 
-HOST_API = 12
+HOST_API = 13
 
 # The release each mod API first shipped in, for the hints. An API past the
 # last listed is newer than every release.
-RELEASES = {9: "v0.2.0", 10: "v0.2.1-preview.1"}
+RELEASES = {9: "v0.2.0", 10: "v0.2.1-preview.1", 11: "v0.3.0", 12: "v0.3.0"}
 
 # tables.c read_limits: what v0.2.1-preview.1 and older know.
 OLD_LIMITS = ("stats", "attack", "defense", "life_points", "two_player", "starchips", "chest", "free_duel_record",
               "two_player_record")
+# The values a game of API 12 and older leaves out.
+API_13_LIMITS = ("card_drops",)
 
 
 def release_text(api: int) -> str:
@@ -186,9 +188,12 @@ def features(manifest: dict, project=None) -> list:
             add(11, "a ritual of other than three tributes")
     limits = manifest.get("limits")
     if isinstance(limits, dict):
-        newer = sorted(key for key in limits if key not in OLD_LIMITS)
+        newer = sorted(key for key in limits if key not in OLD_LIMITS and key not in API_13_LIMITS)
         if newer:
             add(11, "the values " + ", ".join(newer))
+    # --- API 13 -------------------------------------------------------------
+    if isinstance(limits, dict) and "card_drops" in limits:
+        add(13, "the cards a win deals locked (\"limits\" \"card_drops\")")
     return out
 
 

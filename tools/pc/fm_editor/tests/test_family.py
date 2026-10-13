@@ -8,7 +8,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from fm_editor import gamedata as g, importer, kit, manifest
+from fm_editor import compat, gamedata as g, importer, kit, manifest
 from fm_editor.disc import GameFiles
 from fm_editor.tests import fixtures
 from fm_editor.tests.test_data import fixture
@@ -314,6 +314,12 @@ class DeckAndDropTest(unittest.TestCase):
         self.assertEqual(result.project.pools, pools)
         self.assertIn("the prize draw at 0x80021C6C jumps to the mod's code at 0x8000B300, which calls 0x8000B380", report)
         self.assertEqual(kit.extra_draws(f.slus, bytes(slus)).count, 5)
+        # Five cards a win: the mod's "limits" "card_drops", which locks
+        # Game > Card drops while it is applied (API 13).
+        built = manifest.build(result.project)
+        self.assertEqual(built["limits"], {"card_drops": 5})
+        self.assertIn("\"limits\" \"card_drops\" 5, which locks Game > Card drops", report)
+        self.assertEqual(compat.required(built)[0], 13)
 
 
 class RulesTest(unittest.TestCase):

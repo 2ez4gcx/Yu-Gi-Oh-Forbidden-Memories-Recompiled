@@ -261,6 +261,8 @@ static void mod_lock(void)
         CHECK(Tables_CardDropsLock(&by) == 3 && !strcmp(by, "good"));
     }
     Tables_Clear();
+}
+
 /* In a tower's duel its "drops" wins over Game > Card drops: 99 asked, one card. */
 static void tower(void)
 {

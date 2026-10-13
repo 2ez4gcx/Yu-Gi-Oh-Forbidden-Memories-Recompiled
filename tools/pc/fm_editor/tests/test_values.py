@@ -106,9 +106,9 @@ class ValuesTest(unittest.TestCase):
                      "DUEL_CRUSH_CARD_ATTACK_THRESHOLD": 1500, "TABLES_LIMIT_STAT_MAX": 32767, "CARD_STAT_MAX": 9999,
                      "DUEL_RANK_SCORE_INITIAL": 50, "DUEL_RANK_ADJUST_EXODIA_WIN": 40,
                      "DUEL_RANK_ADJUST_DECK_OUT_WIN": -40, "TABLES_VALUE_PRIZE_MAX": 1000,
-                     "TABLES_LIMIT_STARCHIPS_MAX": 99999999}
+                     "TABLES_LIMIT_STARCHIPS_MAX": 99999999, "TABLES_VALUE_CARD_DROPS_MAX": 99}
         rows = re.findall(r'\{"([\w.]+)", ([-\w]+), ([-\w]+), ([-\w]+), (NULL|")', table)
-        self.assertEqual(len(rows), 14)
+        self.assertEqual(len(rows), 15)
         for key, retail, low, high, storage in rows:
             number = lambda text: constants[text] if text in constants else int(text)
             field = values.FIELD[key]
@@ -214,6 +214,31 @@ class ValuesTabTest(unittest.TestCase):
         self.assertTrue(tab.commit())
         self.assertEqual(str(tab.captions["starchip_prize.S"].cget("style")), "Error.TLabel")
         tab.revert("starchip_prize.S")
+        # Cards a win deals: the player's own (grey "player") until the mod
+        # locks it, 1 to 99, with a tooltip saying what the lock does; 0 and
+        # 100 are refused as the game leaves them out.
+        self.assertIn("player", [w.cget("text") for w in tab.group_frames["Rewards"].winfo_children()
+                                 if isinstance(w, ttk.Label)])
+        self.assertIn("Locks Game > Card drops, 1 to 99", hints)
+        tips = tab.tips["card_drops"]
+        self.assertEqual(len(tips), 3)
+        self.assertIn("whatever the player set", tips[0].text)
+        tips[0].show()
+        self.assertIsNotNone(tips[0].window)
+        tips[0].hide()
+        self.assertIsNone(tips[0].window)
+        tab.vars["card_drops"].set("5")
+        self.assertTrue(tab.commit())
+        self.assertEqual(app.project.other["limits"]["card_drops"], 5)
+        self.assertEqual(manifest.build(app.project)["limits"]["card_drops"], 5)
+        for wrong in ("0", "100"):
+            tab.vars["card_drops"].set(wrong)
+            self.assertTrue(tab.commit())
+            self.assertEqual(str(tab.captions["card_drops"].cget("style")), "Error.TLabel")
+        self.assertEqual(values.check({"card_drops": 100}), [("error", "card_drops", "at most 99; left out")])
+        self.assertEqual(values.check({"card_drops": 0}), [("error", "card_drops", "at least 1; left out")])
+        tab.revert("card_drops")
+        self.assertNotIn("card_drops", app.project.other.get("limits") or {})
         json.dumps(manifest.build(app.project))
 
 

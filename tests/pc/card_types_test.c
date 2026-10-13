@@ -202,7 +202,7 @@ static void rename_retail(void)
     setup();
     make_dir("mods/rename");
     write_text("mods/rename/mod.json",
-               "{\"id\":\"rename\",\"min_api\":13,"
+               "{\"id\":\"rename\",\"min_api\":15,"
                "\"card_types\":{\"types\":[{\"id\":0,\"name\":\"Wyrm\"}]},"
                "\"cards\":[{\"replace\":1,\"type\":\"Dragon\"}]}");
     {
@@ -233,7 +233,7 @@ static void custom_range(void)
     size_t i, n;
     setup();
     make_dir("mods/range");
-    n = (size_t)snprintf(manifest, sizeof(manifest), "{\"id\":\"range\",\"min_api\":13,\"card_types\":{\"types\":[");
+    n = (size_t)snprintf(manifest, sizeof(manifest), "{\"id\":\"range\",\"min_api\":15,\"card_types\":{\"types\":[");
     for (i = 0; i < sizeof(ids) / sizeof(ids[0]); i++)
         n += (size_t)snprintf(manifest + n, sizeof(manifest) - n, "%s{\"id\":%d,\"name\":\"%s\"}",
                               i ? "," : "", ids[i], names[i]);
@@ -272,7 +272,7 @@ static void magic_to_monster(void)
     test_stats[0] = 150u | ((unsigned)CARD_TYPE_MAGIC << CARD_STAT_TYPE_SHIFT); /* card 1: Magic, 1500 ATK */
     make_dir("mods/conv");
     write_text("mods/conv/mod.json",
-               "{\"id\":\"conv\",\"min_api\":13,"
+               "{\"id\":\"conv\",\"min_api\":15,"
                "\"card_types\":{\"types\":[{\"id\":24,\"name\":\"Cyberse\"}]},"
                "\"cards\":[{\"replace\":1,\"type\":\"Cyberse\",\"attack\":1800,\"defense\":1200}]}");
     {
@@ -314,7 +314,7 @@ static void name_collision(void)
     setup();
     make_dir("mods/collide");
     write_text("mods/collide/mod.json",
-               "{\"id\":\"collide\",\"min_api\":13,"
+               "{\"id\":\"collide\",\"min_api\":15,"
                "\"card_types\":{\"types\":[{\"id\":24,\"name\":\"Dragon\"}]},"
                "\"cards\":[{\"replace\":1,\"type\":\"Spelcaster\"}]}");
     {
@@ -341,11 +341,11 @@ static void multi_mod_redefine(void)
      * scenario checks the registry's precedence, not TypeIcons_Cell's own
      * decoding, so neither a.png nor b.png need to exist. */
     write_text("mods/first/mod.json",
-               "{\"id\":\"first\",\"min_api\":13,"
+               "{\"id\":\"first\",\"min_api\":15,"
                "\"card_types\":{\"types\":[{\"id\":24,\"name\":\"Alpha\",\"icon\":\"a.png\"}]}}");
     make_dir("mods/second");
     write_text("mods/second/mod.json",
-               "{\"id\":\"second\",\"min_api\":13,"
+               "{\"id\":\"second\",\"min_api\":15,"
                "\"card_types\":{\"types\":[{\"id\":24,\"name\":\"Beta\",\"icon\":\"b.png\"}]}}");
     {
         static const char *const mods[] = {"first", "second"};
@@ -365,7 +365,7 @@ static void bad_glyphs(void)
     make_dir("mods/bad");
     /* U+00E9 "e acute", UTF-8 C3 A9: valid UTF-8, no glyph in this stub. */
     write_text("mods/bad/mod.json",
-               "{\"id\":\"bad\",\"min_api\":13,"
+               "{\"id\":\"bad\",\"min_api\":15,"
                "\"card_types\":{\"types\":[{\"id\":24,\"name\":\"\xC3\xA9\"}]}}");
     {
         static const char *const mods[] = {"bad"};

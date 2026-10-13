@@ -181,6 +181,7 @@ const char *Paths_WriteError(char *out, size_t size, const char *path) { (void)s
 int Settings_Get(SettingId id) { (void)id; return 0; }
 void Starter_Build(void) {}
 void Packs_Build(void) {}
+void Tower_Build(void) {}
 const UiConfig *UiConfig_Load(void) { return NULL; }
 unsigned Packs_Signature(void) { return 0; }
 void Mods_SetPackSignature(unsigned signature) { (void)signature; }

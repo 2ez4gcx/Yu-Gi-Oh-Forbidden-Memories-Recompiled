@@ -14,7 +14,7 @@ import tempfile
 import zipfile
 
 TABS = ["Cards", "Art", "Fusions", "Equips", "Rituals", "Duelists", "UI", "Starter decks", "Map",
-        "Values", "Guardian Stars", "Packs", "Mod info", "Conflicts"]
+        "Values", "Guardian Stars", "Packs", "Tower", "Mod info", "Conflicts"]
 
 
 def require(condition, message):

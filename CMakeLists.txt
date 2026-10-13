@@ -546,7 +546,7 @@ if(BUILD_TESTING)
     endif()
     add_test(NAME pc_cards_order_found COMMAND memories_cards_order_test found)
     add_test(NAME pc_cards_order_moved COMMAND memories_cards_order_test b-first)
-    # Custom monster types (API 13, cards.c's "card_types"):
+    # Custom monster types (API 15, cards.c's "card_types"):
     # a retail type renamed, the whole 24-255 bank, a retail card converted
     # to and from a custom monster type, a name collision, two mods
     # redefining one id, and a name the game has no letters for.
@@ -635,6 +635,34 @@ if(BUILD_TESTING)
         target_compile_options(memories_title_config_test PRIVATE -Wall -Wextra -Wpedantic -Werror)
     endif()
     add_test(NAME pc_title_config COMMAND memories_title_config_test)
+    # The mods' "tower" key and a save's progress in it
+    # (src/pc/tower/tower_config.c): manifests and numbers only.
+    add_executable(memories_tower_test tests/pc/tower_test.c src/pc/mods/json.c)
+    target_include_directories(memories_tower_test PRIVATE src)
+    target_compile_definitions(memories_tower_test PRIVATE MEMORIES_PC)
+    if(NOT MSVC)
+        target_compile_options(memories_tower_test PRIVATE -Wall -Wextra -Wpedantic -Werror)
+    endif()
+    if(MEMORIES_SANITIZERS)
+        target_compile_options(memories_tower_test PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
+        target_link_options(memories_tower_test PRIVATE -fsanitize=address,undefined)
+    endif()
+    add_test(NAME pc_tower COMMAND memories_tower_test)
+    # What the game asks of the tower (src/pc/tower/tower.c): its unlock,
+    # the floor's rules only in its own duel, the duelists' conditions, and
+    # the progress beside the save, with the game's bytes as variables.
+    add_executable(memories_tower_game_test tests/pc/tower_game_test.c src/pc/tower/tower.c
+        src/pc/tower/tower_config.c src/pc/mods/json.c)
+    target_include_directories(memories_tower_game_test PRIVATE src)
+    target_compile_definitions(memories_tower_game_test PRIVATE MEMORIES_PC)
+    if(NOT MSVC)
+        target_compile_options(memories_tower_game_test PRIVATE -Wall -Wextra -Wpedantic -Werror)
+    endif()
+    if(MEMORIES_SANITIZERS)
+        target_compile_options(memories_tower_game_test PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
+        target_link_options(memories_tower_game_test PRIVATE -fsanitize=address,undefined)
+    endif()
+    add_test(NAME pc_tower_game COMMAND memories_tower_game_test)
     # The mods' "ui" key as read (src/pc/platform/ui_config.c): manifests only,
     # so at the host's own width too.
     add_executable(memories_ui_config_test tests/pc/ui_config_test.c src/pc/mods/json.c)
@@ -936,6 +964,11 @@ if(Python3_Interpreter_FOUND)
     if(BUILD_TESTING)
         add_test(NAME pc_mod_cache
             COMMAND "${Python3_EXECUTABLE}" tools/pc/test_mod_cache.py
+            WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+        # What build_mod.py says when the 64-bit targets cannot be built, and
+        # the llvm-mingw it points to (no compiler needed).
+        add_test(NAME pc_build_mod_toolchain
+            COMMAND "${Python3_EXECUTABLE}" tools/pc/test_build_mod_toolchain.py
             WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
         # check_mod_abi.py unpacks only the release packages whose sha256
         # mod_compat.txt pins (synthetic packages, nothing downloaded).

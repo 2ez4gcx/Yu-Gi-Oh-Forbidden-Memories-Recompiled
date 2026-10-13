@@ -1849,7 +1849,7 @@ class GuiTest(GuiCase):
         text = info.api.cget("text")
         self.assertIn("Mod API 11", text)
         self.assertIn("card tags", text)
-        self.assertIn("newer than v0.2.1-preview.1", text)
+        self.assertIn("v0.3.0 or newer", text)
         app.project.set_tags(1, None)
         info.other.delete("1.0", "end")
         info.other.insert("1.0", json.dumps({"min_api": 10}))

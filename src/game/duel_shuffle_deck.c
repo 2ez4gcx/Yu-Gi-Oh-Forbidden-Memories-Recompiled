@@ -7,6 +7,7 @@
 #ifdef MEMORIES_PC
 #include "pc/cards/cards.h"
 #include "pc/cards/tables.h"
+#include "pc/tower/tower.h"
 #include <string.h>
 
 /* An opponent's deck dealt from a pool a mod edited (tables.h): the draw
@@ -41,14 +42,15 @@ static void Duel_DealEditedDeck(const u16 *pool, u8 *out16, u8 *out8)
     }
 }
 
-/* An opponent's deck a mod fixed (tables.h): its forty cards as written,
-   which the swaps below shuffle. */
+/* An opponent's deck a mod fixed (tables.h), or a tower floor's (tower.h),
+   which comes first: its forty cards as written, which the swaps below
+   shuffle. */
 static s32 Duel_DealFixedDeck(u8 *out16, u8 *out8)
 {
     static u16 fixed[DECK_SIZE];
     s32 n;
 
-    if (!Tables_FixedDeck(Tables_OpponentId(), fixed)) {
+    if (!Tower_OpponentDeck(fixed) && !Tables_FixedDeck(Tables_OpponentId(), fixed)) {
         return 0;
     }
     for (n = 0; n < DECK_SIZE; n++) {

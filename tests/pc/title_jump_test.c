@@ -63,6 +63,8 @@ int Duelists_Valid(int duelist) { return duelist >= 0 && duelist < 40; }
 static int save_loaded;
 int Cheats_SaveLoaded(void) { return save_loaded; }
 int Cheats_DeckCount(const char *list) { return list[0] >= '0' && list[0] <= '9' ? 40 : 0; }
+/* No tower here: nothing refused (tower.h). */
+int Tower_Guard(int what, int tell, char *why, size_t size) { (void)what; (void)tell; (void)why; (void)size; return 0; }
 
 struct MemoriesState { int loading, present, active; };
 int Memories_StateLoading(const MemoriesState *state) { return state->loading; }

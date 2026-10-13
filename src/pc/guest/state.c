@@ -24,6 +24,7 @@
 #include "pc/platform/title_screen.h"
 #include "pc/debug/crash.h"
 #include "pc/debug/log.h"
+#include "pc/tower/tower.h"
 #include "pc/compat/signal.h"
 #include <errno.h>
 #include <stdarg.h>
@@ -374,6 +375,7 @@ void Memories_StateRemapRange(MemoriesState *state, uint32_t from, uint32_t to, 
  * goes back to it instead of into a notice. */
 static char *refusal;
 static size_t refusal_size;
+static int tower_refused;   /* the last load was one a tower refused (Tower_Guard) */
 
 static void refuse(const char *format, ...)
 {
@@ -475,6 +477,10 @@ static int save(const char *path, int tell)
     MemoriesState state = {0, NULL, NULL, 0};
     char partial[1024];
     int failed, length;
+    /* Every save comes here (the hotkeys, the menu, autosave, the control
+     * channel): a tower whose mod turns save states off refuses it while
+     * the player is in it (tower.h, Tower_Guard). */
+    if (Tower_Guard(TOWER_GUARD_SAVE_STATE, tell, NULL, 0)) return -1;
     Paths_WriteBegin();
     length = snprintf(partial, sizeof(partial), "%s.partial", path);
     if (length < 0 || (size_t)length >= sizeof(partial)) {
@@ -798,6 +804,16 @@ static int load(const char *path)
     uint32_t header[2];
     size_t size;
     long length;
+    char why[256];
+    tower_refused = 0;
+    /* Every load comes here too: a tower whose mod turns save states off
+     * refuses it while the player is in it (Tower_Guard). */
+    if (Tower_Guard(TOWER_GUARD_LOAD_STATE, 0, why, sizeof(why))) {   /* refuse() tells */
+        if (file) fclose(file);
+        tower_refused = 1;
+        refuse("%s", why);
+        return -1;
+    }
     if (!file) {
         refuse("%s: %s", path, strerror(errno));
         return -1;
@@ -913,7 +929,7 @@ int Memories_StateStartupDone(void) { return requests.startup_done; }
 static void load_requested(const char *path, int slot)
 {
     if (!load(path)) last_loaded_slot = slot;
-    else Crash_ReportSoft("state load failed", path);
+    else if (!tower_refused) Crash_ReportSoft("state load failed", path);   /* a refusal is no failure */
 }
 
 void Memories_StatePoint(unsigned presented_frames)
@@ -979,21 +995,17 @@ static int add_region(const char *name, char *data, char *data_end, char *bss, c
 
 int Memories_StateRunGame(int (*entry)(void))
 {
-    void *stack = mmap((void *)(uintptr_t)STACK_BASE, STACK_SIZE, PROT_READ | PROT_WRITE,
-                       MAP_FIXED_NOREPLACE | MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    void *stack = Memories_MapFixed((void *)(uintptr_t)STACK_BASE, STACK_SIZE, PROT_READ | PROT_WRITE,
+                                    MAP_FIXED_NOREPLACE | MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     unsigned i;
     if (stack != (void *)(uintptr_t)STACK_BASE) {
         /* Never another address: the game's return addresses and pointers
-         * in a save state are on this one. MAP_FIXED_NOREPLACE refuses a
-         * range that holds a mapping (EEXIST); a kernel older than 4.17
-         * takes the address as a hint instead and may put it elsewhere. */
+         * in a save state are on this one. Memories_MapFixed refuses a
+         * range that holds a mapping (EEXIST) on every kernel. */
         int error = errno;
-        if (stack != MAP_FAILED) munmap(stack, STACK_SIZE);
         fprintf(stderr, "memories-pc: the game stack needs 0x%08x-0x%08x, %s; the game cannot run without it\n",
                 (unsigned)STACK_BASE, (unsigned)STACK_TOP,
-                stack == MAP_FAILED ? (error == EEXIST ? "which something else in this process already holds"
-                                                       : strerror(error))
-                                    : "which this system would not map there");
+                error == EEXIST ? "which something else in this process already holds" : strerror(error));
         return 1;
     }
     read_build_id();

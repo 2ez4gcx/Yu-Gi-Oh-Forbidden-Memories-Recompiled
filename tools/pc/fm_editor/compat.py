@@ -19,15 +19,17 @@ from pathlib import Path
 from .gamedata import FRAME_COLOR_NAMES, TYPE_MAGIC
 from .model import type_named
 
-HOST_API = 13
+HOST_API = 15
 
 # The release each mod API first shipped in, for the hints. An API past the
 # last listed is newer than every release.
-RELEASES = {9: "v0.2.0", 10: "v0.2.1-preview.1"}
+RELEASES = {9: "v0.2.0", 10: "v0.2.1-preview.1", 11: "v0.3.0", 12: "v0.3.0"}
 
 # tables.c read_limits: what v0.2.1-preview.1 and older know.
 OLD_LIMITS = ("stats", "attack", "defense", "life_points", "two_player", "starchips", "chest", "free_duel_record",
               "two_player_record")
+# The values a game of API 12 and older leaves out.
+API_13_LIMITS = ("card_drops",)
 
 
 def release_text(api: int) -> str:
@@ -100,6 +102,15 @@ def _has_key(value, key: str) -> bool:
         return key in value or any(_has_key(item, key) for item in value.values())
     if isinstance(value, list):
         return any(_has_key(item, key) for item in value)
+    return False
+
+
+def _has_action(value, action: str) -> bool:
+    """Whether any object in value, at any depth, has "action": action."""
+    if isinstance(value, dict):
+        return value.get("action") == action or any(_has_action(item, action) for item in value.values())
+    if isinstance(value, list):
+        return any(_has_action(item, action) for item in value)
     return False
 
 
@@ -186,12 +197,26 @@ def features(manifest: dict, project=None) -> list:
             add(11, "a ritual of other than three tributes")
     limits = manifest.get("limits")
     if isinstance(limits, dict):
-        newer = sorted(key for key in limits if key not in OLD_LIMITS)
+        newer = sorted(key for key in limits if key not in OLD_LIMITS and key not in API_13_LIMITS)
         if newer:
             add(11, "the values " + ", ".join(newer))
     # --- API 13 -------------------------------------------------------------
+    if isinstance(limits, dict) and "card_drops" in limits:
+        add(13, "the cards a win deals locked (\"limits\" \"card_drops\")")
+    # --- API 14 -------------------------------------------------------------
+    if "tower" in manifest:
+        add(14, "a tower (\"tower\")")
+    for entry in _entries(manifest.get("duelists")):
+        if "tower_only" in entry:
+            add(14, "a duelist of the tower's alone (\"tower_only\")")
+        if isinstance(entry.get("unlock"), dict) and "tower" in entry["unlock"]:
+            add(14, "a duelist's \"unlock\" \"tower\"")
+    for part in (title, menu):
+        if _has_action(part, "tower"):
+            add(14, "a menu item's action \"tower\"")
+    # --- API 15 -------------------------------------------------------------
     if "card_types" in manifest:
-        add(13, "custom card types (\"card_types\")")
+        add(15, "custom card types (\"card_types\")")
     return out
 
 

@@ -16,6 +16,9 @@
 #include "func_8003A440.h"
 #include "func_8003A560.h"
 #include "../unmatched.h"
+#ifdef MEMORIES_PC
+#include "pc/tower/tower_state.h"
+#endif
 
 #define HIGH_MEMORY_ADDRESSES_BASE_IN_DATA
 #include "high_memory_addresses.h"
@@ -134,6 +137,11 @@ void func_8003A560(DisplayEffectVramState *a)
     s32 i;
 
     if (func_80039F1C((DisplayEffectState *)a) == 0) {
+#ifdef MEMORIES_PC
+        /* A character a tower's story gave a mod's picture: in the cache
+         * before it is looked for there (zz_tower_storage.c). */
+        Tower_FillCharacter(a->field_30);
+#endif
         slots = (DisplayEffectVramSlot *)D_80010000;
         D_8009B326 = 0;
         /* The slot cursor has to be an explicit walking pointer decremented at

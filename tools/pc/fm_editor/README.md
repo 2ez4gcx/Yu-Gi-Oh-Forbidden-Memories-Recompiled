@@ -235,6 +235,7 @@ The tabs, left to right:
 | [Values](#values) | the game's numbers: LP, the ATK/DEF cap, magic cards' numbers, deck copies, rank score, starchips |
 | [Guardian Stars](#guardian-stars) | the stars' names and icons, new stars 11 to 15, every matchup |
 | [Packs](#packs) | card packs sold for starchips on the Password screen |
+| [Tower](#tower) | a run of duels in the title's second menu: floors, rules, rewards, story, when it opens, duelists of the tower's alone |
 | [Mod info](#mod-info) | the mod's id, name, version, author, description and settings |
 | [Conflicts](#conflicts) | what the game would refuse, and where other installed mods change the same things |
 
@@ -932,13 +933,18 @@ off), **Deck and Trunk** (copies of a card in a deck, copies the Trunk
 keeps), **Rank** (the score a duel starts at, what an Exodia win and a win
 by the opponent's empty deck add), **Rewards** (the starchips a win gives at
 S to D, 0 to 1000 each: past 8 the results screen shows one starchip with
-"xN" beside it; a new game's starchips, the most the save holds) and **Records and
+"xN" beside it; a new game's starchips, the most the save holds; **Cards a
+win deals**, 1 to 99, which locks the player's Game > Card drops at that
+number while the mod is applied, its grey value `player` the player's own
+choice, [card drops](../../../notes/card-drops.md#a-mod-that-sets-it), mod
+API 13) and **Records and
 2P** (the two-player LP choice and the records), and **Starting LP by
 duelist**: a table of duelists with the LP each side starts with against
 them (the disc's, or one the mod adds, by its name; choose a duelist, type **You** and **Duelist**, **Set**; **Remove**).
 Each row shows the game's own value in grey (an empty field is it), turns
 blue when the mod changes it, has ↺ to put the game's back, and a line that
-says what it does with the range the game keeps; a value past that range
+says what it does with the range the game keeps (resting the pointer on
+Cards a win deals shows what the lock does); a value past that range
 turns its name red, with the reason under the groups, and the game holds it
 at the most it keeps or shows. **Reset all to the game's** empties every
 field.
@@ -1057,6 +1063,52 @@ tab keeps it as written: a pack's fields and buttons are grey, and only
 The file is still inspected for the mod's required API on save. If it cannot
 be read, Conflicts reports an error and Mod info says compatibility is
 incomplete; fix the file before sharing the mod.
+
+### Tower
+
+A mod's `"tower"` ([Tower mode](../../../notes/tower-mode.md)): one more
+button in the title's second menu, a run of duels the save climbs. Check
+**This mod has a tower** to give the mod one (a floor against Simon Muran to
+start from); unchecked, the mod has none. **How to build a tower...** opens
+the tab's own guide, step by step, and **Start from an example** fills in a
+small working tower of three floors (stories, a reward, an unlock) to change.
+Help > **Tower mode** opens the notes with every key. Resting the pointer on
+the options below says what each does.
+
+- **The tower:** its name, the menu button's words (`TOWER` without),
+  its music, when it opens (**always**, **after_ending**, or **conditions**:
+  beat, wins, story, hold, copies, and **and the ending seen**), what a
+  loss does (**checkpoint** or **restart**), its default **Scene**, and
+  **Draw the character not speaking darker**.
+- **The rules of the run:** **Leaving** (**resume**: come back where you
+  were; **checkpoint** or **restart**: the climb goes back, and no save keeps
+  a floor past it), **Cards a win** (1-99 cards a won tower duel gives,
+  whatever Game > Card drops says; **player** follows that setting), **Allow
+  save states in the tower** and **Allow cheats in the tower** (unticked: none
+  of them while the player is in it).
+- **Stage:** writes a story's bracketed lines (`[scene: ...]`, `[left:
+  ...]`, `[right: ...]`, `[pan: ...]`) into the story last clicked, with
+  pictures of the disc's scenes and characters made from your game files.
+- **Story:** what is told before the first climb, at the top and after a
+  loss. A line is a page or more of the box; `@left:`, `@right:` or
+  `@Seto: ...` says who speaks, `#8: ...` adds one of the campaign's 25
+  portraits, `@none: ...` nobody's.
+- **The tower's own duelists:** the mod's added duelists (from the Duelists
+  tab); a checked one is hidden in Free Duel until the tower lets it out
+  (`"tower_only"`).
+- **Floors**, bottom first: **Add floor**, **Remove**, **Up**, **Down**. The
+  selected floor: its opponent, field, both sides' starting LP (empty: the
+  usual), **No fusions**, **No equips**, **Checkpoint**, **Unlock this
+  opponent in Free Duel when beaten** (ticked by itself for a tower-only
+  opponent), the reward (cards, starchips, and **Also unlocks**: more
+  duelists picked from the list, **Add** / **Remove last**), its deck (a card
+  a line, `Card x3`, forty in all, or empty for the opponent's own) and its
+  lines before the duel and after a win.
+
+The line above the form lists what the game would leave out or read
+otherwise (the same as Conflicts' **Tower** area). A tower needs mod API 14,
+which Mod info then shows and the save writes as `min_api`. What the form
+cannot show (a key of a later game) is kept as written.
 
 ### Mod info
 
@@ -1448,7 +1500,7 @@ mod's own code and tables (the addresses of its code move from mod to mod):
 | `Duel_CheckEquip` steps 94 bytes and tests a bit per monster (A6) | every equip card's monsters from the bitmaps, with the records per monster some add and the monsters no equip takes. Records of monsters or magic used as equips are reported: the port's equips take equip cards only |
 | a ritual table that is mostly not recipes (A13) | rituals removed |
 | `Duel_ShuffleDeck` deals counts of copies up to 40 (A4) | `decks` with `"fixed": true`: what that shuffle deals from each pool |
-| the prize draw jumps to a loop that calls `addiu -bias; sra shift` (A1, A2) | the drop pools decoded; the number of prizes goes to the report and the mod's `README.txt` (set Game > Card drops to it; `mod.json` has no key) |
+| the prize draw jumps to a loop that calls `addiu -bias; sra shift` (A1, A2) | the drop pools decoded; the number of prizes is written as `"limits": {"card_drops": n}` (1 to 99), which locks Game > Card drops at it while the mod is applied, and goes to the report and the mod's `README.txt` |
 | `Duel_AwardCard` caps the chest and pays starchips (A3) | `chest_overflow` |
 | the terrain table, or `Duel_GetTerrainBoost` reading a table of its own (A9) | `terrain_bonus` with `"replace"` |
 | `Duel_SelectAttackTrap` rewritten, thresholds as u16 (A8) | `trap_thresholds` |

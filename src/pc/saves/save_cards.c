@@ -8,6 +8,7 @@
 #include "save_slots.h"
 #include "pc/cards/cards.h"
 #include "pc/cards/pack_shop.h"
+#include "pc/tower/tower.h"
 #include "pc/mods/mods.h"
 
 static unsigned token_of(int slot) { return slot >= 0 ? SaveSlots_Token(slot) : 0; }
@@ -33,6 +34,7 @@ void SaveCards_Applied(const void *state)
 {
     const unsigned char *bytes = state;
     PackShop_SaveLoaded(state);
+    Tower_SaveLoaded(state);
     tell_mods(MEMORIES_EVENT_SLOT_LOAD, bytes[0x404] | bytes[0x405] << 8 | bytes[0x406] << 16 | (unsigned)bytes[0x407] << 24);
 }
 
@@ -42,6 +44,7 @@ void SaveCards_Saved(const void *state, unsigned sequence)
     Cards_SaveWritten(state, sequence);
     Duelists_SaveWritten(state, sequence);
     PackShop_SaveWritten(state);
+    Tower_SaveWritten(state);
     tell_mods(MEMORIES_EVENT_SLOT_SAVE, sequence);
 }
 

@@ -1,5 +1,6 @@
 /* Shared subsystem payloads and compatibility checks for every state backend. */
 #define _GNU_SOURCE
+#include "pc/tower/tower.h"
 #include "state.h"
 #include "state_io.h"
 #include "state_subsystems.h"
@@ -258,6 +259,7 @@ void Memories_StateSubsystems(MemoriesState *state)
     SaveMenu_State(state);
     if (!Memories_StateLoading(state)) DeckMenu_ShopState(state);
     if (!Memories_StateLoading(state)) PackShop_State(state);
+    Tower_State(state); /* the other towers' progress lines; the rest is game data */
     TitleJump_State(state);
     TitleScreen_State(state);
     Platform_State(state);

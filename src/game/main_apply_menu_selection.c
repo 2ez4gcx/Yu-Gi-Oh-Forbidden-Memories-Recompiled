@@ -1,6 +1,7 @@
 #ifdef MEMORIES_PC
 #include "pc/mods/mods.h"
 #include "pc/platform/title_menu.h"
+#include "pc/tower/tower.h"
 #endif
 #define MAIN_MODE_STATE_NEXT_AS_SCALAR
 #define MAIN_MODE_STATE_ACTIVE_AS_SCALAR
@@ -82,7 +83,17 @@ void Main_ApplyMenuSelection(MainMenuSelection selection)
     event.a = selection; event.b = D_8009B26C;
     Mods_Dispatch(&event);
 
-    if (!event.handled) { Main_ApplyMenuSelectionRetail((MainMenuSelection)event.a); }
+    if (!event.handled) {
+        /* The tower's button (pc/tower/tower.h): its own screen, none of
+           the retail switch's arms. */
+        if (event.a == TOWER_MENU_SELECTION) {
+            D_8009B268 = 1;
+            D_8009B26D = (u8)event.a;
+            Tower_Enter();
+        } else {
+            Main_ApplyMenuSelectionRetail((MainMenuSelection)event.a);
+        }
+    }
     /* A choice a mod's menu item made that is none of the game's: the title
        comes back to that item's menu (pc/platform/title_menu.h). */
     D_8009B26D = TitleMenu_Reopen(event.a, D_8009B26D);

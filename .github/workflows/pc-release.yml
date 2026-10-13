@@ -26,6 +26,10 @@ concurrency:
 jobs:
   package:
     if: github.event_name != 'workflow_dispatch' || inputs.platform != 'macos-arm64'
+    # Each archive's SDK carries every mod target's export list
+    # (tools/pc/package.py): the arm64 game's from the android job, the
+    # 64-bit Windows game's from sdk-exports-x64, built from this commit.
+    needs: [android, sdk-exports-x64]
     strategy:
       fail-fast: false
       matrix:
@@ -87,8 +91,18 @@ jobs:
           fi
       # Public runners never receive a game ROM. The regular PC workflow
       # runs the full adapter suite; this checks setup and the archives.
+      - uses: actions/download-artifact@v4
+        with:
+          name: sdk-exports-aarch64
+          path: tmp/sdk-exports/android-arm64-v8a
+      - uses: actions/download-artifact@v4
+        with:
+          name: sdk-exports-x86_64-windows
+          path: tmp/sdk-exports/win64
       - name: Build and package
-        run: python tools/pc/package.py "${{ matrix.system }}" --skip-smoke --version "$PACKAGE_VERSION"
+        run: >-
+          python tools/pc/package.py "${{ matrix.system }}" --skip-smoke --version "$PACKAGE_VERSION"
+          --exports-from tmp/sdk-exports/android-arm64-v8a --exports-from tmp/sdk-exports/win64
       - name: Test archive structure
         run: python tools/pc/test_package.py --archives dist
       # The SDK just built against every release in tools/pc/mod_compat.txt:
@@ -202,6 +216,50 @@ jobs:
           path: |
             dist/*.zip
             dist/*.tar.gz
+          if-no-files-found: error
+          retention-days: 14
+
+  # The 64-bit Windows game's export list for the SDKs (not a package of its
+  # own): sdk/exports.x86_64-windows.txt and the tree it was built from.
+  sdk-exports-x64:
+    if: github.event_name != 'workflow_dispatch' || inputs.platform != 'macos-arm64'
+    runs-on: windows-2022
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Cache Windows dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            tmp/pc/tools
+            tmp/pc/win64-deps
+          key: release-win64-${{ runner.os }}-${{ hashFiles('tools/pc/build_win32_deps.py', 'tools/pc/fetch_tools.py', 'tools/pc/dependency_archives.py') }}
+      - name: Archive version
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          if [ "$REF_TYPE" = tag ]; then
+            echo "PACKAGE_VERSION=$REF_NAME" >> "$GITHUB_ENV"
+          else
+            echo "PACKAGE_VERSION=dev-${GITHUB_SHA:0:12}" >> "$GITHUB_ENV"
+          fi
+      # As package.py windows-x64 builds it, without the archive.
+      - name: Build the 64-bit Windows game
+        run: MEMORIES_VERSION="$PACKAGE_VERSION" python tools/pc/build_game32.py --target windows-x64 --backend sdl --release --build tmp/pc/win64
+      - name: Upload the x86_64-windows export list
+        uses: actions/upload-artifact@v4
+        with:
+          name: sdk-exports-x86_64-windows
+          path: |
+            tmp/pc/win64/sdk/exports.x86_64-windows.txt
+            tmp/pc/win64/source
           if-no-files-found: error
           retention-days: 14
 
@@ -342,6 +400,17 @@ jobs:
       # next step signs again with the release key.
       - name: Build the APK
         run: MEMORIES_VERSION="$PACKAGE_VERSION" python tools/pc/build_game32.py --target android-arm64-v8a --backend sdl --release --build tmp/pc/android-arm64-v8a
+      # The arm64 game's export list, for the desktop archives' SDKs (the
+      # package job): every run, signed or not; the list holds no secret.
+      - name: Upload the aarch64 export list
+        uses: actions/upload-artifact@v4
+        with:
+          name: sdk-exports-aarch64
+          path: |
+            tmp/pc/android-arm64-v8a/sdk/exports.aarch64.txt
+            tmp/pc/android-arm64-v8a/source
+          if-no-files-found: error
+          retention-days: 14
       # The secrets reach this step only. The keystore goes to the runner's
       # temporary folder, readable by this user only, its path stays in this
       # step, and it is deleted when the step ends. package_android.py signs

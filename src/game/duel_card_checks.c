@@ -8,6 +8,7 @@
 #include "pc/cards/cards.h"
 #include "pc/cards/tables.h"
 #include "pc/cards/rules.h"
+#include "pc/tower/tower.h"
 #endif
 
 #define FUSION_TABLE_BYTES(table) ((u8 *)(table))
@@ -64,6 +65,9 @@ int CardRules_Equip(int a, int b)
     if (ruled < 0)
         ruled = (as || !Cards_KindChanged(a)) && !Cards_KindChanged(b) &&
                 Duel_CheckEquipRetail(as ? as : Cards_BaseId(a), Cards_BaseId(b)) != 0;
+    /* A tower floor with "no_equips" (tower.h): nothing equips, for the
+       player, the CPU and the fusion helper alike. */
+    if (ruled && Tower_Refuses(TOWER_RULE_NO_EQUIPS, a, b, b)) return 0;
     return ruled ? b : 0;
 }
 
@@ -72,6 +76,8 @@ s32 Duel_CheckEquip(s32 arg0, s32 arg1)
     MemoriesModEvent event = {MEMORIES_EVENT_EQUIP, MEMORIES_BEFORE, arg0, arg1, 0, 0, 0};
     Mods_Dispatch(&event);
     if (!event.handled) event.result = CardRules_Equip(event.a, event.b) != 0;
+    /* The floor's rule stands over a code mod's answer too. */
+    if (event.result && Tower_Refuses(TOWER_RULE_NO_EQUIPS, event.a, event.b, event.b)) event.result = 0;
     event.phase = MEMORIES_AFTER; Mods_Dispatch(&event);
     return event.result ? arg1 : 0;
 }
@@ -140,6 +146,9 @@ int CardRules_Fusion(int a, int b)
             result = Tables_FilterFusion(Duel_CheckFusionRetail(a, b));
         if (result && Cards_KindChanged(result)) result = 0;
     }
+    /* A tower floor with "no_fusions" (tower.h): nothing fuses, for the
+       player, the CPU and the fusion helper alike. */
+    if (Cards_Valid(result) && Tower_Refuses(TOWER_RULE_NO_FUSIONS, a, b, result)) return 0;
     return Cards_Valid(result) ? result : 0;
 }
 
@@ -149,6 +158,8 @@ s32 Duel_CheckFusion(s32 a, s32 b)
     Mods_Dispatch(&event);
     if (!event.handled) event.result = CardRules_Fusion(event.a, event.b);
     if (event.result && !Cards_Valid(event.result)) event.result = 0;
+    /* The floor's rule stands over a code mod's answer too. */
+    if (event.result && Tower_Refuses(TOWER_RULE_NO_FUSIONS, event.a, event.b, event.result)) event.result = 0;
     event.phase = MEMORIES_AFTER; Mods_Dispatch(&event);
     return event.result;
 }

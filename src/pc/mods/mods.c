@@ -344,13 +344,9 @@ static void *host_map_fixed(const MemoriesModHost *host, uintptr_t address, size
     /* On Windows compat/mman.h's VirtualAlloc, which refuses an address
      * that is already taken; the 64-bit game holds the mod arenas' range
      * from the start (image.c), and the mmap there gives it back first. */
-    got = mmap(wanted, size, PROT_READ | PROT_WRITE, MAP_FIXED_NOREPLACE | MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-    if (got == MAP_FAILED) return NULL;
-    if (got != wanted) {   /* a kernel older than MAP_FIXED_NOREPLACE takes it as a hint */
-        munmap(got, size);
-        return NULL;
-    }
-    return got;
+    got = Memories_MapFixed(wanted, size, PROT_READ | PROT_WRITE, MAP_FIXED_NOREPLACE | MAP_PRIVATE | MAP_ANONYMOUS,
+                            -1, 0);
+    return got == MAP_FAILED ? NULL : got;
 }
 
 static int (*card_resolver)(const char *);
@@ -1273,7 +1269,7 @@ static const char *const manifest_keys[] = {
     "settings", "fusions", "equips", "rituals", "drops", "decks", "duelists", "text", "font",
     "chest_overflow", "terrain_bonus", "trap_thresholds", "equip_bonus_default", "passwords", "starter",
     "starter_pools", "title", "menu", "limits", "guardian_stars", "packs", "pack_shop",
-    "card_text_colors", "card_layout", "palette_ramps", "ui", "card_types",
+    "card_text_colors", "card_layout", "palette_ramps", "ui", "tower", "card_types",
 };
 
 /* How many letters to add, remove or change to turn one word into the
@@ -1462,7 +1458,8 @@ static int read_manifest(Mod *mod, const char *directory, const char *origin)
         static const char *const tables[] = {"fusions", "equips", "rituals", "drops", "decks", "duelists",
                                              "text", "font", "terrain_bonus", "trap_thresholds",
                                              "chest_overflow", "passwords", "starter", "starter_pools",
-                                             "limits", "guardian_stars", "packs", "pack_shop", "palette_ramps"};
+                                             "limits", "guardian_stars", "packs", "pack_shop", "palette_ramps",
+                                             "tower"};
         for (size_t t = 0; t < sizeof(tables) / sizeof(tables[0]); t++) {
             const JsonValue *value = Json_Member(root, tables[t]);
             /* "text": "text.txt" is one file named as a string. */
@@ -1773,16 +1770,18 @@ static void activate_once(int index, int on)
          * only the 32-bit object: it stays off with the reason beside it, as
          * above, and is not a broken mod. The macOS game, which has no 32-bit
          * one to send the player to, reports a missing dylib as broken. On a
-         * phone there is no other game to point to either: the note says only
-         * which object is missing. */
+         * phone there is no other game to point to either: the note says
+         * which object is missing. Both say how one is made (notes/modding.md,
+         * "Building one"). */
 #if !(defined(__APPLE__) && defined(__aarch64__) && defined(MEMORIES_TRANSLATED))
         if (strcmp(OBJECT_LOADER_TARGET, "i386") && !mod->broken && mod->library[0] && !mod->object.image &&
             !mod->object.native_handle && !library_present(mod)) {
 #ifdef __ANDROID__
-            note(mod, "needs an Android build of this mod: it has no %s", mod->library);
+            note(mod, "needs an Android build of this mod: it has no %s (rebuild it with build_mod.py using clang)",
+                 mod->library);
 #else
             note(mod, "needs a 64-bit build of this mod (%s): the one it has is for the 32-bit game, which is the one "
-                      "to play it with", mod->library);
+                      "to play it with, or rebuild it with build_mod.py using clang", mod->library);
 #endif
             drop_overrides(index);
             return;

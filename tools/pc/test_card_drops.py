@@ -64,13 +64,17 @@ def presses(frame, keys):
     return ",".join(f"{frame + 40 * i}:{key},{frame + 40 * i + 6}:0000" for i, key in enumerate(keys))
 
 
-def run(executable, label, frame, sequence="", state=None, drops=1):
+def run(executable, label, frame, sequence="", state=None, drops=1, settings_more="", env_more=None):
+    """One run to `frame`, saving a state there. `settings_more` adds
+    settings lines and `env_more` variables (test_card_drops_mod.py: the
+    mods it applies, and a window script)."""
     folder = OUT / label
     folder.mkdir(parents=True, exist_ok=True)
     for old in folder.glob("*.bmp"):
         old.unlink()
     settings = folder / "settings.txt"
-    settings.write_text(f"card_drops={drops}\nscale=2\nmod.3d-monsters=0\nmod.hand-camera=0\nmod.ai-hard-mode=0\n")
+    settings.write_text(f"card_drops={drops}\nscale=2\nmod.3d-monsters=0\nmod.hand-camera=0\nmod.ai-hard-mode=0\n"
+                        + settings_more)
     env = {key: value for key, value in os.environ.items() if not key.startswith("MEMORIES_")}
     env.update(SDL_VIDEODRIVER=os.environ.get("SDL_VIDEODRIVER", "offscreen"),
                MEMORIES_DETERMINISTIC="1", MEMORIES_NO_AUDIO="1", MEMORIES_NO_GAMEPAD="1",
@@ -83,6 +87,7 @@ def run(executable, label, frame, sequence="", state=None, drops=1):
         env["MEMORIES_DISC"] = os.environ["MEMORIES_DISC"]
     if state:
         env["MEMORIES_LOAD_STATE"] = str(state)
+    env.update(env_more or {})
     command = [str(executable)]
     if executable.suffix == ".exe" and sys.platform != "win32":
         command = ["wine", str(executable)]

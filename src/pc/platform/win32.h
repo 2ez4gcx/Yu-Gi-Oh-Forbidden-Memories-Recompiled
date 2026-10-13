@@ -11,7 +11,8 @@
  * as SIGALRM does on Linux. `context` describes the interrupted registers
  * (see Win32_ContextRegisters). Returns 0 on success. */
 int Win32_StartInterrupt(void (*tick)(uintptr_t eip, void *context));
-/* The same thread, reporting stalls only: the cooperative clock. */
+/* The same thread, reporting stalls only, woken ten times a second instead
+ * of every millisecond: the cooperative clock. */
 int Win32_StartWatch(void);
 /* Stops the clock thread and waits for it; call before exiting. */
 void Win32_StopInterrupt(void);
@@ -25,6 +26,13 @@ int Win32_UndoInterruptedFault(void *context);
 /* Runs a tick the clock could not deliver because the main thread was outside
  * the executable (sleeping, in a driver). Call from waits on the main thread. */
 void Win32_ServiceInterrupt(void);
+
+/* Sleeps about `microseconds` on the calling thread (nanosleep sleeps whole
+ * milliseconds here, and not at all below one). It can wake up to
+ * Win32_SleepMargin microseconds late: a wait for a deadline stops sleeping
+ * that long before it. */
+void Win32_Sleep(unsigned microseconds);
+unsigned Win32_SleepMargin(void);
 
 /* The hang watchdog, run from the clock thread so that it also sees a main
  * thread stuck outside the executable (a driver, a lock), which the tick

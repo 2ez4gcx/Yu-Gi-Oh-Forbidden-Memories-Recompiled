@@ -1,12 +1,16 @@
 #ifndef MEMORIES_MOD_TYPES_H
 #define MEMORIES_MOD_TYPES_H
-#define MEMORIES_MOD_API 13
-/* API 13: card_types names the existing type ids and declares monster ids
+#define MEMORIES_MOD_API 15
+/* API 15: card_types names the existing type ids and declares monster ids
  * 24-255, with optional per-custom-type icons. It has no host entry: cards
  * and gameplay tables resolve its names. */
 /* API 11 adds no host entry or event: it marks the mod.json features a game
  * of API 10 would leave out (notes/modding.md, "Which game a mod needs"), so
- * a mod that uses them says "min_api": 11 and an older game refuses it. */
+ * a mod that uses them says "min_api": 11 and an older game refuses it.
+ * API 13 does the same for "limits": {"card_drops": n}, a lock on the cards
+ * a won duel deals (notes/card-drops.md); API 14 for the tower: a mod's
+ * "tower", a duelist's "tower_only" and "unlock" "tower", a menu item's
+ * action "tower". */
 /* API 3: before hooks may alter arguments/result, or set handled to replace
  * the operation (including cancellation). Highest priority runs first;
  * equal priorities follow registration/load order. After hooks observe the

@@ -47,6 +47,9 @@
  *  10  the MONSTER event and manifest features listed in notes/modding.md
  *  11  manifest features only; no host layout or event change
  *  12  sound_add, sound_play, sound_free: a code mod's own sounds
+ *  13  "limits" "card_drops" (manifest only), which limit() also answers
+ *  14  the tower's manifest features (notes/tower-mode.md) only; no host
+ *      layout or event change
  * A data mod declares its required version with min_api in mod.json. */
 #include "mod_types.h"
 
@@ -218,7 +221,9 @@ struct MemoriesModHost {
      * "deck_copies", "swords_turns", "crush_card", "spellbinding_circle",
      * "shadow_spell", "rank_score.start", "rank_score.exodia",
      * "rank_score.deck_out", "starchip_prize.S" to "starchip_prize.D" and
-     * "new_game_starchips". -1 for a name it does not know. Answers once the card tables are
+     * "new_game_starchips"; from API 13 "card_drops", the cards a mod locks
+     * every won duel to (0 while none does and the player's Game > Card
+     * drops decides). -1 for a name it does not know. Answers once the card tables are
      * built, which is before the title. A mod that deals damage or bonuses of
      * its own reads the caps here rather than assume 9999. */
     long (*limit)(const MemoriesModHost *, const char *name);

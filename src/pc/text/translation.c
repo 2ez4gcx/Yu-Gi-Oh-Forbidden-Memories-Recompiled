@@ -16,6 +16,7 @@
 #include "pc/cards/starchip_prize.h"
 #include "pc/cards/passwords.h"
 #include "pc/cards/stars.h"
+#include "pc/tower/tower.h"
 #include "pc/cards/pack_shop.h"
 #include "pc/free_duel/duelists.h"
 #include "pc/free_duel/page_box.h"
@@ -81,8 +82,8 @@ static unsigned char *arena_take(size_t size)
     if (!tried) {
         void *wanted = (void *)(uintptr_t)ARENA_BASE, *got;
         tried = 1;
-        got = mmap(wanted, ARENA_SIZE, PROT_READ | PROT_WRITE, MAP_FIXED_NOREPLACE | MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-        if (got != MAP_FAILED && got != wanted) munmap(got, ARENA_SIZE); /* taken as a hint */
+        got = Memories_MapFixed(wanted, ARENA_SIZE, PROT_READ | PROT_WRITE,
+                                MAP_FIXED_NOREPLACE | MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
         if (got == wanted) {
             arena = got;
         } else {
@@ -649,6 +650,7 @@ const unsigned char *Text_Resolve(int id, const unsigned char *retail)
     const unsigned char *card = NULL, *side = side_name(id), *drops = CardDrops_Text(id), *shop = DeckMenu_Text(id);
     const unsigned char *page = FreeDuelPage_Text(id), *packs = PackShop_Text(id);
     if (page) return page;   /* the Free Duel grid's page (free_duel/page_box.h) */
+    if (Tower_Text(id)) return Tower_Text(id); /* the tower's screen (tower/tower.h) */
     if (packs) return packs; /* the card packs on the Password screen (cards/pack_shop.h) */
     if (drops) return drops; /* the results screen's added pages (drops.h) */
     if (StarchipPrize_Text(id)) return StarchipPrize_Text(id); /* a prize past eight (starchip_prize.h) */
@@ -707,6 +709,10 @@ unsigned char *Text_Retarget(unsigned char *cursor, unsigned target)
     {   /* The card packs' question: its answer ends the text (pack_shop.h). */
         unsigned char *packs = PackShop_Retarget(cursor);
         if (packs) return packs;
+    }
+    {   /* The tower's choices, likewise (tower.h). */
+        unsigned char *tower = Tower_Retarget(cursor);
+        if (tower) return tower;
     }
     int copied = address >= results_at && address - results_at < sizeof(results);
     if (copied || (address & 0xFFFF0000u) == bases[TEXT_BANK_DIALOG]) {

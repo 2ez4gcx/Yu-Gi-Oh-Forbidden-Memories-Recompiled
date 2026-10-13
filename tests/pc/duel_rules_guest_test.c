@@ -15,6 +15,9 @@ int Cards_CardEffectsReplace(int id) { (void)id; return 0; }
 void MonsterEffects_AttackTrapPlayed(int card, int side) { (void)card; (void)side; }
 void DuelCard_RemoveFromField(DuelCardRecord *card) { (void)card; abort(); }
 int Cards_Type(int id) { (void)id; abort(); }
+/* The translated ritual fixture does not load the card-type registry. Its
+ * selected retail-rule paths only need the framework's monster predicate. */
+int Cards_IsMonsterType(int type) { return type >= 0 && (type < CARD_TYPE_MAGIC || type > CARD_TYPE_EQUIP); }
 int Cards_Level(int id) { (void)id; abort(); }
 int Cards_InFusionGroup(int id, int group) { (void)id; (void)group; abort(); }
 int Tables_HasRitual(int id) { (void)id; return 0; }

@@ -18,7 +18,8 @@ The mod.json shape:
         "deck_copies": 3, "swords_turns": 3, "crush_card": 1500, "spellbinding_circle": 500, "shadow_spell": 1000,
         "rank_score": {"start": 50, "exodia": 40, "deck_out": -40},
         "starchip_prize": {"S": 5, "A": 4, "B": 3, "C": 2, "D": 1},
-        "new_game_starchips": 0
+        "new_game_starchips": 0,
+        "card_drops": 5
     }
 
 The editor keeps it in Project.other["limits"] as written; the Values tab
@@ -39,6 +40,7 @@ SWORDS_MAX = 9              # one digit on the field's card bar
 PRIZE_MAX = 1000            # a win's starchips; past PRIZE_ROW the results show one picture and "xN"
 PRIZE_ROW = 8               # the starchip pictures the results' row draws
 EFFECT_MAX = 9999           # four digits in the effect's number
+CARD_DROPS_MAX = 99         # Game > Card drops' range (src/pc/cards/drops.h)
 
 STAT = "a 16-bit number in every card record"
 PRIZE_STORAGE = "the starchips a win gives"
@@ -81,6 +83,7 @@ GROUPS = (
         ("new_game_starchips", "New game starchips", 0, 0, STARCHIPS_MAX, "A new save has",
          "eight digits on screen"),
         ("starchips", "Most starchips", 999999, 0, STARCHIPS_MAX, "The save holds", "eight digits on screen"),
+        ("card_drops", "Cards a win deals", 0, 1, CARD_DROPS_MAX, "Locks Game > Card drops", None),
     )),
     ("Rank", (
         ("rank_score.start", "Score at the start", 50, 0, 99, "Below 50 is TEC", None),
@@ -100,11 +103,20 @@ GROUPS = (
 GROUP_NOTES = {
     "Rewards": f"Past {PRIZE_ROW} starchips a win, the results show one starchip with \"xN\" beside it.",
 }
+# What a field's empty value means, where it is not a number of the game's.
+RETAIL_TEXT = {"card_drops": "player"}
+# A field's tooltip, where its hint line has no room for what it does.
+TIPS = {
+    "card_drops": "Every won duel deals exactly this many cards, 1 to 99, whatever the player set in "
+                  "Game > Card drops. While the mod is applied the setting shows the mod's number, greyed, "
+                  "with the mod's name; the player's own value comes back when the mod is removed. "
+                  "Empty: the player chooses (1 is the console's). Needs the game of mod API 13.",
+}
 ALL_FIELDS = tuple(field for _, fields in GROUPS for field in fields)
 FIELD = {field[0]: field for field in ALL_FIELDS}
 TOP_KEYS = ("stats", "attack", "defense", "life_points", "two_player", "starchips", "chest", "free_duel_record",
             "two_player_record", "deck_copies", "swords_turns", "crush_card", "spellbinding_circle", "shadow_spell",
-            "rank_score", "starchip_prize", "new_game_starchips")
+            "rank_score", "starchip_prize", "new_game_starchips", "card_drops")
 LIFE_KEYS = ("start", "player", "opponent", "max", "duelists")
 # The sections whose members are all fields: their keys, and the example a
 # wrong kind of value is told.
@@ -132,6 +144,8 @@ def _get(limits: dict, path: str):
 
 def retail_text(key) -> str:
     """The game's own value as the form shows it."""
+    if key in RETAIL_TEXT:
+        return RETAIL_TEXT[key]
     retail = FIELD[key][2]
     return "start" if retail is None else str(retail)
 

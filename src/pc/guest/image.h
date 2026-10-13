@@ -33,6 +33,14 @@ int Memories_GuestMap(void);
 /* What Memories_GuestMap could not do, in a few words for the player (the
  * Linux and Android one says; "" otherwise). */
 const char *Memories_GuestMapError(void);
+/* The mappings that held the range Memories_GuestMap could not have, one
+ * per line ("start-end perms name", from /proc/self/maps), or "" (Linux and
+ * Android; "" elsewhere). */
+const char *Memories_GuestMapOccupants(void);
+/* Whether this kernel refuses MAP_FIXED_NOREPLACE over a mapping (Linux
+ * 4.17 and later): 1 yes, 0 no (it takes the address as a hint), -1 not
+ * known (not Linux, or the probe failed). */
+int Memories_KernelRefusesTakenRange(void);
 /* Copy a user-supplied PS-X EXE's initialized image to its load address.
  * MIPS text comes along unused; it keeps every data offset exact. */
 int Memories_GuestLoadExe(const char *path);

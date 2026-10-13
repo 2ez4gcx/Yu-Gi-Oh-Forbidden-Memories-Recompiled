@@ -12,7 +12,7 @@ from tkinter import ttk
 from . import duelist_rules, roster, values
 from .gamedata import DUELIST_NAMES
 from .tabs import Tab
-from .widgets import ScrolledForm
+from .widgets import ScrolledForm, Tooltip
 
 # The groups in each of the two columns, by title; the LP by duelist goes
 # under the second.
@@ -32,7 +32,7 @@ class ValuesTab(Tab):
             side="left")
         ttk.Button(top, text="Reset all to the game's", command=self.clear).pack(side="right")
         self.status = ttk.Label(body, style="Error.TLabel", wraplength=1100, justify="left")
-        self.vars, self.captions, self.reverts, self.wrong = {}, {}, {}, set()
+        self.vars, self.captions, self.reverts, self.wrong, self.tips = {}, {}, {}, set(), {}
         columns = ttk.Frame(body)
         columns.pack(fill="x")
         groups = dict(values.GROUPS)
@@ -72,8 +72,10 @@ class ValuesTab(Tab):
                                 command=lambda k=key: self.revert(k))
             revert.grid(row=row, column=3, padx=(2, 0))
             self.reverts[key] = revert
-            ttk.Label(parent, style="Hint.TLabel", text=f"{hint}, {low} to {high}").grid(
-                row=row, column=4, sticky="w", padx=(4, 0))
+            line = ttk.Label(parent, style="Hint.TLabel", text=f"{hint}, {low} to {high}")
+            line.grid(row=row, column=4, sticky="w", padx=(4, 0))
+            if key in values.TIPS:
+                self.tips[key] = [Tooltip(widget, values.TIPS[key]) for widget in (caption, entry, line)]
 
     def _duelist_table(self, parent):
         per = ttk.LabelFrame(parent, text="Starting LP by duelist", padding=(6, 2))

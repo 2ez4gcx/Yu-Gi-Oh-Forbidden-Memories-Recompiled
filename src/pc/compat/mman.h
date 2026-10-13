@@ -100,4 +100,37 @@ int Memories_TranslatedMprotect(void *, size_t, int);
 #else
 #include <sys/mman.h>
 #endif
+
+/* Memories_MapFixed: mmap for a MAP_FIXED_NOREPLACE request, which maps at
+ * `address` exactly or not at all (MAP_FAILED, errno EEXIST when something
+ * holds part of the range), on every kernel. Linux before 4.17 does not
+ * know the flag and takes the address as a hint: a range that is free is
+ * given as asked, one that is not goes wherever the kernel puts it (in an
+ * arm64 app process top-down from below the stack, far above 4 GB), which
+ * is undone here and told as the newer kernels tell it. The range is never
+ * checked and then mapped with MAP_FIXED: another thread (an app's Java
+ * runtime maps below 4 GB itself) could take it in between, and MAP_FIXED
+ * would map over that. MEMORIES_TEST_OLD_KERNEL=1, in a test build, drops
+ * the flag as such a kernel does (notes/pc-build.md, "Android arm64"). */
+#if defined(_WIN32) || (defined(__APPLE__) && defined(MEMORIES_TRANSLATED))
+#define Memories_MapFixed mmap /* both refuse a taken address themselves */
+#else
+#include <errno.h>
+#include <stdlib.h>
+static inline void *Memories_MapFixed(void *address, size_t length, int prot, int flags, int fd, off_t offset)
+{
+    void *got;
+#ifdef MEMORIES_TEST_HOOKS
+    const char *old = getenv("MEMORIES_TEST_OLD_KERNEL");
+    if (old && old[0] && old[0] != '0') flags &= ~MAP_FIXED_NOREPLACE;
+#endif
+    got = mmap(address, length, prot, flags, fd, offset);
+    if (got != MAP_FAILED && got != address) {
+        munmap(got, length);
+        errno = EEXIST;
+        return MAP_FAILED;
+    }
+    return got;
+}
+#endif
 #endif

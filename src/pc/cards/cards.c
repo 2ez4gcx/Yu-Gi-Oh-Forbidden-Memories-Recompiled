@@ -17,6 +17,8 @@
 #include "starter.h"
 #include "stars.h"
 #include "attributes.h"
+#include "type_icons.h"
+#include "pc/tower/tower.h"
 #include "packs.h"
 #include "pc/platform/ui_config.h"
 #include "pc/free_duel/duelists.h"
@@ -84,6 +86,10 @@ static unsigned char frames[CARD_TABLE_ID_END];
 /* The original table packs an attribute into four bits beside level.  Keep
  * its retail values for guest code, but let PC cards carry any registry id. */
 static unsigned short attribute_ids[CARD_TABLE_ID_END];
+/* Types past the retail word's five bits. -1 means the packed type is the
+ * card's complete identity. The original engine sees their monster fallback
+ * (Dragon); port-owned rules call Cards_Type and see this bank value. */
+static short extended_types[CARD_TABLE_ID_END];
 /* A card's "tags" (cards.h's Cards_HasTag): one bit a tag, in the order the
  * tags were first met; 32 is room for a mod pack, more are noted and left out. */
 #define MAX_TAGS 32
@@ -185,7 +191,7 @@ int Cards_FrameColor(int id)
     /* Left out, a monster with effects of its own is drawn orange, as an
      * effect monster is in the card game. */
     if (frames[id] == FRAME_TYPE) return -1;
-    return Cards_Type(id) < CARD_TYPE_MAGIC && Cards_MonsterEffects(id, &effects) ? CARD_FRAME_ORANGE : -1;
+    return Cards_IsMonsterType(Cards_Type(id)) && Cards_MonsterEffects(id, &effects) ? CARD_FRAME_ORANGE : -1;
 }
 int Cards_ExodiaPiece(int id)
 {
@@ -447,6 +453,45 @@ static unsigned char *encode_description(const char *mod, const char *text, int 
     return glyphs;
 }
 
+/* A custom type's name (card_types' "name"), glyph by glyph, the same way
+ * encode_name reads a card's. No {n}/{id} pattern: a type's name names the
+ * type, not a particular card. */
+static unsigned char *encode_type_name(const char *mod, const char *text, const char *where, int index)
+{
+    unsigned char *glyphs = Memories_LowAlloc(strlen(text) * 2 + 1);
+    size_t length = 0;
+    const char *at = text;
+    int bad = 0, dropped = 0;
+    if (!glyphs) return NULL;
+    while (*at) {
+        const char *letter = at;
+        uint32_t character = Glyphs_NextCharacter(&at);
+        int code;
+        if (character == GLYPHS_NOT_UTF8) {
+            if (!bad++) Mods_Note(mod, "%s.types[%d]: its name is not UTF-8; save the file as UTF-8. Left out", where, index);
+            continue;
+        }
+        code = Glyphs_Code(character);
+        if (code < 0) {
+            dropped++;
+            Mods_Note(mod, "%s.types[%d]: the game has no letter \"%.*s\"; left out of its name", where, index,
+                      (int)(at - letter), letter);
+            continue;
+        }
+        length += put_glyph(glyphs + length, code);
+    }
+    if (!length) {
+        Mods_Note(mod, "%s.types[%d]: \"name\" has no letter the game can display; type left out", where, index);
+        return NULL;
+    }
+    if (dropped) {
+        Mods_Note(mod, "%s.types[%d]: its displayed name omits %d unsupported character%s; manifests must still use the original UTF-8 name",
+                  where, index, dropped, dropped == 1 ? "" : "s");
+    }
+    glyphs[length] = 0xFF;
+    return glyphs;
+}
+
 /* The Library's heading, string F8: "<" then the seen count (F8 03: four
  * address bytes and a width byte, 0x80 for zero padding) then "/722>".
  * With more cards than the disc's, the "722" is their number and the count
@@ -500,10 +545,23 @@ const unsigned char *Cards_Text(int id, const unsigned char *text)
 
 /* --- building the tables --------------------------------------------- */
 
-static const char *const type_names[] = {"Dragon", "Spellcaster", "Zombie", "Warrior", "Beast-Warrior", "Beast",
-                                         "Winged Beast", "Fiend", "Fairy", "Insect", "Dinosaur", "Reptile",
-                                         "Fish", "Sea Serpent", "Machine", "Thunder", "Aqua", "Pyro", "Rock",
-                                         "Plant", "Magic", "Trap", "Ritual", "Equip"};
+static const char *const retail_type_names[] = {"Dragon", "Spellcaster", "Zombie", "Warrior", "Beast-Warrior", "Beast",
+                                                "Winged Beast", "Fiend", "Fairy", "Insect", "Dinosaur", "Reptile",
+                                                "Fish", "Sea Serpent", "Machine", "Thunder", "Aqua", "Pyro", "Rock",
+                                                "Plant", "Magic", "Trap", "Ritual", "Equip"};
+/* The card record has a five-bit retail type.  New monster identities live
+ * in the separate bank below, so they do not consume or wrap those bits. */
+#define CARD_TYPE_LIMIT 256
+static const char *type_names[CARD_TYPE_LIMIT];
+/* Icons are owned copies because a Json document is freed when its mod is
+ * rescanned.  They are intentionally per *custom type*, never an asset named
+ * after a retail type such as dragon.png. */
+#define TYPE_ICON_PATH 1024
+static char type_icons[CARD_TYPE_LIMIT][TYPE_ICON_PATH];
+/* A custom type's name, glyph-encoded for the card view (Cards_TypeNameText):
+ * owned, like a card's own name (encode_name), rather than a copy of the
+ * manifest's UTF-8, which the game's text stream cannot read directly. */
+static unsigned char *type_name_text[CARD_TYPE_LIMIT];
 /* The frames, in the order of their palettes (CARD_FRAME_*); "type" is the
  * card's own type's again. */
 static const char *const frame_names[] = {"Monster", "Magic", "Trap", "Ritual", "Purple", "Orange", "Type"};
@@ -513,6 +571,7 @@ static const char *const frame_color_names[] = {"Gold", "Green", "Pink", "Blue"}
 
 static int same_words(const char *a, const char *b)
 {
+    if (!a || !b) return 0;
     for (; *a && *b; a++, b++) {
         if (tolower((unsigned char)*a) != tolower((unsigned char)*b)) return 0;
     }
@@ -539,9 +598,22 @@ static int choice(const JsonValue *value, const char *const *choices, int count)
     text = Json_String(value, NULL);
     if (!text) return -1;
     for (i = 0; i < count; i++) {
-        if (same_words(text, choices[i])) return i;
+        if (choices[i] && same_words(text, choices[i])) return i;
     }
     return narrow(Json_Number(value, -1));
+}
+
+/* A card type can be written by number or name, but an unclaimed spare
+ * encoding is not a type.  This keeps a typo such as 31 from silently making
+ * a card which none of the monster rules recognise. */
+static int type_choice(const JsonValue *value)
+{
+    int type = choice(value, type_names, CARD_TYPE_LIMIT);
+    const char *text;
+    /* choice() uses display names for the fast, exact case.  A renamed
+     * retail type also keeps its disc spelling as a resolver alias. */
+    if (type < 0 && (text = Json_String(value, NULL))) type = Cards_TypeNamed(text);
+    return type >= 0 && type < CARD_TYPE_LIMIT && type_names[type] ? type : -1;
 }
 
 
@@ -555,6 +627,101 @@ static int same_letters(const char *a, const char *b)
         if (!*a || !*b) return !*a && !*b;
         if (tolower((unsigned char)*a++) != tolower((unsigned char)*b++)) return 0;
     }
+}
+
+/* "card_types": {"types": [{"id": 24, "name": "Cyberse"}]}.  A
+ * declaration for an existing id changes its display/manifest name, never
+ * its numeric identity or behaviour.  The record has five type bits; IDs
+ * 24-255 live in the type bank and are necessarily monsters. */
+static void add_card_types_section(const char *mod, const char *directory, const JsonValue *section, const char *where)
+{
+    const JsonValue *entry;
+    int index;
+    if (!section) return;
+    if (Json_TypeOf(section) != JSON_OBJECT) {
+        Mods_Note(mod, "\"%s\" is an object with a \"types\" list", where);
+        return;
+    }
+    for (index = 0, entry = Json_At(Json_Member(section, "types"), 0); entry; entry = Json_Next(entry), index++) {
+        const JsonValue *name = Json_Member(entry, "name");
+        const char *icon = Json_String(Json_Member(entry, "icon"), NULL);
+        int id = (int)Json_Number(Json_Member(entry, "id"), -1);
+        if (Json_TypeOf(entry) != JSON_OBJECT || Json_TypeOf(name) != JSON_STRING) {
+            Mods_Note(mod, "%s.types[%d]: an object with numeric \"id\" and string \"name\"", where, index);
+            continue;
+        }
+        if (!((id >= CARD_TYPE_DRAGON && id <= CARD_TYPE_EQUIP) ||
+              (id > CARD_TYPE_EQUIP && id < CARD_TYPE_LIMIT))) {
+            Mods_Note(mod, "%s.types[%d]: id is an existing type (0-23) or a new monster type (24-255)", where, index);
+            continue;
+        }
+        if (!*Json_String(name, "")) {
+            Mods_Note(mod, "%s.types[%d]: \"name\" must not be empty", where, index);
+            continue;
+        }
+        {
+            /* Encoded first: a name with no letter the game can display
+             * (encode_type_name) leaves the whole type out, the way an
+             * invalid id or an empty name already does, rather than
+             * registering an identity nothing can show. */
+            int other;
+            /* Cards_TypeNamed returns the first match by id: a name that
+             * collides with an earlier type's (any mod's, retail or
+             * custom) silently shadows that type whenever this one's name
+             * is looked up by text instead of id. */
+            for (other = 0; other < CARD_TYPE_LIMIT; other++) {
+                if (other != id && type_names[other] && same_letters(Json_String(name, ""), type_names[other])) {
+                    Mods_Note(mod, "%s.types[%d]: \"%s\" is already type %d's name; declaration left out",
+                              where, index, Json_String(name, ""), other);
+                    goto next_type;
+                }
+            }
+            /* Retail spellings remain lookup aliases after a rename.  Do
+             * not let a later custom declaration make one ambiguous. */
+            for (other = CARD_TYPE_DRAGON; other <= CARD_TYPE_EQUIP; other++) {
+                if (other != id && same_letters(Json_String(name, ""), retail_type_names[other])) {
+                    Mods_Note(mod, "%s.types[%d]: \"%s\" is already type %d's retail alias; declaration left out",
+                              where, index, Json_String(name, ""), other);
+                    goto next_type;
+                }
+            }
+            {
+                unsigned char *encoded = encode_type_name(mod, Json_String(name, ""), where, index);
+                if (!encoded) goto next_type;
+                type_names[id] = Json_String(name, ""); /* later mods deliberately replace earlier names */
+                type_name_text[id] = encoded;
+            }
+        }
+        type_icons[id][0] = '\0';
+        if (icon) {
+            if (!Paths_Contained(icon) || !directory ||
+                snprintf(type_icons[id], sizeof(type_icons[id]), "%s/%s", directory, icon) >= (int)sizeof(type_icons[id])) {
+                type_icons[id][0] = '\0';
+                Mods_Note(mod, "%s.types[%d]: \"icon\" must name a PNG inside the mod", where, index);
+            }
+        }
+next_type:
+        ;
+    }
+}
+
+static void add_card_types(const char *mod, const char *directory, const JsonValue *manifest, void *context)
+{
+    (void)context;
+    add_card_types_section(mod, directory, Json_Member(manifest, "card_types"), "card_types");
+}
+
+static void build_monster_types(void)
+{
+    int type;
+    for (type = 0; type < CARD_TYPE_LIMIT; type++) {
+        type_names[type] = NULL;
+        type_icons[type][0] = '\0';
+        type_name_text[type] = NULL;
+    }
+    for (type = CARD_TYPE_DRAGON; type <= CARD_TYPE_EQUIP; type++) type_names[type] = retail_type_names[type];
+    TypeIcons_Clear();
+    Mods_VisitManifests(add_card_types, NULL);
 }
 
 int Cards_FusionGroupNamed(const char *text)
@@ -648,15 +815,43 @@ int Cards_Named(const char *text)
 int Cards_TypeNamed(const char *text)
 {
     int type;
-    for (type = 0; text && type < (int)(sizeof(type_names) / sizeof(type_names[0])); type++) {
-        if (same_letters(text, type_names[type])) return type;
+    for (type = 0; text && type < CARD_TYPE_LIMIT; type++) {
+        if (type_names[type] && same_letters(text, type_names[type])) return type;
+    }
+    /* A retail rename changes what the player sees, not what existing mods
+     * may write in terrain/equip/ritual rules.  Keep the disc spelling as a
+     * permanent lookup alias. */
+    for (type = CARD_TYPE_DRAGON; text && type <= CARD_TYPE_EQUIP; type++) {
+        if (same_letters(text, retail_type_names[type])) return type;
     }
     return -1;
 }
 
+const char *Cards_TypeName(int type)
+{
+    return type >= 0 && type < CARD_TYPE_LIMIT && type_names[type] ? type_names[type] : "";
+}
+
+const char *Cards_TypeIcon(int type)
+{
+    return type > CARD_TYPE_EQUIP && type < CARD_TYPE_LIMIT && type_icons[type][0] ? type_icons[type] : NULL;
+}
+
+const unsigned char *Cards_TypeNameText(int type)
+{
+    return type >= 0 && type < CARD_TYPE_LIMIT ? type_name_text[type] : NULL;
+}
+
+int Cards_IsMonsterType(int type)
+{
+    return (type >= CARD_TYPE_DRAGON && type < CARD_TYPE_MAGIC) ||
+           (type >= CARD_TYPE_EQUIP + 1 && type < CARD_TYPE_LIMIT && type_names[type]);
+}
+
 int Cards_Type(int id)
 {
-    return Cards_Valid(id) ? (int)(((unsigned)gDuel_adwCardStats[id - 1] >> 26) & 0x1F) : -1;
+    return !Cards_Valid(id) ? -1 : extended_types[id] >= 0 ? extended_types[id] :
+           (int)(((unsigned)gDuel_adwCardStats[id - 1] >> 26) & 0x1F);
 }
 
 int Cards_AttributeNamed(const char *text)
@@ -1038,7 +1233,7 @@ int Cards_RetailType(int id)
 }
 
 /* Monster, magic, trap, ritual or equip: what a card is played as. */
-static int kind(int type) { return type < CARD_TYPE_MAGIC ? 0 : type; }
+static int kind(int type) { return Cards_IsMonsterType(type) ? 0 : type; }
 int Cards_KindChanged(int id)
 {
     return Cards_Valid(id) && kind(Cards_Type(id)) != kind(Cards_RetailType(Cards_BaseId(id)));
@@ -1069,7 +1264,7 @@ static int retail_monster(int id)
  * (stars.h). */
 static void default_stars(int id, unsigned *stats, int was_monster, int stars_given)
 {
-    if ((int)((*stats >> 26) & 0x1F) < CARD_TYPE_MAGIC && !was_monster && !stars_given && !(*stats & (0xFFu << 18))) {
+    if (Cards_IsMonsterType((int)((*stats >> 26) & 0x1F)) && !was_monster && !stars_given && !(*stats & (0xFFu << 18))) {
         *stats |= retail_monster(Cards_ModelId(id))
                       ? ((const unsigned *)(uintptr_t)RETAIL_STATS)[Cards_ModelId(id) - 1] & (0xFFu << 18)
                       : (8u << 22) | (9u << 18);
@@ -1197,7 +1392,7 @@ static void add_entry(const char *mod, const char *directory, int index, const J
     int base = 0, count, n, value, has_password;
     unsigned stats, password = CARD_PASSWORD_NONE, entry_fusion_groups = 0;
     int entry_has_fusion_groups = 0;
-    int was_monster, stars_given = 0;
+    int was_monster, stars_given = 0, logical_type;
     MonsterEffect read_effects[MONSTER_EFFECTS_MAX];
     MonsterEffect *own_effects = NULL;
     int effect_count;
@@ -1278,6 +1473,7 @@ static void add_entry(const char *mod, const char *directory, int index, const J
     }
     /* What the entry leaves out is the base's. */
     stats = (unsigned)gDuel_adwCardStats[base - 1];
+    logical_type = extended_types[base] >= 0 ? extended_types[base] : (int)((stats >> 26) & 0x1F);
     trap_threshold = trap_thresholds[base];
     {
         const JsonValue *threshold = Json_Member(entry, "trap_threshold");
@@ -1289,7 +1485,7 @@ static void add_entry(const char *mod, const char *directory, int index, const J
             else Mods_Note(mod, "cards[%d]: \"trap_threshold\" must be a whole number, 0 to 65535, or null", index);
         }
     }
-    was_monster = (int)((stats >> 26) & 0x1F) < CARD_TYPE_MAGIC;
+    was_monster = Cards_IsMonsterType((int)((stats >> 26) & 0x1F));
     level_attr = gDuel_abCardLevelAttr[base];
     attribute = attribute_ids[base];
     /* A card's own ATK and DEF are nine bits of tens in its stats word
@@ -1324,24 +1520,35 @@ static void add_entry(const char *mod, const char *directory, int index, const J
             stats = (stats & ~(0x1FFu << (9 * k))) | ((unsigned)clamp(value / 10, 0, 0x1FF) << (9 * k));
         }
     }
-    if ((value = choice(Json_Member(entry, "type"), type_names, 24)) >= 0) {
+    if ((value = type_choice(Json_Member(entry, "type"))) >= 0) {
         /* A copy may become a non-monster when it has a retail effect of
          * that type. The effect names a built-in behavior, even if the
          * source card was itself replaced. An equip needs none: what it
          * equips and adds are the mod's "equips" rules (tables.h). Any
          * card may become a monster, as a replaced one may. */
-        int monster = ((stats >> 26) & 0x1F) < CARD_TYPE_MAGIC;
+        int monster = Cards_IsMonsterType((int)((stats >> 26) & 0x1F));
         int effect = Cards_Reference(Json_Member(entry, "effect"));
         if (effect <= 0 && Json_Number(Json_Member(entry, "effect"), 0) == 0)
             effect = Cards_EffectId(base);
-        value = clamp(value, 0, CARD_TYPE_EQUIP);
-        if (!replace && value >= CARD_TYPE_MAGIC && value != (int)((stats >> 26) & 0x1F) &&
+        value = clamp(value, 0, CARD_TYPE_LIMIT - 1);
+        if (!replace && !Cards_IsMonsterType(value) && value != (int)((stats >> 26) & 0x1F) &&
             !(value >= CARD_TYPE_MAGIC && Cards_RetailType(effect) == value) && value != CARD_TYPE_EQUIP) {
             Mods_Note(mod, "cards[%d]: %s; \"type\" left out", index,
                       monster ? "a copy needs a matching retail effect to become a non-monster" :
                                 "a non-monster copy needs a matching retail effect to change type");
         } else {
-            stats = (stats & ~(0x1Fu << 26)) | ((unsigned)value << 26);
+            logical_type = value;
+            /* The retail word has five bits, which hold every built-in type
+             * (0-23) as-is: those are also what untouched game readers (the
+             * switch in duel_card_type_icon.c, the AI's own stat reads, ...)
+             * compare against directly, so Magic/Trap/Ritual/Equip must stay
+             * put. A banked type starts at 24, so it must never be placed in
+             * this field: untouched game readers would hide its ATK/DEF and
+             * index unrelated icon glyphs.  Keep a Dragon compatibility
+             * value there; Cards_Type() returns the banked identity to
+             * port-owned rules. */
+            stats = (stats & ~(0x1Fu << 26)) |
+                    ((unsigned)(value <= CARD_TYPE_EQUIP ? value : CARD_TYPE_DRAGON) << 26);
         }
     }
     /* Only a monster has ATK and DEF: no magic, trap, ritual or equip card of
@@ -1349,7 +1556,7 @@ static void add_entry(const char *mod, const char *directory, int index, const J
      * own, and the CPU, which ranks its hand by them whatever their type,
      * would take it for its best monster: it plays it face down every turn,
      * into the back row, over the last one it set. */
-    if (((stats >> 26) & 0x1F) >= CARD_TYPE_MAGIC && (stats & 0x3FFFFu)) {
+    if (!Cards_IsMonsterType((int)((stats >> 26) & 0x1F)) && (stats & 0x3FFFFu)) {
         if (Json_Number(Json_Member(entry, "attack"), 0) > 0 || Json_Number(Json_Member(entry, "defense"), 0) > 0)
             Mods_Note(mod, "cards[%d]: only a monster has ATK and DEF; \"attack\" and \"defense\" left out", index);
         stats &= ~0x3FFFFu;
@@ -1385,7 +1592,7 @@ static void add_entry(const char *mod, const char *directory, int index, const J
         const JsonValue *attribute_value = Json_Member(entry, "attribute");
         long raw_attribute = Json_TypeOf(attribute_value) == JSON_NUMBER ? Json_Number(attribute_value, -1) : -1;
         /* 6 and 7 are retail's magic/trap presentation values: never
-         * declarable, but a card may still be given one (as before API 13;
+         * declarable, but a card may still be given one (as before API 16;
          * the FM Editor writes them for cards made Magic or Trap). */
         value = raw_attribute == 6 || raw_attribute == 7 ? (int)raw_attribute : Attributes_Value(attribute_value);
         if (value < 0) {
@@ -1590,8 +1797,9 @@ static void add_entry(const char *mod, const char *directory, int index, const J
         fusion_groups[id] = entry_fusion_groups;
         has_fusion_groups[id] = (unsigned char)entry_has_fusion_groups;
         gDuel_adwCardStats[id - 1] = (int)stats;
+        extended_types[id] = logical_type > CARD_TYPE_EQUIP ? (short)logical_type : -1;
         /* A monster with no star: star 0 is neutral from now on (stars.h). */
-        if (((stats >> 26) & 0x1F) < CARD_TYPE_MAGIC && !(stats & (0xFu << 22))) Stars_NoteNoStar();
+        if (Cards_IsMonsterType((int)((stats >> 26) & 0x1F)) && !(stats & (0xFu << 22))) Stars_NoteNoStar();
         gDuel_abCardLevelAttr[id] = level_attr;
         attribute_ids[id] = attribute;
         frames[id] = frame;
@@ -1665,6 +1873,8 @@ void Cards_Build(void)
     if (built) return;
     built = 1;
     Attributes_Build();
+    build_monster_types();
+    memset(extended_types, 0xFF, sizeof(extended_types));
     gCard_nCount = CARD_COUNT;
     memcpy(gDuel_adwCardStats, (const void *)(uintptr_t)RETAIL_STATS, CARD_COUNT * sizeof(int));
     memcpy(gCard_asNameSortKey, (const void *)(uintptr_t)RETAIL_SORT_KEYS, CARD_COUNT * sizeof(short));
@@ -1725,6 +1935,8 @@ void Cards_Build(void)
      * mod signature covers. */
     Packs_Build();
     Mods_SetPackSignature(Packs_Signature());
+    /* The tower (tower.h), whose floors name duelists and cards. */
+    Tower_Build();
     /* The duel's pictures (ui_config.h), read now so that a mistake in a
      * mod's "ui" is noted in the Mods window before any duel. */
     UiConfig_Load();

@@ -5,7 +5,7 @@
     "author": "DecompRecomp",
     "description": "Two cards with stable save identities and their own fusion recipe. Artwork is inherited from the player's disc.",
     "enabled": false,
-    "min_api": 13,
+    "min_api": 16,
     "attributes": {
         "attributes": [
             {"id": 8, "name": "Starlight"}

@@ -7,6 +7,9 @@
 #include "display_object_helpers.h"
 #include "../unmatched.h"
 #include "script_image_objects.h"
+#ifdef MEMORIES_PC
+#include "pc/tower/tower_state.h"
+#endif
 
 void ScriptImage_TransferCallback(FileTransferDescriptor *obj, s32 mode)
 {
@@ -54,6 +57,13 @@ void ScriptImage_RequestTransfer(
     if (owner) {
         owner->image_id = value;
     }
+#ifdef MEMORIES_PC
+    /* A tower's own scene (ids no record of the disc's has): put in VRAM
+     * where the record would stream, without the disc. */
+    if (Tower_UploadScene(value)) {
+        return;
+    }
+#endif
 
     index = ((value >> 4) & 15) * 10 + (value & 15);
     mode = value >> 8;

@@ -74,13 +74,37 @@ def exercise(folder: Path) -> dict:
             pngio.write(art, pngio.Image(102, 96, bytes((50, 100, 200, 255)) * (102 * 96)))
             app.art.goto(1)
             app.art.use_file("art", str(art))
+            # The Tower tab: a tower of one floor, which needs mod API 14.
+            app.notebook.select(app.tower)
+            app.tower.has.set(True)
+            app.tower.toggle()
+            app.tower.vars["name"].set("Smoke tower")
+            app.tower.vars["scene"].set("seal shrine")
+            require(app.tower.commit(), "Tower Apply failed")
+            # A story's stage through the Stage box: a character of the
+            # campaign's and a PNG of the mod's, copied into it on export.
+            app.tower._set_text("intro", "Welcome.")
+            app.tower.last_story = "intro"
+            app.tower.stage_character.set("1")
+            app.tower.stage_side.set("left")
+            app.tower._character()
+            app.tower.stage_side.set("right")
+            picked = app.tower.use_png(str(art))
+            require(picked == "tower/picture.png", f"the stage's PNG is {picked}")
+            app.tower._insert(f"[right: {picked}]")
+            require(app.tower.commit(), "Tower Apply failed")
             app.info.vars["id"].set("editor-smoke")
             require(app.info.commit(), "Mod info Apply failed")
             with mock.patch.object(file_dialogs, "askdirectory", return_value=str(folder / "mods")):
                 require(app.save(ask=True, export=True), "Export failed")
             saved = folder / "mods/editor-smoke"
             value = json.loads((saved / "mod.json").read_text(encoding="utf-8"))
-            require(value["min_api"] == 11, value)
+            require(value["min_api"] == 14, value)
+            require(value["tower"] == {"name": "Smoke tower", "scene": "seal shrine",
+                                       "intro": [{"text": "Welcome.", "characters": {"left": 1,
+                                                                                     "right": "tower/picture.png"}}],
+                                       "floors": [{"duelist": 1}]}, value)
+            require((saved / "tower/picture.png").is_file(), "the stage's PNG was not exported")
             app.load_mod(saved)
             app.update()
             require(app.project.cards[1].name == "Packaged editor smoke card", "card name did not reopen")
@@ -90,7 +114,7 @@ def exercise(folder: Path) -> dict:
             require(list(saved.rglob("*.png")), "exported art is missing")
             require(not callbacks, "\n".join(callbacks))
             return {"build": build_info.current(), "tabs": tabs, "ui_pages": pages,
-                    "export_reopen": True, "art": True}
+                    "export_reopen": True, "art": True, "tower": True}
         finally:
             app.dirty = False
             app.destroy()

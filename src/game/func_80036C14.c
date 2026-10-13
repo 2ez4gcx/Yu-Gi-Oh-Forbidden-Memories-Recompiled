@@ -6,6 +6,7 @@
 #include "pc/text/glyphs.h"
 #include "pc/cards/stars.h"
 #include "pc/cards/duel_ui.h"
+#include "pc/cards/type_icons.h"
 #endif
 
 /* D_801D9174: a lookup table of 0x1E-byte records, each prefixed by a
@@ -47,9 +48,11 @@ void DuelEffect_AppendEntry(DuelEffectChannel *p, s32 a)
     s32 b;
     s32 c;
 #ifdef MEMORIES_PC
-    /* The guardian star func_80037DA4 said this icon stands for, taken now
-       so it never passes to a later entry (stars.h). */
+    /* The guardian star or the card type func_80037DA4 said this icon
+       stands for, taken now so it never passes to a later entry (stars.h,
+       type_icons.h). The two are never both marked for the same entry. */
     u16 star_icon = Stars_TakeIconMark();
+    u16 type_icon = (u16)TypeIcons_TakeIconMark();
 #endif
 
     q = p->entry_end_20;
@@ -81,8 +84,9 @@ void DuelEffect_AppendEntry(DuelEffectChannel *p, s32 a)
         q->field_17 = b;
 #ifdef MEMORIES_PC
         /* Retail leaves an icon's code as the entry had it; func_80035E20
-           reads a star's there, so every icon says whether it is one. */
-        q->code_00 = star_icon;
+           reads a star's or a type's there, so every icon says whether it
+           is one. */
+        q->code_00 = star_icon ? star_icon : type_icon;
 #endif
     } else if (f & 0x100) {
 #ifdef MEMORIES_PC

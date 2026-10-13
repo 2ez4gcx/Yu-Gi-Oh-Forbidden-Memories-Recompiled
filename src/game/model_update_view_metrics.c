@@ -137,4 +137,14 @@ void func_800580D4(s32 index, s32 arg1, u8 *arg2, GsCOORDUNIT *arg3)
     arg3->matrix.t[1] = 0;
     arg3->matrix.t[0] = 0;
     arg3->super = &unit;
+#ifdef MEMORIES_PC
+    /* The caller resolves this coordinate after we return. Its parent is
+     * a local record, so compose the chain while that parent is still alive
+     * and return a self-contained root instead of a dangling stack pointer. */
+    GsGetLwUnit(arg3, &work);
+    arg3->matrix = work;
+    arg3->workm = work;
+    arg3->super = NULL;
+    arg3->flg = 0;
+#endif
 }

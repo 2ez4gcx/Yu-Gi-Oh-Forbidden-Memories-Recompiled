@@ -25,6 +25,9 @@
 #include "display_object_work_slots.h"
 #include "../unmatched.h"
 #include "main_mode_state.h"
+#ifdef MEMORIES_PC
+#include "pc/tower/tower.h"
+#endif
 
 /* The grouped mode runners use common-symbol forms overridden by the tracked
    link symbols, so these definitions do not allocate storage here. */
@@ -78,9 +81,14 @@ void Main_RunGameOver(void)
 }
 
 /* gMain_apfnModeRunner entry 13: the developer-mode slot's runner is empty in
-   the retail build. */
+   the retail build. The PC build runs the tower's screen in it (TOWER_MODE,
+   pc/tower/tower.h): no retail screen enters it, so no save state holds it,
+   and Main_Loop and the table stay as they were. */
 void Main_RunUnusedDeveloperMode(void)
 {
+#ifdef MEMORIES_PC
+    Tower_RunMode();
+#endif
 }
 
 void Main_RunTrade(void)

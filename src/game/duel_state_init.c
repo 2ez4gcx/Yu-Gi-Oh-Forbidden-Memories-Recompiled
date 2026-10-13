@@ -11,6 +11,7 @@
 #ifdef MEMORIES_PC
 #include "pc/debug/cheats.h"
 #include "pc/cards/tables.h"
+#include "pc/tower/tower.h"
 #endif
 
 #define DUEL_SELECTION_RECORDS(address) ((DuelSelectionRecord *)(address))
@@ -32,13 +33,15 @@ void Duel_InitSideStates(void) {
     } else {
 #ifdef MEMORIES_PC
         /* Game > Cheats > Starting LP when the player picked one; else a
-           mod's "limits" (per side, per duelist), else the console's 8000
-           (tables.h). */
+           tower floor's "life_points" (tower.h), else a mod's "limits" (per
+           side, per duelist), else the console's 8000 (tables.h). */
         if (Cheats_StartingLifePoints() != DUEL_STARTING_LIFE_POINTS) {
             sp[1] = sp[0] = (u16)Cheats_StartingLifePoints();
         } else {
-            sp[0] = (u16)Tables_StartingLifePoints(0, gDuel_bOpponentID, DUEL_STARTING_LIFE_POINTS);
-            sp[1] = (u16)Tables_StartingLifePoints(1, gDuel_bOpponentID, DUEL_STARTING_LIFE_POINTS);
+            sp[0] = (u16)Tower_StartingLifePoints(0,
+                Tables_StartingLifePoints(0, gDuel_bOpponentID, DUEL_STARTING_LIFE_POINTS));
+            sp[1] = (u16)Tower_StartingLifePoints(1,
+                Tables_StartingLifePoints(1, gDuel_bOpponentID, DUEL_STARTING_LIFE_POINTS));
         }
 #else
         sp[1] = DUEL_STARTING_LIFE_POINTS;

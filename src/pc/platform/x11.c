@@ -5,6 +5,7 @@
 #include "pc/audio/spu.h"
 #include "pc/debug/cheats.h"
 #include "pc/cards/cards.h"
+#include "pc/tower/tower.h"
 #include "pc/free_duel/duelists.h"
 #include "pc/cards/fusion_helper.h"
 #include "update_check.h"
@@ -870,6 +871,7 @@ void Platform_Frame(unsigned frame)
     Cheats_Frame();
     Cards_Frame();
     Duelists_Frame();
+    Tower_Frame();
     Update_Frame(); /* a notice shows with the next frame's menu */
     Menu_TakeChanged();
     wheel_now = wheel_frames > 0 && wheel_frames-- ? wheel_bits : 0;

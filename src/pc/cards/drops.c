@@ -15,12 +15,26 @@
 #include "pc/text/glyphs.h"
 #include "pc/text/text.h"
 #include "pc/debug/log.h"
+#include "pc/tower/tower.h"
 #include "game/card_constants.h"
 #include "game/duel_rewards.h"
 #include "game/save_data.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#if CARD_DROPS_MAX != TABLES_VALUE_CARD_DROPS_MAX
+#error "a mod's \"card_drops\" (tables.c) and Game > Card drops must have one range"
+#endif
+
+int CardDrops_Count(void)
+{
+    int wanted = Tables_CardDropsLock(NULL);
+    if (!wanted) wanted = Settings_Get(SET_CARD_DROPS);
+    if (wanted < 1) wanted = 1;
+    if (wanted > CARD_DROPS_MAX) wanted = CARD_DROPS_MAX;
+    return wanted;
+}
 
 void CardDrops_Begin(void)
 {
@@ -45,10 +59,11 @@ static int owned(int id)
  * card a roll gives (notes/card-drops.md, "Mods"). */
 int CardDrops_Roll(int pool)
 {
-    int wanted = Settings_Get(SET_CARD_DROPS), i;
+    /* In a tower's duel, the tower's "drops" (tower.h) over the count a
+     * mod locks or the player set (CardDrops_Count). */
+    int wanted = Tower_CardDrops(CardDrops_Count()), i;
     CardDrops_Begin();
     if (wanted <= 1) return Duel_SelectCardDrop(pool);
-    if (wanted > CARD_DROPS_MAX) wanted = CARD_DROPS_MAX;
     Memories_Rand();
     for (i = 1; i < wanted; i++) {
         int burn, card;

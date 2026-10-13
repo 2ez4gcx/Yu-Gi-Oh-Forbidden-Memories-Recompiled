@@ -553,6 +553,36 @@ if(BUILD_TESTING)
     endif()
     add_test(NAME pc_cards_order_found COMMAND memories_cards_order_test found)
     add_test(NAME pc_cards_order_moved COMMAND memories_cards_order_test b-first)
+    # Custom monster types (API 15, cards.c's "card_types"):
+    # a retail type renamed, the whole 24-255 bank, a retail card converted
+    # to and from a custom monster type, a name collision, two mods
+    # redefining one id, and a name the game has no letters for.
+    add_executable(memories_card_types_test tests/pc/card_types_test.c src/pc/cards/stars.c ${MOD_TEST_SOURCES}
+                   src/pc/cards/monster_effects.c tests/pc/effect_groups_stub.c)
+    target_include_directories(memories_card_types_test PRIVATE src)
+    target_compile_definitions(memories_card_types_test PRIVATE MEMORIES_PC)
+    target_link_libraries(memories_card_types_test PRIVATE m Threads::Threads)
+    if(NOT MSVC)
+        target_compile_options(memories_card_types_test PRIVATE -Wall -Wextra)
+    endif()
+    add_test(NAME pc_card_types_rename COMMAND memories_card_types_test rename)
+    add_test(NAME pc_card_types_range COMMAND memories_card_types_test range)
+    add_test(NAME pc_card_types_magic_to_monster COMMAND memories_card_types_test magic-to-monster)
+    add_test(NAME pc_card_types_monster_to_trap COMMAND memories_card_types_test monster-to-trap)
+    add_test(NAME pc_card_types_collision COMMAND memories_card_types_test collision)
+    add_test(NAME pc_card_types_multi_mod COMMAND memories_card_types_test multi-mod)
+    add_test(NAME pc_card_types_bad_glyphs COMMAND memories_card_types_test bad-glyphs)
+    # Custom monster type icons (type_icons.c): a successful load's slot
+    # math, a missing/corrupt PNG's throttled retry, a lost HD
+    # registration's diagnostic, and the mark/cell round trip the duel's and
+    # the card view's drawing use to find a type's icon.
+    add_executable(memories_type_icons_test tests/pc/type_icons_test.c)
+    target_include_directories(memories_type_icons_test PRIVATE src)
+    target_compile_definitions(memories_type_icons_test PRIVATE MEMORIES_PC)
+    if(NOT MSVC)
+        target_compile_options(memories_type_icons_test PRIVATE -Wall -Wextra -Wpedantic -Werror)
+    endif()
+    add_test(NAME pc_type_icons COMMAND memories_type_icons_test)
     add_executable(memories_free_duel_progress_test tests/pc/free_duel_progress_test.c tests/pc/duelists_stubs.c src/pc/mods/json.c)
     target_include_directories(memories_free_duel_progress_test PRIVATE src)
     target_compile_definitions(memories_free_duel_progress_test PRIVATE MEMORIES_PC)
@@ -612,6 +642,34 @@ if(BUILD_TESTING)
         target_compile_options(memories_title_config_test PRIVATE -Wall -Wextra -Wpedantic -Werror)
     endif()
     add_test(NAME pc_title_config COMMAND memories_title_config_test)
+    # The mods' "tower" key and a save's progress in it
+    # (src/pc/tower/tower_config.c): manifests and numbers only.
+    add_executable(memories_tower_test tests/pc/tower_test.c src/pc/mods/json.c)
+    target_include_directories(memories_tower_test PRIVATE src)
+    target_compile_definitions(memories_tower_test PRIVATE MEMORIES_PC)
+    if(NOT MSVC)
+        target_compile_options(memories_tower_test PRIVATE -Wall -Wextra -Wpedantic -Werror)
+    endif()
+    if(MEMORIES_SANITIZERS)
+        target_compile_options(memories_tower_test PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
+        target_link_options(memories_tower_test PRIVATE -fsanitize=address,undefined)
+    endif()
+    add_test(NAME pc_tower COMMAND memories_tower_test)
+    # What the game asks of the tower (src/pc/tower/tower.c): its unlock,
+    # the floor's rules only in its own duel, the duelists' conditions, and
+    # the progress beside the save, with the game's bytes as variables.
+    add_executable(memories_tower_game_test tests/pc/tower_game_test.c src/pc/tower/tower.c
+        src/pc/tower/tower_config.c src/pc/mods/json.c)
+    target_include_directories(memories_tower_game_test PRIVATE src)
+    target_compile_definitions(memories_tower_game_test PRIVATE MEMORIES_PC)
+    if(NOT MSVC)
+        target_compile_options(memories_tower_game_test PRIVATE -Wall -Wextra -Wpedantic -Werror)
+    endif()
+    if(MEMORIES_SANITIZERS)
+        target_compile_options(memories_tower_game_test PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
+        target_link_options(memories_tower_game_test PRIVATE -fsanitize=address,undefined)
+    endif()
+    add_test(NAME pc_tower_game COMMAND memories_tower_game_test)
     # The mods' "ui" key as read (src/pc/platform/ui_config.c): manifests only,
     # so at the host's own width too.
     add_executable(memories_ui_config_test tests/pc/ui_config_test.c src/pc/mods/json.c)
@@ -914,6 +972,11 @@ if(Python3_Interpreter_FOUND)
         add_test(NAME pc_mod_cache
             COMMAND "${Python3_EXECUTABLE}" tools/pc/test_mod_cache.py
             WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+        # What build_mod.py says when the 64-bit targets cannot be built, and
+        # the llvm-mingw it points to (no compiler needed).
+        add_test(NAME pc_build_mod_toolchain
+            COMMAND "${Python3_EXECUTABLE}" tools/pc/test_build_mod_toolchain.py
+            WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
         # check_mod_abi.py unpacks only the release packages whose sha256
         # mod_compat.txt pins (synthetic packages, nothing downloaded).
         add_test(NAME pc_mod_compat_fetch
@@ -1004,7 +1067,7 @@ if(BUILD_TESTING)
     # (src/pc/guest/low_memory.h): real functions in a 64-bit clang build,
     # malloc and free elsewhere, where low_memory.c compiles to nothing.
     foreach(target memories_duelists_test memories_stars_test memories_cards_stars_test memories_cards_order_test
-                   memories_cards_identity_test memories_card_notes_test)
+                   memories_cards_identity_test memories_card_notes_test memories_card_types_test)
         if(TARGET ${target})
             target_sources(${target} PRIVATE src/pc/guest/low_memory.c)
         endif()

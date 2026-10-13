@@ -197,7 +197,7 @@ static s32 extended_match(const TablesRitualRule *rule, DuelRitualResult *out)
         for (i = 0; i < HAND_SIZE; i++) {
             DuelCardRecord *card = &D_801A7AD8[base + i];
             if (D_800E9FF0[side].hand[i] >= 0 && (card->flags & DUEL_CARD_FLAG_OCCUPIED) &&
-                Cards_Type(card->card_id) < CARD_TYPE_MAGIC) {
+                Cards_IsMonsterType(Cards_Type(card->card_id))) {
                 x.record[x.candidates] = (s16)(base + i);
                 x.hand_slot[x.candidates++] = (s8)i;
             }

@@ -9,6 +9,7 @@
 #include "../psyq/libgs.h"
 #ifdef MEMORIES_PC
 #include "pc/cards/cards.h"
+#include "pc/cards/type_icons.h"
 #endif
 
 #include "duel_card_stat_display.h"
@@ -61,12 +62,22 @@ DisplayObject *func_80031574(s32 index, s32 arg1, s32 arg2, s32 arg3, s32 arg4)
         break;
     }
 #ifdef MEMORIES_PC
-    /* A mod's frame color (Cards_FrameColor): the icon's palettes follow
-     * the frames' order, with orange next after ritual; this package has no
-     * purple, so a purple frame keeps its type's icon. */
-    if (Cards_FrameColor(index) >= 0 && Cards_FrameColor(index) != CARD_FRAME_PURPLE) {
-        DISPLAY_OBJECT_UNSIGNED_HALFWORD(object->field_40) =
-            0x260 + (Cards_FrameColor(index) - (Cards_FrameColor(index) == CARD_FRAME_ORANGE)) * 0x10;
+    {
+        int tpage, u, v, clut, custom_icon;
+        custom_icon = TypeIcons_Cell(Cards_Type(index), &tpage, &u, &v, &clut);
+        if (custom_icon) {
+            DisplayObject_ConfigureScreenSprite(DISPLAY_OBJECT_VIEW(object), x, y, 0x10, 0x10,
+                                                u, v, tpage, clut, 0);
+        }
+        /* A mod's frame color (Cards_FrameColor): the icon's palettes follow
+         * the frames' order, with orange next after ritual; this package has
+         * no purple, so a purple frame keeps its type's icon. A custom
+         * type's icon keeps its own bank's palette too: the frames' strip
+         * is a row of the retail icons' bank, not this one's. */
+        if (!custom_icon && Cards_FrameColor(index) >= 0 && Cards_FrameColor(index) != CARD_FRAME_PURPLE) {
+            DISPLAY_OBJECT_UNSIGNED_HALFWORD(object->field_40) =
+                0x260 + (Cards_FrameColor(index) - (Cards_FrameColor(index) == CARD_FRAME_ORANGE)) * 0x10;
+        }
     }
 #endif
     DisplayObject_SelectOrderingTable1(DISPLAY_OBJECT_VIEW(object));

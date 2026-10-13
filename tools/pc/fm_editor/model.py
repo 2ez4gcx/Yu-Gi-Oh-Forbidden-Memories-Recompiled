@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 
 from .gamedata import (ATTACK_TRAP_FIRST, ATTACK_TRAP_THRESHOLDS, CARD_COUNT, DECK_SIZE, DUELIST_COUNT,
                        DUELIST_NAMES, EQUIP_BONUS, EQUIP_BONUS_MAX, MEGAMORPH, MEGAMORPH_BONUS, POOLS, TYPE_NAMES,
-                       Card, GameData)
+                       TYPE_LIMIT, Card, GameData)
 
 KEY_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 
@@ -200,6 +200,9 @@ class Project:
         self.pools = [{p: dict(retail.pools[d][p]) for p in POOLS} for d in range(len(retail.pools))]
         self.info = ModInfo()
         self.other = {}                 # top-level keys the editor keeps as written (data, text, audio...)
+        # The active card-type registry.  Retail names remain available to
+        # readers as aliases; type_names holds the spelling a manifest writes.
+        self.type_names = list(TYPE_NAMES) + [None] * (TYPE_LIMIT - len(TYPE_NAMES))
         self.kept = {"fusions": [], "equips": [], "rituals": []}   # rules naming cards it cannot place
         self.kept_pools = {}            # (duelist or "all", pool) -> {name: weight} it cannot place
         self.fixed = {}                 # key as written -> fixed_decks.FixedDeck ("fixed": true), in order

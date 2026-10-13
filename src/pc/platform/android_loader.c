@@ -17,14 +17,17 @@
  * not just flash and close. */
 #ifdef __ANDROID__
 #include "pc/compat/fs.h" /* setenv, as every unit that names a file or a variable */
+#include "pc/compat/mman.h" /* <sys/mman.h> and Memories_MapFixed */
 #include <android/dlext.h>
 #include <android/log.h>
 #include <dlfcn.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <errno.h>
 #include <string.h>
-#include <sys/mman.h>
+#include <sys/system_properties.h>
+#include <sys/utsname.h>
 #include <unistd.h>
 
 #ifndef MEMORIES_ANDROID_GAME_BASE
@@ -40,20 +43,46 @@ static void say(const char *text)
     __android_log_write(ANDROID_LOG_INFO, LOG_TAG, text);
 }
 
-/* What holds the part of [low, high) that the reservation could not have. */
-static void say_occupants(uintptr_t low, uintptr_t high)
+/* What holds the part of [low, high) that the reservation could not have:
+ * to the log, and the first few, as "start-end name", to `held` for the
+ * message the player sees (a screenshot of it is the report). */
+static void say_occupants(uintptr_t low, uintptr_t high, char *held, size_t size)
 {
     char text[512], line[600];
     unsigned long start, end;
+    size_t used = 0;
+    int name = 0, shown = 0;
     FILE *maps = fopen("/proc/self/maps", "r");
+    held[0] = '\0';
     if (!maps) return;
-    while (fgets(text, sizeof(text), maps))
-        if (sscanf(text, "%lx-%lx", &start, &end) == 2 && start < high && end > low) {
-            text[strcspn(text, "\n")] = 0;
-            snprintf(line, sizeof(line), "memories-pc: occupied by %s", text);
-            say(line);
+    while (fgets(text, sizeof(text), maps)) {
+        name = 0;
+        if (sscanf(text, "%lx-%lx %*s %*s %*s %*s %n", &start, &end, &name) < 2 || start >= high || end <= low)
+            continue;
+        text[strcspn(text, "\n")] = 0;
+        snprintf(line, sizeof(line), "memories-pc: occupied by %s", text);
+        say(line);
+        if (shown++ < 2 && used + 1 < size) {
+            int added = snprintf(held + used, size - used, "%lx-%lx %s\n", start, end,
+                                 name > 0 && text[name] ? text + name : "(no name)");
+            if (added > 0) used = used + (size_t)added < size ? used + (size_t)added : size - 1;
         }
+    }
     fclose(maps);
+}
+
+/* "Xiaomi Redmi Note 8 Pro, Android 10 (API 29), Linux 4.14.141" */
+static void device_line(char *out, size_t size)
+{
+    char maker[PROP_VALUE_MAX] = "", model[PROP_VALUE_MAX] = "", release[PROP_VALUE_MAX] = "", api[PROP_VALUE_MAX] = "";
+    struct utsname name;
+    __system_property_get("ro.product.manufacturer", maker);
+    __system_property_get("ro.product.model", model);
+    __system_property_get("ro.build.version.release", release);
+    __system_property_get("ro.build.version.sdk", api);
+    if (uname(&name)) snprintf(name.release, sizeof(name.release), "?");
+    name.release[strcspn(name.release, "-")] = '\0'; /* the version, without the build's suffix */
+    snprintf(out, size, "%s %s, Android %s (API %s), Linux %s", maker, model, release, api, name.release);
 }
 
 /* A failure the player sees: the log, then SDL's message box (libSDL3.so,
@@ -85,11 +114,12 @@ int SDL_main(int argc, char **argv)
     GameMain run;
     long bias = 0;
     if (game_path(path, sizeof(path))) snprintf(path, sizeof(path), "libgame.so");
-    /* MAP_FIXED_NOREPLACE: without it the address is a hint, which the
-     * kernel may pass over even when the range is free (it did in a phone's
-     * app process); kernels before 4.17 ignore the flag and take the hint. */
-    reserved = mmap(base, MEMORIES_ANDROID_GAME_SPAN, PROT_NONE,
-                    MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE | MAP_FIXED_NOREPLACE, -1, 0);
+    /* MAP_FIXED_NOREPLACE: without it the address is only a hint, which
+     * the kernel passes over when anything holds part of the range (the JIT
+     * caches did, at the first base, on a phone); kernels before 4.17 ignore
+     * the flag and take the hint, which Memories_MapFixed undoes. */
+    reserved = Memories_MapFixed(base, MEMORIES_ANDROID_GAME_SPAN, PROT_NONE,
+                                 MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE | MAP_FIXED_NOREPLACE, -1, 0);
     if (reserved == base) {
         android_dlextinfo extinfo;
         memset(&extinfo, 0, sizeof(extinfo));
@@ -108,16 +138,23 @@ int SDL_main(int argc, char **argv)
 #endif
         }
     } else {
-        snprintf(line, sizeof(line), "memories-pc: the game's address range at %p is taken (got %p)", base, reserved);
+        char held[400], device[300];
+        snprintf(line, sizeof(line), "memories-pc: the game's address range at %p is taken (%s)", base,
+                 strerror(errno));
         say(line);
-        if (reserved != MAP_FAILED) munmap(reserved, MEMORIES_ANDROID_GAME_SPAN);
-        say_occupants((uintptr_t)base, (uintptr_t)base + MEMORIES_ANDROID_GAME_SPAN);
+        say_occupants((uintptr_t)base, (uintptr_t)base + MEMORIES_ANDROID_GAME_SPAN, held, sizeof(held));
+        device_line(device, sizeof(device));
+        snprintf(line, sizeof(line), "memories-pc: %s", device);
+        say(line);
 #if UINTPTR_MAX > 0xffffffffu
         /* Refused before anything of the game is loaded: elsewhere its
-         * initialisers would run at an address it cannot work at. */
-        snprintf(line, sizeof(line), "The game could not start: it needs the addresses %p-%p, which this phone "
-                 "already uses for something else (the log lists what). Please report this, with the phone's "
-                 "model and Android version.", base, (void *)((uintptr_t)base + MEMORIES_ANDROID_GAME_SPAN));
+         * initialisers would run at an address it cannot work at. Short:
+         * the system's box does not scroll in landscape, and its button
+         * sits under the text. */
+        snprintf(line, sizeof(line), "The game could not start: this phone already uses memory it needs (%p-%p). "
+                 "Please send a screenshot of this to us on Discord or GitHub.\n\n%s\nHeld by %s", base,
+                 (void *)((uintptr_t)base + MEMORIES_ANDROID_GAME_SPAN), device,
+                 held[0] ? held : "nothing found there now");
         fail(line);
 #endif
     }

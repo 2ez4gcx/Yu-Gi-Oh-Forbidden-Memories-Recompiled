@@ -47,7 +47,7 @@ static FusionCard card(int id)
     if (!Cards_Valid(id)) return result;
     stats = (unsigned)gDuel_adwCardStats[id - 1];
     result.id = id;
-    result.type = (int)(stats >> CARD_STAT_TYPE_SHIFT & CARD_STAT_TYPE_MASK);
+    result.type = Cards_Type(id);
     result.attack = (int)(stats & CARD_STAT_VALUE_MASK) * CARD_STAT_SCALE;
     result.defense = (int)(stats >> CARD_STAT_DEFENSE_SHIFT & CARD_STAT_VALUE_MASK) * CARD_STAT_SCALE;
     result.terrain = Duel_GetTerrainBoost(result.type);

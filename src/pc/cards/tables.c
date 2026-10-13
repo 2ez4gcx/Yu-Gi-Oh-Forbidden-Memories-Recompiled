@@ -232,8 +232,12 @@ static int fixed_count, fixed_room;
 static long overflow_starchips;          /* per card the chest has no room for */
 static int chest_limit;                  /* copies the chest keeps; 0: the disc's 250 */
 #define TERRAINS 6                        /* DUEL_TERRAIN_COUNT: Forest to Yami, 1-6 */
-static short terrain_bonus[TERRAINS][CARD_TYPE_MAGIC];
-static unsigned char terrain_listed[TERRAINS][CARD_TYPE_MAGIC];
+/* Retail types use the card record's five-bit field; custom monster types
+ * use cards.c's logical type bank.  A mod may provide a bonus for any
+ * declared monster type. */
+#define TABLE_TYPE_LIMIT 256
+static short terrain_bonus[TERRAINS][TABLE_TYPE_LIMIT];
+static unsigned char terrain_listed[TERRAINS][TABLE_TYPE_LIMIT];
 static long trap_threshold[DUEL_ATTACK_TRAP_COUNT];   /* House of Adhesive Tape to Widespread Ruin */
 static unsigned char trap_listed[DUEL_ATTACK_TRAP_COUNT];
 static const char *trap_from[DUEL_ATTACK_TRAP_COUNT];      /* the mod that set it */
@@ -537,12 +541,12 @@ static void read_equip_bonus(const char *mod, int index, int equip, const JsonVa
         const char *name = Json_Name(member);
         int type = Cards_TypeNamed(name), attribute = Cards_AttributeNamed(name);
         snprintf(where, sizeof(where), "equips[%d].bonus_if \"%s\"", index, name);
-        if ((type < 0 || type >= CARD_TYPE_MAGIC) && attribute < 0) {
+        if ((type < 0 || !Cards_IsMonsterType(type)) && attribute < 0) {
             Mods_Note(mod, "%s: not a monster type or an attribute", where);
             continue;
         }
         if (!bonus_points(mod, where, member, &points)) continue;
-        if (type >= 0 && type < CARD_TYPE_MAGIC)
+        if (type >= 0 && Cards_IsMonsterType(type))
             add_bonus(equip, BONUS_TYPE, type, BONUS_ATTACK | BONUS_DEFENSE, points, points, order, (unsigned)j + 1);
         else
             add_bonus(equip, BONUS_ATTRIBUTE, attribute, BONUS_ATTACK | BONUS_DEFENSE, points, points, order,
@@ -704,7 +708,7 @@ static int ritual_requirement(const char *mod, const char *where, const JsonValu
     v = Json_Member(value, "type");
     if (v) {
         if (Json_TypeOf(v) != JSON_STRING || (type = Cards_TypeNamed(Json_String(v, ""))) < 0 ||
-            type >= CARD_TYPE_MAGIC) {
+            !Cards_IsMonsterType(type)) {
             Mods_Note(mod, "%s: ritual tribute \"type\" is a monster type", where);
             return 0;
         }
@@ -1526,7 +1530,7 @@ const unsigned short *Tables_Pool(int pool, const unsigned short *retail)
 static const char *const terrain_names[TERRAINS][2] = {
     {"Forest", NULL}, {"Wasteland", NULL}, {"Mountain", NULL}, {"Sogen", "Meadow"}, {"Umi", "Sea"}, {"Yami", "Dark"}};
 
-static int terrain_named(const char *text)
+int Tables_TerrainNamed(const char *text)
 {
     int terrain;
     if (strspn(text, "0123456789") == strlen(text) && *text) {
@@ -1563,7 +1567,7 @@ static void read_terrain_bonus(const char *mod, const JsonValue *table)
         int terrain;
         if (!strcmp(name, "replace")) continue;
         snprintf(where, sizeof(where), "terrain_bonus \"%s\"", name);
-        terrain = terrain_named(name);
+        terrain = Tables_TerrainNamed(name);
         if (terrain < 0) {
             Mods_Note(mod, "%s: the terrains are Forest, Wasteland, Mountain, Sogen, Umi and Yami", where);
             continue;
@@ -1576,7 +1580,7 @@ static void read_terrain_bonus(const char *mod, const JsonValue *table)
             const JsonValue *member = Json_At(entry, j);
             int type = Cards_TypeNamed(Json_Name(member));
             long points = Json_Number(member, 0);
-            if (type < 0 || type >= CARD_TYPE_MAGIC) {
+            if (type < 0 || !Cards_IsMonsterType(type)) {
                 Mods_Note(mod, "%s \"%s\": not a monster type", where, Json_Name(member));
                 continue;
             }
@@ -1595,7 +1599,7 @@ static void read_terrain_bonus(const char *mod, const JsonValue *table)
 
 int Tables_TerrainBonus(int terrain, int type, int *bonus)
 {
-    if (terrain < 1 || terrain > TERRAINS || type < 0 || type >= CARD_TYPE_MAGIC) return 0;
+    if (terrain < 1 || terrain > TERRAINS || type < 0 || type >= TABLE_TYPE_LIMIT || !Cards_IsMonsterType(type)) return 0;
     if (!terrain_listed[terrain - 1][type]) return 0;
     *bonus = terrain_bonus[terrain - 1][type];
     return 1;
@@ -1878,9 +1882,13 @@ static void read_life_points(const char *mod, const JsonValue *value)
  *     "spellbinding_circle": n, "shadow_spell": n,
  *     "rank_score": {"start": n, "exodia": n, "deck_out": n},
  *     "starchip_prize": {"S": n, "A": n, "B": n, "C": n, "D": n},
- *     "new_game_starchips": n
+ *     "new_game_starchips": n,
+ *     "card_drops": n
  *
- * Each key's latest mod wins. A section is the key, a "." and the member. */
+ * Each key's latest mod wins. A section is the key, a "." and the member.
+ * "card_drops" locks the cards a won duel deals over the player's Game >
+ * Card drops (drops.c); its retail 0 is "no mod says", and a later mod's
+ * other number is noted beside the earlier mod, which no longer decides. */
 
 static const struct {
     const char *key;
@@ -1901,9 +1909,11 @@ static const struct {
     {"starchip_prize.A", 4, 0, TABLES_VALUE_PRIZE_MAX, "a win gives"},
     {"starchip_prize.S", 5, 0, TABLES_VALUE_PRIZE_MAX, "a win gives"},
     {"new_game_starchips", 0, 0, TABLES_LIMIT_STARCHIPS_MAX, "the game shows (eight digits)"},
+    {"card_drops", 0, 1, TABLES_VALUE_CARD_DROPS_MAX, NULL},
 };
 static long value_set[TABLES_VALUE_COUNT];
 static unsigned char value_given[TABLES_VALUE_COUNT];
+static char card_drops_by[64];      /* the mod whose "card_drops" decides */
 
 static void read_values(const char *mod, const JsonValue *limits)
 {
@@ -1950,10 +1960,26 @@ static void read_values(const char *mod, const JsonValue *limits)
         }
         if (limit_number(mod, where, value, value_keys[i].low, value_keys[i].high,
                          value_keys[i].storage ? value_keys[i].storage : "", &n)) {
+            if (i == TABLES_VALUE_CARD_DROPS) {
+                /* Two mods that lock the drops differently: the one applied
+                 * later decides, and the earlier one says so in the Mods
+                 * window. */
+                if (value_given[i] && value_set[i] != n && strcmp(card_drops_by, mod))
+                    Mods_Note(card_drops_by, "limits: \"card_drops\" %ld is not used: %s, applied later, "
+                              "locks it at %ld", value_set[i], mod, n);
+                snprintf(card_drops_by, sizeof(card_drops_by), "%s", mod);
+            }
             value_set[i] = n;
             value_given[i] = 1;
         }
     }
+}
+
+int Tables_CardDropsLock(const char **mod)
+{
+    int locked = value_given[TABLES_VALUE_CARD_DROPS] ? (int)value_set[TABLES_VALUE_CARD_DROPS] : 0;
+    if (mod) *mod = locked ? card_drops_by : NULL;
+    return locked;
 }
 
 long Tables_Value(int which, long retail)
@@ -1993,14 +2019,15 @@ static void read_limits(const char *mod, const JsonValue *limits)
         static const char *const keys[] = {"stats", "attack", "defense", "life_points", "two_player", "starchips",
                                             "chest", "free_duel_record", "two_player_record", "deck_copies",
                                             "swords_turns", "crush_card", "spellbinding_circle", "shadow_spell",
-                                            "rank_score", "starchip_prize", "new_game_starchips"};
+                                            "rank_score", "starchip_prize", "new_game_starchips", "card_drops"};
         const char *name = Json_Name(Json_At(limits, i));
         size_t k;
         for (k = 0; k < sizeof(keys) / sizeof(keys[0]) && strcmp(name, keys[k]); k++) {}
         if (k == sizeof(keys) / sizeof(keys[0]))
             Mods_Note(mod, "limits: no limit \"%s\" (stats, attack, defense, life_points, two_player, starchips, chest, "
                       "free_duel_record, two_player_record, deck_copies, swords_turns, crush_card, "
-                      "spellbinding_circle, shadow_spell, rank_score, starchip_prize, new_game_starchips)", name);
+                      "spellbinding_circle, shadow_spell, rank_score, starchip_prize, new_game_starchips, card_drops)",
+                      name);
     }
 #define STAT_STORAGE "the game keeps (a 16-bit number; more would mean widening every card record)"
     if (limit_number(mod, "\"stats\"", Json_Member(limits, "stats"), 0, TABLES_LIMIT_STAT_MAX, STAT_STORAGE, &n))
@@ -2430,6 +2457,7 @@ void Tables_Clear(void)
     limit_life_max = limit_record = limit_two_player_record = duelist_life_count = 0;
     limit_starchips = -1;
     memset(value_given, 0, sizeof(value_given));
+    card_drops_by[0] = '\0';
     memset(terrain_bonus, 0, sizeof(terrain_bonus));
     memset(terrain_listed, 0, sizeof(terrain_listed));
     memset(trap_listed, 0, sizeof(trap_listed));

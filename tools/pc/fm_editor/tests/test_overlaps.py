@@ -237,6 +237,24 @@ class ConflictsTab(unittest.TestCase):
         self.assertIn("2 installed mods", summary)
         self.assertIn("beta is off in the game now", summary)
 
+    def test_two_card_drops_locks(self):
+        # "limits" "card_drops": two mods' locks meet, and the later one
+        # deals (tables.c read_values notes the earlier one in the game).
+        (self.folder / "gamma").mkdir()
+        (self.folder / "gamma" / "mod.json").write_text(
+            json.dumps({"id": "gamma", "name": "Gamma", "limits": {"card_drops": 7}}), encoding="utf-8")
+        project = Project(fixture().game())
+        project.info.id = "mine"
+        project.info.name = "Mine"
+        project.other["priority"] = 5
+        project.other["limits"] = {"card_drops": 5}
+        (self.folder / "settings.txt").write_text("mod.alpha=0\nmod.beta=0\nmod.gamma=1\n", encoding="utf-8")
+        issues, _ = validate.cross_mod(project, [self.folder], self.folder / "settings.txt")
+        drops = [i for i in issues if i.where.startswith("Value card_drops")]
+        self.assertEqual(len(drops), 1)
+        self.assertIn("Gamma", drops[0].message)
+        self.assertIn("Mine wins (later in load order)", drops[0].message)
+
     def test_renamed_mod_is_itself(self):
         # Opened from alpha/ and given another id: the folder it came from is
         # still this mod, not another installed one meeting it everywhere.

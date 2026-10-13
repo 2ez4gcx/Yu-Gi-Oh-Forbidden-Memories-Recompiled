@@ -104,7 +104,14 @@ void Duelists_SetAvailable(int duelist, int shown);
  *     "card":   a card the trunk or deck must hold -- an id, a name, or an
  *               identity
  *     "copies": how many of "card" (1 by default)
+ *     "tower":  true for the mod's tower won to its top, or a floor (1 up)
+ *               won on this save (pc/tower/tower.h)
  *   }
+ *
+ * "tower_only": true on an added duelist keeps it off the grid until the
+ * tower lets it out -- a won floor names it as its opponent or in its
+ * reward's "unlock_duelist" -- whatever else its "unlock" says, which must
+ * hold too. The tower fights it all the same.
  *
  * Nothing is stored: a condition is read from the save's own records, trunk
  * and flags every time the screen opens, so it follows the save that is

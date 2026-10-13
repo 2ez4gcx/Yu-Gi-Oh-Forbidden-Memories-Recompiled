@@ -163,6 +163,17 @@ int Mods_Active(int mod) { (void)mod; return 0; }
 const char *Mods_Id(int mod) { (void)mod; return ""; }
 const char *Mods_Directory(int mod) { (void)mod; return "."; }
 const struct JsonValue *Mods_Manifest(int mod) { (void)mod; return NULL; }
+/* No mod here declares "card_types": build_monster_types
+ * (cards.c) still calls this once, visiting nothing. */
+void Mods_VisitManifests(void (*visit)(const char *id, const char *directory,
+                                       const struct JsonValue *manifest, void *context), void *context)
+{
+    (void)visit;
+    (void)context;
+}
+/* The custom type icon bank (type_icons.c): this test never asks for a
+ * card's type icon, so a no-op stands in for it. */
+void TypeIcons_Clear(void) {}
 int Paths_Contained(const char *relative) { return relative[0] != '/' && !strstr(relative, ".."); }
 int Paths_MakeDirs(const char *path) { (void)path; return -1; }
 int Paths_User(char *out, size_t size, const char *relative) { (void)out; (void)size; (void)relative; return -1; }
@@ -171,6 +182,7 @@ const char *Paths_WriteError(char *out, size_t size, const char *path) { (void)s
 int Settings_Get(SettingId id) { (void)id; return 0; }
 void Starter_Build(void) {}
 void Packs_Build(void) {}
+void Tower_Build(void) {}
 const UiConfig *UiConfig_Load(void) { return NULL; }
 unsigned Packs_Signature(void) { return 0; }
 void Mods_SetPackSignature(unsigned signature) { (void)signature; }

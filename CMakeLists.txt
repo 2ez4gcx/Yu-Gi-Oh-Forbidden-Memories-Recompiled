@@ -642,6 +642,20 @@ if(BUILD_TESTING)
         target_compile_options(memories_title_config_test PRIVATE -Wall -Wextra -Wpedantic -Werror)
     endif()
     add_test(NAME pc_title_config COMMAND memories_title_config_test)
+    # A duelist's bust (src/pc/free_duel/busts.c): "bust" as read, and the
+    # records it is made into read back as the game reads a character's
+    # parts bank, on the test's own pictures.
+    add_executable(memories_busts_test tests/pc/busts_test.c src/pc/mods/json.c)
+    target_include_directories(memories_busts_test PRIVATE src)
+    target_compile_definitions(memories_busts_test PRIVATE MEMORIES_PC)
+    if(NOT MSVC)
+        target_compile_options(memories_busts_test PRIVATE -Wall -Wextra -Wpedantic -Werror)
+    endif()
+    if(MEMORIES_SANITIZERS)
+        target_compile_options(memories_busts_test PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
+        target_link_options(memories_busts_test PRIVATE -fsanitize=address,undefined)
+    endif()
+    add_test(NAME pc_busts COMMAND memories_busts_test)
     # The mods' "tower" key and a save's progress in it
     # (src/pc/tower/tower_config.c): manifests and numbers only.
     add_executable(memories_tower_test tests/pc/tower_test.c src/pc/mods/json.c)

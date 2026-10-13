@@ -11,6 +11,7 @@
  * duelist with its own deck is a "duelists" entry and a "decks" entry for it.
  */
 #include "duelists.h"
+#include "busts.h"
 #include "pc/tower/tower.h"
 #include "game/card_constants.h"
 #include "pc/cards/cards.h"
@@ -50,6 +51,8 @@ typedef struct {
     signed char sight;             /* 1 reads face-down cards, 0 does not, -1 the base's */
     unsigned char has_ai;          /* else its base's row */
     unsigned char *portrait;       /* PORTRAIT_RECORD bytes, or NULL for its base's */
+    int bust;                      /* its "bust" (busts.h), -1 none */
+    unsigned char replace_bust;    /* "replace_bust": the campaign shows its bust too */
     char *art;                     /* the PNG it was made from, for the scaled picture */
     /* "ranks": how a duel against it is scored, five threshold/change pairs
      * per rule over what its block holds. Given to the tables once the
@@ -212,6 +215,18 @@ const unsigned char *Duelists_Portrait(int duelist)
 {
     const Duelist *one = entry_at(duelist);
     return one ? one->portrait : NULL;
+}
+
+int Duelists_Bust(int duelist)
+{
+    const Duelist *one = entry_at(duelist);
+    return one ? one->bust : -1;
+}
+
+int Duelists_ReplacesBust(int duelist)
+{
+    const Duelist *one = entry_at(duelist);
+    return one && duelist < DUELISTS_RETAIL_COUNT && one->replace_bust && one->bust >= 0;
 }
 
 /* The text id the disc names a duelist by: FreeDuel_PlaceCursor and the duel's
@@ -752,6 +767,7 @@ static void read_one_duelist(const char *mod, const char *mod_directory, const J
     one.sight = -1;                /* the base's, until "ai" says otherwise */
     one.replace = target;
     one.slot = -1;
+    one.bust = -1;
     one.mod = mod;
     one.index = index;
     one.used = 1;
@@ -947,6 +963,24 @@ static void read_one_duelist(const char *mod, const char *mod_directory, const J
                 one.art = malloc(strlen(path) + 1);
                 if (one.art) strcpy(one.art, path);
             }
+        }
+    }
+    {   /* Its own large character (busts.h), over its base's campaign one;
+         * "replace_bust" puts it in the campaign too, for a disc duelist
+         * a "replace" entry takes over. */
+        const JsonValue *bust = Json_Member(entry, "bust"), *over_bust = Json_Member(entry, "replace_bust");
+        char where[64];
+        snprintf(where, sizeof where, "duelists[%d]", index);
+        if (bust && Json_TypeOf(bust) != JSON_NULL) one.bust = Busts_Read(mod, mod_directory, bust, where);
+        if (over_bust && Json_TypeOf(over_bust) != JSON_BOOL) {
+            Mods_Note(mod, "duelists[%d]: replace_bust is true or false, without quotes", index);
+        } else if (Json_Bool(over_bust, 0) && target < 0) {
+            Mods_Note(mod, "duelists[%d]: replace_bust is for a duelist of the disc's (a \"replace\" entry); "
+                      "an added duelist's bust is its own already", index);
+        } else if (Json_Bool(over_bust, 0) && one.bust < 0) {
+            Mods_Note(mod, "duelists[%d]: replace_bust without a \"bust\" of its own changes nothing", index);
+        } else if (Json_Bool(over_bust, 0)) {
+            one.replace_bust = 1;
         }
     }
     /* An entry without an id of its own is identified by its place, which
@@ -1261,6 +1295,7 @@ void Duelists_Clear(void)
     added_top = added_room = 0;
     for (i = 0; i < DUELISTS_RETAIL_COUNT; i++) release(&replaced[i]);
     memset(replaced, 0, sizeof replaced);
+    Busts_Clear();
 }
 
 void Duelists_Build(void)
@@ -1282,6 +1317,8 @@ void Duelists_Build(void)
      * no mod, so its duelists are identified by "user:". */
     if (Paths_UserDir()) read_duelist_folder("user", Paths_UserDir());
     place_pending();
+    /* Their busts made, now each has its id (busts.h). */
+    Busts_Make();
     /* A code mod resolves an identity to the id it has this run through the
        host's duelist_id, as it does a card's (modapi.h). */
     Mods_SetDuelistResolver(Duelists_Find);

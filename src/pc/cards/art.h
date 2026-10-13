@@ -49,6 +49,12 @@ int CardArt_TitleFromImage(const char *path, unsigned char *plate, char *why, si
  * clear and 1-255 its colors in `clut` (256 BGR555 entries). */
 int CardArt_IndexedImage(const char *path, int w, int h, unsigned char *indices, unsigned short *clut, char *why,
                          size_t why_size);
+/* Several such pictures at once, all `w` x `h` and sharing the one palette
+ * in `clut`: the colors of all of them are reduced together, so a texel the
+ * same color in two of them is the same entry in both (a duelist's bust,
+ * busts.c, draws a talking frame's changes over its base by that). */
+int CardArt_IndexedImages(const char *const *paths, int count, int w, int h, unsigned char *const *indices,
+                          unsigned short *clut, char *why, size_t why_size);
 /* The PNG's size; 0 when it is not one. */
 int CardArt_ImageSize(const char *path, int *width, int *height);
 /* PORTRAIT_RECORD bytes: a duelist's face for the Free Duel grid. */

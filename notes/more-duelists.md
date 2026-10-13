@@ -856,6 +856,206 @@ the disc.
 
 ---
 
+## `bust` — the large character
+
+The portrait is the small face on the Free Duel grid. The **bust** is the large
+character the campaign's dialogue stands on its stone-framed box, the one a
+[tower](tower-mode.md#story)'s stories bring in. A duelist's entry may give it
+one of its own, with **named expressions** that talk and blink as the disc's
+do (mod API 17, [Which game a mod needs](modding.md#which-game-a-mod-needs)):
+
+```json
+{
+    "id": "ghost",
+    "copy": "Simon Muran",
+    "name": "Ghost Simon",
+    "bust": {
+        "default": "calm",
+        "expressions": [
+            {
+                "name": "calm",
+                "image": "busts/ghost/calm.png",
+                "talk": ["busts/ghost/calm-talk1.png", "busts/ghost/calm-talk2.png"],
+                "blink": "busts/ghost/calm-blink.png"
+            },
+            { "name": "angry", "image": "busts/ghost/angry.png", "talk": "busts/ghost/angry-talk1.png" },
+            { "name": "sad", "image": "busts/ghost/sad.png" }
+        ]
+    }
+}
+```
+
+`"bust": "busts/ghost.png"` is the short form: one expression, named
+`default`, that neither speaks nor blinks.
+
+| Key | Meaning |
+| --- | --- |
+| `default` | the expression a story shows when it names none; required (without it, or naming none of them, the first is taken, noted) |
+| `expressions` | the list, at most 16, each with a `name` (up to 31 bytes; two may not share one, whatever their case) and an `image` |
+| `image` | the expression's picture: a PNG with clear parts, a path inside the mod |
+| `talk` | a PNG, or a list of up to 4: the frames the mouth moves through while the words are typed |
+| `blink` | a PNG: the eyes shut, shown for a moment at the game's random times |
+
+**The pictures.** Every picture of a bust is the default expression's size
+(another size is stretched to it, noted), and a picture larger than 256 x 256
+is shrunk to fit, keeping its shape. It stands on the box as the campaign's
+characters do: its middle over the side's place, its bottom just under the
+box's top, or, taller than the 178 rows above it, its top at the screen's and
+the rest under the box. It is drawn at the console's resolution. All the
+pictures of a bust share one palette of 255 colors.
+
+**Talking and blinking** are the game's own (`DisplayEffect_UpdateMenuRecord`):
+the speaker's mouth takes the shape its letters ask for, and a speaker's eyes
+close now and then. A talking frame and a blink frame are drawn **over** the
+expression's picture where they differ from it, as the disc's mouths and eyes
+are parts drawn over a body: so draw them as the same picture with the mouth
+open, or the eyes shut. A frame can change and add pixels, not clear them. An
+expression without `talk` keeps its mouth still; without `blink` it never
+blinks; a frame the same as its picture is no frame. Nothing missing is ever a
+blank or a crash: the picture alone is what is left.
+
+**The expressions' numbers.** The game's codes number a character's
+expressions 0 to 3. A bust's are, in order: the **default** first, then the
+others **in the list's order** (above: calm 0, angry 1, sad 2). A story may name
+an expression by its name or by that number.
+
+**How many change in place.** The game changes a character's face in place
+(`F6 id 4e`) among four expressions of one record: one sheet of 256 x 256 texels
+and 2 KB of parts. The first expression of a record is its picture whole; the
+others are that picture where they are the same and their own parts where they
+differ, cut in squares from 128 texels down to 8; a talking or blink frame is
+the squares where it differs from its expression. So a bust whose expressions
+share a body and change their faces keeps four to a record easily (the tests'
+128 x 192 figure: three expressions with two talking frames and a blink each fit
+one record). What does not fit, and a fifth expression on, goes in the bust's
+next record: changing to it brings it in as another character -- the old one
+slides out and the new one in. An expression too big to fit a record even alone
+is made without its blink, then with fewer talking frames (noted). The mods'
+busts have 127 records in all.
+
+### A disc duelist's bust
+
+A [replacement](#replacing-one-of-the-discs-duelists) entry may give one of the
+disc's duelists a bust:
+
+```json
+{ "replace": "Seto", "bust": { "default": "smug", "expressions": [ ... ] } }
+```
+
+That changes nothing in Free Duel (its name, face and play stay the disc's
+unless the entry says otherwise). By default it **adds** expressions: a story
+naming Seto, or Seto with a number, still shows the campaign's own character;
+only a story naming one of the bust's expressions by name shows the bust. The
+campaign is untouched.
+
+**`"replace_bust": true`** makes the bust the duelist's character **in the
+campaign too**. Off by default, because it changes the campaign:
+
+- the campaign character the duelist is (the table below) is drawn from the
+  bust in **every** scene that shows it -- every scene of the story, not only
+  that duelist's duels. A character several duelists share is the bust's for
+  all of them: replacing Seto's is Seto 2nd's and Seto 3rd's too (all three are
+  character 4), Teana's is Teana 2nd's, Jono's Jono 2nd's, Heishin's Heishin
+  2nd's;
+- the campaign's expression *n* (0-3) of that character is the bust's
+  expression *n* (the default, then the list's order); one the bust lacks, or
+  one past its first record, is its default;
+- talking and blinking are the bust's frames; the scenes themselves -- the
+  words, the box, the small portraits beside it, the backgrounds, the music,
+  what happens -- are the campaign's;
+- a tower's stories show the bust wherever they show that character, and
+  naming the duelist with no expression is the bust's default;
+- two duelists replacing the same character: the later in load order has it
+  (noted).
+
+Without `replace_bust` the campaign is the game's frame for frame (the
+end-to-end test compares the campaign's first scene with a master build's and
+with the same mod's without the bust). The villagers and the five shrine mages
+are no character in the campaign, so `replace_bust` changes nothing for them
+(noted). The campaign's other characters (the prince, 0x0C, and those that are
+nobody's duelist) are no duelist's to replace.
+
+### Which character a disc duelist is
+
+The large character the campaign brings in before each duelist's duel (the
+last `F6 01-40` of the text that starts it, `F8 0D <duelist>`; Jono's duels
+show none there, and he is 0x02 where he speaks; `tower_config.c`,
+`Tower_DuelistCharacter`). This is what a duelist shows on a tower's stage
+today, and what `replace_bust` replaces. An added duelist without a bust of
+its own is its base's.
+
+| # | duelist | character |
+| --- | --- | --- |
+| 1 | Simon Muran | 0x01 |
+| 2 | Teana | 0x03 |
+| 3 | Jono | 0x02 |
+| 4-6 | Villager 1-3 | none |
+| 7 | Seto | 0x04 |
+| 8 | Heishin | 0x07 |
+| 9 | Rex Raptor | 0x10 |
+| 10 | Weevil Underwood | 0x11 |
+| 11 | Mai Valentine | 0x12 |
+| 12 | Bandit Keith | 0x13 |
+| 13 | Shadi | 0x0F |
+| 14 | Yami Bakura | 0x14 |
+| 15 | Pegasus | 0x15 |
+| 16 | Isis | 0x2F |
+| 17 | Kaiba | 0x0E |
+| 18 | Mage Soldier | 0x18 |
+| 19 | Jono 2nd | 0x02 |
+| 20 | Teana 2nd | 0x03 |
+| 21, 23, 25, 27, 29 | Ocean, Forest, Mountain, Desert, Meadow Mage | none |
+| 22 | High Mage Secmeton | 0x1A |
+| 24 | High Mage Anubisius | 0x1C |
+| 26 | High Mage Atenza | 0x1E |
+| 28 | High Mage Martis | 0x20 |
+| 30 | High Mage Kepura | 0x22 |
+| 31 | Labyrinth Mage | 0x2E |
+| 32 | Seto 2nd | 0x04 |
+| 33 | Guardian Sebek | 0x23 |
+| 34 | Guardian Neku | 0x24 |
+| 35 | Heishin 2nd | 0x07 |
+| 36 | Seto 3rd | 0x04 |
+| 37 | DarkNite | 0x25 |
+| 38 | Nitemare | 0x26 |
+
+### On a tower's stage
+
+`{"duelist": "ghost", "expression": "angry"}` on a side of a story
+([Story](tower-mode.md#story)): the duelist's bust in that expression. A later
+line naming another expression of the same record changes the face in place.
+An added duelist with a bust is its bust wherever a story shows it, `"opponent"`
+included; a disc duelist only with `replace_bust`, or when a name of its bust's
+is asked for.
+
+### How a bust is made
+
+`src/pc/free_duel/busts.c`, once every mod is read (`Busts_Make`, from
+`Duelists_Build`): all of a bust's pictures through one palette
+(`CardArt_IndexedImages`), then into records of the disc's kind -- what
+`func_8003A560` keeps in a cache slot for a character it read from WA sector
+15182 + id x 50: a 384 x 256 sheet at 8 bits (the parts in its first 256
+columns, one texture page, as the disc's characters have them), two rows of 256
+colors (the second semi-transparent) and a 0x800-byte parts bank
+(`DisplayEffect_BuildResourceObjects`): per expression a body (variant 0
+held), eyes (variant 0 held with nothing over the body, variant 1 the blink's
+parts for eight frames, then a stop, which `DisplayEffect_UpdateMenuRecord`
+waits for to open them again) and a mouth (variants 0-7 for the glyph's kind:
+0 and 4-7 closed, 1 and 2 the first two talking frames held, 3 played through
+them and closed again). Each frame's parts have the disc's ten-bit offsets
+(flag 0x10). An expression without eyes or mouth has no such piece, as Simon
+Muran has no mouth on the disc. The four expression slots a record has are
+never empty: one it does not hold is its first's.
+
+A record is given to the game where a character's cache slot is filled
+(`Tower_FillCharacter`, `zz_tower_storage.c`, asked by `func_8003A560` before
+it reads the disc, `#ifdef MEMORIES_PC`): for a `replace_bust` character
+always, for a story's bust through the characters the disc keeps empty (0x27,
+0x28, 0x29, 0x0B, 0x05, the tower's pool). Without a replacing bust and a story
+on the screen it does nothing, and the disc is read as always.
+
+---
+
 ## The manifest instead of the folders
 
 A roster need not be in folders at all. Each of `duelists`, `decks` and `drops`
@@ -1225,6 +1425,10 @@ would reach nothing but byte 0.
 * A duelist is a copy of one of the disc's: its model of play, its script and
   where the disc is read are its base's.
 * The strategy distributions in the bytecode are not reachable from `"ai"`.
+* A bust: 16 expressions, 4 talking frames each, pictures of 256 x 256 at
+  most, 4 expressions changed in place a record, 127 records for all the
+  mods' busts; a talking or blink frame draws over its expression, it cannot
+  clear what is there.
 
 ## Checking it
 
@@ -1248,6 +1452,21 @@ without a screen: slots and their collisions, replacement precedence, the AI
 row's layering, face-down sight, every unlock condition, the rank rules, the
 folder reader, the mod API's resolver, which string id names a duelist, what a
 name in a manifest reaches, a record round-tripped through the sidecar by an
-identity with a space in it, and NEW GAME clearing the added records. It runs real manifests through the real
+identity with a space in it, NEW GAME clearing the added records, and which
+entry keeps a `bust` and a `replace_bust`. It runs real manifests through the real
 JSON reader, and is checked by mutation — better than twenty deliberate
 breaks, each of which fails it.
+
+`tests/pc/busts_test.c` (`ctest -R pc_busts`) reads `bust` right and wrong
+(every note it can raise) and reads the records it is made into back the way
+the game reads a character's parts bank: every expression's body drawn from
+the sheet is its picture texel for texel, its blink and talking frames drawn
+over it are those pictures, the variants the game may ask for are all there
+and stop where they must, an expression without frames has no eyes or mouth,
+a picture too big for a record with another goes on in the next, and a disc
+duelist's `replace_bust` takes over its character (the later of two having
+it). `tests/pc/tower/busts_e2e.py` plays it in the game: a mod's duelist with
+three expressions talking, blinking and changing face in place in a tower
+story, the old forms beside it, and the campaign's first scene with Simon
+Muran's bust kept (frames hashed against a master build and the same mod's
+without the bust) and replaced.

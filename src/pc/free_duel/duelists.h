@@ -157,6 +157,12 @@ void Duelists_Frame(void);
  * So a portrait is as sharp as the file is, and nothing more is asked of the
  * mod. */
 const unsigned char *Duelists_Portrait(int duelist);
+/* A duelist's own large character, its "bust" (busts.h): the bust's number,
+ * -1 for none (the campaign's character of its base, if any, then).
+ * "replace_bust": true on a "replace" entry makes it the campaign's too:
+ * Duelists_ReplacesBust, 1 for a disc duelist whose entry says so. */
+int Duelists_Bust(int duelist);
+int Duelists_ReplacesBust(int duelist);
 /* The nine AI parameters a duelist plays by: its own when a mod gave it any,
  * its base's otherwise. Never NULL for a valid id, so a caller can index it
  * straight. Byte 0 is how deep into its deck the AI may look for a card to

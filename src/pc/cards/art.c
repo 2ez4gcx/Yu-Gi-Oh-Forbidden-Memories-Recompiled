@@ -530,19 +530,16 @@ int CardArt_Crop(const char *path, int w, int h, int *x, int *y, int *cw, int *c
     return 1;
 }
 
-/* A PNG with see-through parts as 8-bit texels (title_images.c): stretched
- * to `w` x `h`, each texel the average of the pixels under it, a texel under
- * half covered clear (entry 0, the PS1's transparent 0x0000) and the rest
- * reduced to 255 colors by median cut from entry 1. */
-int CardArt_IndexedImage(const char *path, int w, int h, unsigned char *indices, unsigned short *clut, char *why,
-                         size_t why_size)
+/* A PNG stretched to `w` x `h`, each texel the average of the pixels under
+ * it: a texel under half covered is clear (0 in `indices`), the others 1,
+ * their colors appended to `opaque` from `*count` on. */
+static int sample_indexed(const char *path, int w, int h, unsigned char *indices, Rgb *opaque, int *count,
+                          char *why, size_t why_size)
 {
     png_image image;
     FILE *file;
     unsigned char *rgba;
-    Rgb *opaque;
-    unsigned char *opaque_indices;
-    int x, y, sw, sh, count = 0, k;
+    int x, y, sw, sh;
     memset(&image, 0, sizeof(image));
     image.version = PNG_IMAGE_VERSION;
     file = fopen(path, "rb");
@@ -564,15 +561,6 @@ int CardArt_IndexedImage(const char *path, int w, int h, unsigned char *indices,
     sw = (int)image.width;
     sh = (int)image.height;
     png_image_free(&image);
-    opaque = malloc((size_t)w * h * sizeof(*opaque));
-    opaque_indices = malloc((size_t)w * h);
-    if (!opaque || !opaque_indices) {
-        free(rgba);
-        free(opaque);
-        free(opaque_indices);
-        snprintf(why, why_size, "out of memory for %s", path);
-        return 0;
-    }
     for (y = 0; y < h; y++) {
         int top = (int)((long)sh * y / h), bottom = (int)((long)sh * (y + 1) / h);
         if (bottom <= top) bottom = top + 1;
@@ -590,19 +578,55 @@ int CardArt_IndexedImage(const char *path, int w, int h, unsigned char *indices,
                 indices[y * w + x] = 0;
                 continue;
             }
-            opaque[count].r = (unsigned char)(r / a);
-            opaque[count].g = (unsigned char)(g / a);
-            opaque[count].b = (unsigned char)(b / a);
+            opaque[*count].r = (unsigned char)(r / a);
+            opaque[*count].g = (unsigned char)(g / a);
+            opaque[*count].b = (unsigned char)(b / a);
             indices[y * w + x] = 1;   /* an opaque texel, numbered below */
-            count++;
+            (*count)++;
         }
     }
     free(rgba);
+    return 1;
+}
+
+/* A PNG with see-through parts as 8-bit texels (title_images.c): stretched
+ * to `w` x `h`, each texel the average of the pixels under it, a texel under
+ * half covered clear (entry 0, the PS1's transparent 0x0000) and the rest
+ * reduced to 255 colors by median cut from entry 1. */
+int CardArt_IndexedImage(const char *path, int w, int h, unsigned char *indices, unsigned short *clut, char *why,
+                         size_t why_size)
+{
+    return CardArt_IndexedImages(&path, 1, w, h, &indices, clut, why, why_size);
+}
+
+int CardArt_IndexedImages(const char *const *paths, int count, int w, int h, unsigned char *const *indices,
+                          unsigned short *clut, char *why, size_t why_size)
+{
+    Rgb *opaque;
+    unsigned char *opaque_indices;
+    int x, i, opaque_count = 0, k;
+    opaque = malloc((size_t)w * h * (size_t)count * sizeof(*opaque));
+    opaque_indices = malloc((size_t)w * h * (size_t)count);
+    if (!opaque || !opaque_indices) {
+        free(opaque);
+        free(opaque_indices);
+        snprintf(why, why_size, "out of memory for %s", count ? paths[0] : "a picture");
+        return 0;
+    }
+    for (i = 0; i < count; i++) {
+        if (!sample_indexed(paths[i], w, h, indices[i], opaque, &opaque_count, why, why_size)) {
+            free(opaque);
+            free(opaque_indices);
+            return 0;
+        }
+    }
     memset(clut, 0, 256 * sizeof(*clut));
-    if (count) quantize(opaque, count, 255, clut, opaque_indices);
+    if (opaque_count) quantize(opaque, opaque_count, 255, clut, opaque_indices);
     clut[0] = 0x0000;
-    for (k = 0, x = 0; x < w * h; x++) {
-        if (indices[x]) indices[x] = opaque_indices[k++];
+    for (k = 0, i = 0; i < count; i++) {
+        for (x = 0; x < w * h; x++) {
+            if (indices[i][x]) indices[i][x] = opaque_indices[k++];
+        }
     }
     free(opaque);
     free(opaque_indices);

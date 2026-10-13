@@ -183,7 +183,8 @@ def _check_card(project: Project, cid: int, out: list):
         elif card.type != 21 or project.trap_threshold_default(project.effect_of(cid)) is None:
             add("warning", "the saved attack threshold only applies to an attack-destruction trap effect")
     if "monster_effects" in extra:
-        for problem in monster_effects.problems(extra["monster_effects"], project.resolve):
+        for problem in monster_effects.problems(extra["monster_effects"], project.resolve,
+                                                project.type_names):
             add("error", problem)
         if extra["monster_effects"] and not card.is_monster():
             add("warning", "monster effects only work for a monster on the field; this card is not one")

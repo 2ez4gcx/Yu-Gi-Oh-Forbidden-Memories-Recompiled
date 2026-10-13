@@ -119,13 +119,15 @@ static int bank_sprite_count;
 static unsigned bank_sprite_owner;
 static int bank_cached = -1; /* the current primitive normally stays in one sprite */
 
-/* The next level: half of `from` (rounded up), each texel the average of
- * those it covers, colors weighted by their alpha so that transparent
- * texels' colors do not bleed into the edges. */
+/* The next level: half of `from` (rounded down, at least 1: OpenGL's mip
+ * chain is max(1, floor(size / 2^n)), and a texture of any other sizes is
+ * incomplete, so texelFetch on it returns transparent black), each texel the
+ * average of those it covers, colors weighted by their alpha so that
+ * transparent texels' colors do not bleed into the edges. */
 static int bank_halve(BankImage *image, int from)
 {
-    int width = image->width[from], height = image->height[from], half_w = (width + 1) / 2,
-        half_h = (height + 1) / 2, x, y;
+    int width = image->width[from], height = image->height[from], half_w = width > 1 ? width / 2 : 1,
+        half_h = height > 1 ? height / 2 : 1, x, y;
     const unsigned char *in = image->level[from];
     unsigned char *out = malloc((size_t)half_w * half_h * 4);
     if (!out) return 0;

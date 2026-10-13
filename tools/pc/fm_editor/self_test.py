@@ -74,7 +74,7 @@ def exercise(folder: Path) -> dict:
             pngio.write(art, pngio.Image(102, 96, bytes((50, 100, 200, 255)) * (102 * 96)))
             app.art.goto(1)
             app.art.use_file("art", str(art))
-            # The Tower tab: a tower of one floor, which needs mod API 13.
+            # The Tower tab: a tower of one floor, which needs mod API 14.
             app.notebook.select(app.tower)
             app.tower.has.set(True)
             app.tower.toggle()
@@ -99,7 +99,7 @@ def exercise(folder: Path) -> dict:
                 require(app.save(ask=True, export=True), "Export failed")
             saved = folder / "mods/editor-smoke"
             value = json.loads((saved / "mod.json").read_text(encoding="utf-8"))
-            require(value["min_api"] == 13, value)
+            require(value["min_api"] == 14, value)
             require(value["tower"] == {"name": "Smoke tower", "scene": "seal shrine",
                                        "intro": [{"text": "Welcome.", "characters": {"left": 1,
                                                                                      "right": "tower/picture.png"}}],

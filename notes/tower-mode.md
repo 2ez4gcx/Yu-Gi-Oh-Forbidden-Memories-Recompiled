@@ -13,7 +13,7 @@ the title's two menus, the cursor walked through them).
 {
     "id": "shadow-tower",
     "name": "The Shadow Tower",
-    "min_api": 13,
+    "min_api": 14,
     "duelists": [
         {"id": "ghost", "copy": "Simon Muran", "name": "Ghost Simon", "tower_only": true}
     ],
@@ -68,7 +68,7 @@ The FM Editor's **Tower** tab does all of this without writing JSON: **How to
 build a tower...** there walks through the same steps, and **Start from an
 example** fills in a small working tower to change. By hand:
 
-1. **A mod with a tower.** In a mod's `mod.json`, add `"min_api": 13` and a
+1. **A mod with a tower.** In a mod's `mod.json`, add `"min_api": 14` and a
    `"tower"` object with a `"name"` and a list of `"floors"`. One floor is
    enough: `{"duelist": "Simon Muran"}`. Turn the mod on in the game's Mods
    window: the title's second menu (CAMPAIGN to SAVE, after loading a game)
@@ -498,7 +498,7 @@ CLEARED!, `FE7C` YOU LOST. BACK TO FLOOR %d., `FE7D` SAVE YOUR PROGRESS?,
 
 ## Which game
 
-A tower needs mod API 13 (`"min_api": 13`, [Which game a mod
+A tower needs mod API 14 (`"min_api": 14`, [Which game a mod
 needs](modding.md#which-game-a-mod-needs)): `tower`, a duelist's `tower_only`
 or `unlock` `tower`, a menu item's action `tower`. An older game would play the
 mod without its tower.

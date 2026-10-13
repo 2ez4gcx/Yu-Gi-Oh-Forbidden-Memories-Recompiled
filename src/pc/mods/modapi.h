@@ -47,6 +47,8 @@
  *  10  the MONSTER event and manifest features listed in notes/modding.md
  *  11  manifest features only; no host layout or event change
  *  12  sound_add, sound_play, sound_free: a code mod's own sounds
+ *  14  the tower's manifest features (notes/tower-mode.md) only; no host
+ *      layout or event change
  * A data mod declares its required version with min_api in mod.json. */
 #include "mod_types.h"
 

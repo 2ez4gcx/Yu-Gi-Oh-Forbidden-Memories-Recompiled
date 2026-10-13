@@ -92,7 +92,7 @@ class FeatureTest(unittest.TestCase):
             with self.subTest(value=value):
                 self.assertEqual(self.needs(value), 11)
 
-    def test_api_13(self):
+    def test_api_14(self):
         """The tower (notes/tower-mode.md): a game of API 12 (v0.3.0) would
         leave each of these out."""
         for value in ({"tower": {"floors": [{"duelist": 1}]}},
@@ -100,9 +100,9 @@ class FeatureTest(unittest.TestCase):
                       {"duelists": [{"id": "g", "copy": 1, "unlock": {"tower": 2}}]},
                       {"menu": {"buttons": [{"id": "t", "label": "T", "menu": "second", "action": "tower"}]}}):
             with self.subTest(value=value):
-                self.assertEqual(self.needs(value), 13)
+                self.assertEqual(self.needs(value), 14)
         self.assertEqual(self.needs({"duelists": [{"id": "g", "copy": 1, "unlock": {"beat": 2}}]}), 0)
-        self.assertIn("newer than v0.3.0", compat.release_text(13))
+        self.assertIn("newer than v0.3.0", compat.release_text(14))
 
     def test_reasons_are_the_highest_apis(self):
         api, reasons = compat.required({"card_text_colors": {}, "ui": {}, "limits": {"swords_turns": 5}})

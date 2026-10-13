@@ -275,7 +275,7 @@ class TowerTest(unittest.TestCase):
         built = manifest.build(p)
         self.assertEqual(built["tower"], TOWER)
         self.assertEqual(built["duelists"][0]["tower_only"], True)
-        self.assertEqual(compat.required(built)[0], 13)
+        self.assertEqual(compat.required(built)[0], 14)
         self.assertEqual([i for i in validate.validate(p) if i.area == "Tower"], [])
         p.other["tower"] = {"floors": [{"duelist": "Nobody"}]}
         issues = [(i.level, i.where) for i in validate.validate(p) if i.area == "Tower"]
@@ -514,7 +514,7 @@ class TowerTabTest(unittest.TestCase):
         tab.vars["music"].set("0x2C0")
         self.assertTrue(tab.commit())
         self.assertEqual(p.other["tower"], {"name": "Mine", "music": 0x2C0, "floors": [{"duelist": 1}]})
-        self.assertEqual(compat.required(manifest.build(p))[0], 13)
+        self.assertEqual(compat.required(manifest.build(p))[0], 14)
 
     def test_stage_keeps_spelling(self):
         """A mod that wrote its stage its own way keeps it through the tab."""

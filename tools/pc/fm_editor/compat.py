@@ -19,7 +19,7 @@ from pathlib import Path
 from .gamedata import FRAME_COLOR_NAMES, TYPE_MAGIC
 from .model import type_named
 
-HOST_API = 13
+HOST_API = 14
 
 # The release each mod API first shipped in, for the hints. An API past the
 # last listed is newer than every release.
@@ -198,17 +198,17 @@ def features(manifest: dict, project=None) -> list:
         newer = sorted(key for key in limits if key not in OLD_LIMITS)
         if newer:
             add(11, "the values " + ", ".join(newer))
-    # --- API 13 -------------------------------------------------------------
+    # --- API 14 -------------------------------------------------------------
     if "tower" in manifest:
-        add(13, "a tower (\"tower\")")
+        add(14, "a tower (\"tower\")")
     for entry in _entries(manifest.get("duelists")):
         if "tower_only" in entry:
-            add(13, "a duelist of the tower's alone (\"tower_only\")")
+            add(14, "a duelist of the tower's alone (\"tower_only\")")
         if isinstance(entry.get("unlock"), dict) and "tower" in entry["unlock"]:
-            add(13, "a duelist's \"unlock\" \"tower\"")
+            add(14, "a duelist's \"unlock\" \"tower\"")
     for part in (title, menu):
         if _has_action(part, "tower"):
-            add(13, "a menu item's action \"tower\"")
+            add(14, "a menu item's action \"tower\"")
     return out
 
 

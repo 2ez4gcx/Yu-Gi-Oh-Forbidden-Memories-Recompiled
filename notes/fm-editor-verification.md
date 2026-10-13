@@ -165,7 +165,7 @@ new live scenario for every variant in this run.
 The editor has a fifteenth tab, **Tower** (`tower_tab.py`, `tower.py`): a
 mod's `"tower"` (notes/tower-mode.md) and its duelists' `"tower_only"`. The
 packaged `self-test` now selects all 15 tabs, builds a tower of one floor on
-the Tower tab and checks that the export carries it with `"min_api": 13`.
+the Tower tab and checks that the export carries it with `"min_api": 14`.
 `tests/test_tower.py` covers the tab (showing a tower, committing it untouched
 as written, editing a floor, adding, moving and removing floors, the
 tower-only list, the unlock conditions, turning the tower off, floors and

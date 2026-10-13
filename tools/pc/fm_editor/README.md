@@ -1101,7 +1101,7 @@ the options below says what each does.
   lines before the duel and after a win.
 
 The line above the form lists what the game would leave out or read
-otherwise (the same as Conflicts' **Tower** area). A tower needs mod API 13,
+otherwise (the same as Conflicts' **Tower** area). A tower needs mod API 14,
 which Mod info then shows and the save writes as `min_api`. What the form
 cannot show (a key of a later game) is kept as written.
 

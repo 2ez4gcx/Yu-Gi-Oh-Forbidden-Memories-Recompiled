@@ -115,7 +115,7 @@ checked as well, when it starts.
 | 9 or less | v0.2.0 | everything not listed below; added cards, duelists, starter pools, packs, the title's menus |
 | 10 | v0.2.1-preview.1 | `card_text_colors`; a card's `monster_effects` or `trap_threshold`; an equip's `bonus_attack`/`bonus_defense`; a pack's `image_style`; an added card (`copy`) of another kind than its base (a monster made a magic card, a magic card a monster or a trap), or whose `model` or `effect` is a card's name; the `MEMORIES_EVENT_MONSTER` event |
 | 11 | v0.3.0 | `assets`, `ui`, `card_layout`, `palette_ramps`; a card's `tags`, or a `frame` of `Gold`, `Green`, `Pink` or `Blue`; a monster effect's `for_each`; `{"remove": "all"}` in `fusions`; a ritual of other than three tributes, or with `tributes_from` `hand` or `both`; the title's `images`, a `scale` in `title` or `menu`; the `limits` `deck_copies`, `swords_turns`, `crush_card`, `spellbinding_circle`, `shadow_spell`, `rank_score`, `starchip_prize` and `new_game_starchips` |
-| 13 | the release after v0.3.0 | `tower`; a duelist's `tower_only`, or `unlock` `tower`; a menu item's action `tower` ([Tower mode](tower-mode.md)) |
+| 14 | the release after v0.3.0 | `tower`; a duelist's `tower_only`, or `unlock` `tower`; a menu item's action `tower` ([Tower mode](tower-mode.md)) |
 
 The FM Editor writes `min_api` on save as the lowest one of these that has
 everything the mod uses, never lowering one written higher, and its Mod
@@ -128,7 +128,7 @@ feature an older game would leave out raises `MEMORIES_MOD_API`
 (`src/pc/mods/mod_types.h`), lists the feature here and in `compat.py`,
 and keeps every lower `min_api` loading.
 API 12 (v0.3.0 too) added no mod.json feature, only a code mod's sounds.
-When tagging the first API 13 release, replace the unreleased description in
+When tagging the first release past v0.3.0, replace the unreleased descriptions in
 the table and add that tag to `compat.RELEASES`; do not assign an unchosen
 release number in advance.
 
@@ -1448,7 +1448,7 @@ won floor, and any duelist's `unlock` may ask for a floor won (`"tower"`).
 }
 ```
 
-A mod with a tower asks for `"min_api": 13`. [Tower mode](tower-mode.md) has
+A mod with a tower asks for `"min_api": 14`. [Tower mode](tower-mode.md) has
 every key, the scenes and characters a story may use, what the player sees,
 where the progress is kept and how the screen is drawn.
 
@@ -1745,7 +1745,7 @@ the player's settings file as `mod.<id>.<key>`, and read from
 `MEMORIES_MOD_<ID>_<KEY>` first when that is set; a key is letters, digits,
 `_` and `-`, and `order` is the manager's), `disc_file_start`/
 `disc_read`, `pad`, and from mod API 2 `now_us` (a clock) and `map_fixed`
-(memory at an address the mod chooses, as 3D Monsters' model arenas need). API 4 adds `hook`/`unhook`/`symbol`, below; API 5 adds `duelist_id`, which resolves an added duelist's identity to the id it has this run as `card_id` does for a card. API 7 adds `card_notes` and `card_tag`, a card's [notes](more-cards.md#notes-on-a-card) and the `<tag: value>` tags in them. API 8 adds `limit`, the numbers the game caps and its other values as the mods' `limits` set them ([Gameplay tables](gameplay-tables.md#values-atk-def-lp-starchips-and-more)): `host->limit(host, "attack")` is 9999 without such a mod, `host->limit(host, "deck_copies")` 3. API 9 adds `menu_item`, the name of an item of the title's menus, and the event `MEMORIES_EVENT_MENU` ([The title's menus](#the-titles-menus)). API 10 adds the event `MEMORIES_EVENT_MONSTER`: a monster summoned, flipped, at its owner's draw, in a battle, destroyed or destroying the monster it battled, for every monster, with `handled` to skip a card's own `monster_effects` ([Monster effects](more-cards.md#monster-effects)). API 11 adds no entry or event; it marks the mod.json features a game of API 10 leaves out ([Which game a mod needs](#which-game-a-mod-needs)). API 12 adds `sound_add`, `sound_play` and `sound_free`, sounds of the mod's own: `sound_add` copies signed 16-bit PCM at any rate and channel count and returns a handle, and `sound_play(host, sound, volume, pan)` plays it once on the channels the audio replacement mixes the game's replaced sound effects on ([Audio](#audio-songs-voices-and-sounds-from-files)), under the player's sound-effect volume, restarting it if it is still playing, as a game sound effect takes its own voice again. Both work only while the mod is applied, not from `MemoriesModInit`: the host frees a mod's sounds when it is turned off, so a mod adds them when it needs them, or in `applied(1)`. 3D Monsters plays its fighters' arena sounds this way (`fight_sounds.c`). API 13 adds no entry or event either; it marks the [tower](tower-mode.md)'s mod.json features.
+(memory at an address the mod chooses, as 3D Monsters' model arenas need). API 4 adds `hook`/`unhook`/`symbol`, below; API 5 adds `duelist_id`, which resolves an added duelist's identity to the id it has this run as `card_id` does for a card. API 7 adds `card_notes` and `card_tag`, a card's [notes](more-cards.md#notes-on-a-card) and the `<tag: value>` tags in them. API 8 adds `limit`, the numbers the game caps and its other values as the mods' `limits` set them ([Gameplay tables](gameplay-tables.md#values-atk-def-lp-starchips-and-more)): `host->limit(host, "attack")` is 9999 without such a mod, `host->limit(host, "deck_copies")` 3. API 9 adds `menu_item`, the name of an item of the title's menus, and the event `MEMORIES_EVENT_MENU` ([The title's menus](#the-titles-menus)). API 10 adds the event `MEMORIES_EVENT_MONSTER`: a monster summoned, flipped, at its owner's draw, in a battle, destroyed or destroying the monster it battled, for every monster, with `handled` to skip a card's own `monster_effects` ([Monster effects](more-cards.md#monster-effects)). API 11 adds no entry or event; it marks the mod.json features a game of API 10 leaves out ([Which game a mod needs](#which-game-a-mod-needs)). API 12 adds `sound_add`, `sound_play` and `sound_free`, sounds of the mod's own: `sound_add` copies signed 16-bit PCM at any rate and channel count and returns a handle, and `sound_play(host, sound, volume, pan)` plays it once on the channels the audio replacement mixes the game's replaced sound effects on ([Audio](#audio-songs-voices-and-sounds-from-files)), under the player's sound-effect volume, restarting it if it is still playing, as a game sound effect takes its own voice again. Both work only while the mod is applied, not from `MemoriesModInit`: the host frees a mod's sounds when it is turned off, so a mod adds them when it needs them, or in `applied(1)`. 3D Monsters plays its fighters' arena sounds this way (`fight_sounds.c`). API 14 adds no entry or event either; it marks the [tower](tower-mode.md)'s mod.json features.
 A mod that uses an entry newer than API 1 should refuse to start when
 `host->api` is older.
 

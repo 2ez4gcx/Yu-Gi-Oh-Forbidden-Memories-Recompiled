@@ -1,7 +1,7 @@
 {
     "id": "tower-test",
     "name": "Tower test",
-    "min_api": 13,
+    "min_api": 14,
     "version": "1.0",
     "author": "tests",
     "description": "The tests' tower (notes/tower-mode.md): three floors, a short story, a duelist of the tower's own.",

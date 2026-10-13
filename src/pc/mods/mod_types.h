@@ -1,6 +1,6 @@
 #ifndef MEMORIES_MOD_TYPES_H
 #define MEMORIES_MOD_TYPES_H
-#define MEMORIES_MOD_API 12
+#define MEMORIES_MOD_API 13
 /* API 11 adds no host entry or event: it marks the mod.json features a game
  * of API 10 would leave out (notes/modding.md, "Which game a mod needs"), so
  * a mod that uses them says "min_api": 11 and an older game refuses it. */

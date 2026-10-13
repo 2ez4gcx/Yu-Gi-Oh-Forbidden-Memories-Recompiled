@@ -313,6 +313,47 @@ void Win32_ServiceInterrupt(void)
     in_tick = 0;
 }
 
+/* Sleeps for the waits of platform_common.c. winpthreads' nanosleep counts
+ * whole milliseconds: the frame wait's 0.5 ms nap came out as 0 ms and
+ * returned at once, without even yielding, so the main thread polled the
+ * clock flat out (a whole core, 32- and 64-bit alike), and 1-5 ms is Sleep
+ * at the 15.6 ms system tick, 10-15 ms late. A high-resolution waitable
+ * timer (Windows 10 1803 and later) wakes 0.3-0.6 ms after the time asked,
+ * about 1 ms at worst (Windows 11, measured at normal priority); without
+ * one, the process asks for the 1 ms timer period and Sleeps whole
+ * milliseconds: Sleep(1) took 1.0-2.7 ms. Each thread gets its own timer. */
+static _Thread_local HANDLE sleep_timer;
+static _Thread_local int sleep_ready;
+
+static void ready_sleep(void)
+{
+    static volatile LONG period_asked;
+    if (sleep_ready) return;
+    sleep_ready = 1;
+    sleep_timer = CreateWaitableTimerExW(NULL, NULL, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS);
+    if (!sleep_timer && InterlockedExchange(&period_asked, 1) == 0) timeBeginPeriod(1);
+}
+
+void Win32_Sleep(unsigned microseconds)
+{
+    ready_sleep();
+    if (sleep_timer) {
+        LARGE_INTEGER due;
+        due.QuadPart = -(LONGLONG)microseconds * 10; /* relative, in 100 ns units */
+        if (SetWaitableTimer(sleep_timer, &due, 0, NULL, NULL, FALSE)) {
+            WaitForSingleObject(sleep_timer, INFINITE);
+            return;
+        }
+    }
+    Sleep((microseconds + 999) / 1000);
+}
+
+unsigned Win32_SleepMargin(void)
+{
+    ready_sleep();
+    return sleep_timer ? 1000 : 3000;
+}
+
 int Win32_StartInterrupt(void (*tick)(uintptr_t eip, void *context))
 {
     HANDLE thread;

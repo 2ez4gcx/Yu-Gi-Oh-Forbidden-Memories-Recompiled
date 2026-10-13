@@ -170,6 +170,10 @@ void Platform_ServiceClock(void);
 /* At most `count` more VBlanks from the clock (-1: no limit); VSync(0) holds
  * the clock to one while it waits, as on the console. */
 void Platform_LimitVBlanks(int count);
+/* The tick handler's next timed work (the sequencer's next tick), in the
+ * real microseconds it is given; 0 for none. The cooperative clock's wait
+ * on Windows sleeps between services and wakes in time for it. */
+void Platform_SetTickDue(uint64_t real_us);
 unsigned Platform_VBlankCount(void);
 void Platform_SetClockRate(int percent);
 int Platform_ClockRate(void);

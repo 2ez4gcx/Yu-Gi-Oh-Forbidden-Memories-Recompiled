@@ -980,7 +980,9 @@ position in the stat band keeps it clear of `art`'s own rect.
 layout is on: `{"image": "digits.png", "width": 10, "height": 12, "step": 10}`.
 The image is a strip of 5 x 4 cells of 40 x 48 texels: digit d in column
 `d % 5` and row `d / 5`, and the same ten greyed two rows further down
-(200 x 192; `tools/pc/card_digits.py` draws one from a font). The greyed ones
+(200 x 192 texels; the PNG can be any size, read in proportion, and
+should have power-of-two sides such as 256 x 256 so OpenGL draws it at Internal 2x
+and up; `tools/pc/card_digits.py` draws one from a font). The greyed ones
 are the stat the attack screen dims, which keeps the card's own box and the
 mod's font. `width`/`height` are one digit's size on the card, `step` the
 distance between two digits' left edges (default `width`). Each number is

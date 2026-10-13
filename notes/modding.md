@@ -68,7 +68,7 @@ editors write, is fine):
 | `equip_bonus_default` | what an equip adds when no `equips` entry sets its bonus, below |
 | `trap_thresholds` | the attack each of the six attack traps stops, below |
 | `passwords` | each card's password and starchip price on the Password screen, below |
-| `limits` | the numbers the game caps (ATK and DEF, life points, starchips, the chest, the records), below |
+| `limits` | the numbers the game caps (ATK and DEF, life points, starchips, the chest, the records) and the cards a won duel deals (`card_drops`), below |
 | `guardian_stars` | the stars' names and icons, stars 11 to 15, and what each star gets against each other, below |
 | `card_text_colors` | the color a card's name, description and guardian star are written in on its details, below |
 | `palette_ramps` | the game's eight text color ramps, and ramps of the mod's own for its code to draw with, below |
@@ -115,6 +115,7 @@ checked as well, when it starts.
 | 9 or less | v0.2.0 | everything not listed below; added cards, duelists, starter pools, packs, the title's menus |
 | 10 | v0.2.1-preview.1 | `card_text_colors`; a card's `monster_effects` or `trap_threshold`; an equip's `bonus_attack`/`bonus_defense`; a pack's `image_style`; an added card (`copy`) of another kind than its base (a monster made a magic card, a magic card a monster or a trap), or whose `model` or `effect` is a card's name; the `MEMORIES_EVENT_MONSTER` event |
 | 11 | v0.3.0 | `assets`, `ui`, `card_layout`, `palette_ramps`; a card's `tags`, or a `frame` of `Gold`, `Green`, `Pink` or `Blue`; a monster effect's `for_each`; `{"remove": "all"}` in `fusions`; a ritual of other than three tributes, or with `tributes_from` `hand` or `both`; the title's `images`, a `scale` in `title` or `menu`; the `limits` `deck_copies`, `swords_turns`, `crush_card`, `spellbinding_circle`, `shadow_spell`, `rank_score`, `starchip_prize` and `new_game_starchips` |
+| 13 | the release after v0.3.0 | the `limits` `card_drops`, a lock on the cards a won duel deals ([card drops](card-drops.md#a-mod-that-sets-it)) |
 | 14 | the release after v0.3.0 | `tower`; a duelist's `tower_only`, or `unlock` `tower`; a menu item's action `tower` ([Tower mode](tower-mode.md)) |
 
 The FM Editor writes `min_api` on save as the lowest one of these that has
@@ -1276,7 +1277,9 @@ the attack each attack trap springs on.
 sets what the Password screen takes for a card and what it costs;
 `"all": {"password": "card number", "starchips_percent": 10}` does every card.
 `"limits": {"stats": 30000, "life_points": 16000}` raises the ATK and DEF cap
-and the life points a duel starts with; `limits` also sets how far healing
+and the life points a duel starts with, and `"limits": {"card_drops": 5}`
+makes every won duel deal 5 cards whatever the player set in Game > Card
+drops ([card drops](card-drops.md#a-mod-that-sets-it)); `limits` also sets how far healing
 goes, each side's and each duelist's LP, the two-player LP choice, the most
 starchips, the chest and the Free Duel record, up to what the game keeps
 them in (32767 for ATK, DEF and LP), and the duel's numbers take a fifth

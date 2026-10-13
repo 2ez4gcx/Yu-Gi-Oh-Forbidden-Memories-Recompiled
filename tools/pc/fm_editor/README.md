@@ -933,13 +933,18 @@ off), **Deck and Trunk** (copies of a card in a deck, copies the Trunk
 keeps), **Rank** (the score a duel starts at, what an Exodia win and a win
 by the opponent's empty deck add), **Rewards** (the starchips a win gives at
 S to D, 0 to 1000 each: past 8 the results screen shows one starchip with
-"xN" beside it; a new game's starchips, the most the save holds) and **Records and
+"xN" beside it; a new game's starchips, the most the save holds; **Cards a
+win deals**, 1 to 99, which locks the player's Game > Card drops at that
+number while the mod is applied, its grey value `player` the player's own
+choice, [card drops](../../../notes/card-drops.md#a-mod-that-sets-it), mod
+API 13) and **Records and
 2P** (the two-player LP choice and the records), and **Starting LP by
 duelist**: a table of duelists with the LP each side starts with against
 them (the disc's, or one the mod adds, by its name; choose a duelist, type **You** and **Duelist**, **Set**; **Remove**).
 Each row shows the game's own value in grey (an empty field is it), turns
 blue when the mod changes it, has ↺ to put the game's back, and a line that
-says what it does with the range the game keeps; a value past that range
+says what it does with the range the game keeps (resting the pointer on
+Cards a win deals shows what the lock does); a value past that range
 turns its name red, with the reason under the groups, and the game holds it
 at the most it keeps or shows. **Reset all to the game's** empties every
 field.
@@ -1495,7 +1500,7 @@ mod's own code and tables (the addresses of its code move from mod to mod):
 | `Duel_CheckEquip` steps 94 bytes and tests a bit per monster (A6) | every equip card's monsters from the bitmaps, with the records per monster some add and the monsters no equip takes. Records of monsters or magic used as equips are reported: the port's equips take equip cards only |
 | a ritual table that is mostly not recipes (A13) | rituals removed |
 | `Duel_ShuffleDeck` deals counts of copies up to 40 (A4) | `decks` with `"fixed": true`: what that shuffle deals from each pool |
-| the prize draw jumps to a loop that calls `addiu -bias; sra shift` (A1, A2) | the drop pools decoded; the number of prizes goes to the report and the mod's `README.txt` (set Game > Card drops to it; `mod.json` has no key) |
+| the prize draw jumps to a loop that calls `addiu -bias; sra shift` (A1, A2) | the drop pools decoded; the number of prizes is written as `"limits": {"card_drops": n}` (1 to 99), which locks Game > Card drops at it while the mod is applied, and goes to the report and the mod's `README.txt` |
 | `Duel_AwardCard` caps the chest and pays starchips (A3) | `chest_overflow` |
 | the terrain table, or `Duel_GetTerrainBoost` reading a table of its own (A9) | `terrain_bonus` with `"replace"` |
 | `Duel_SelectAttackTrap` rewritten, thresholds as u16 (A8) | `trap_thresholds` |

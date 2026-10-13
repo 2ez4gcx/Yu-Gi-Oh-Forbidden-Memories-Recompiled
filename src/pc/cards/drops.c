@@ -23,6 +23,19 @@
 #include <stdlib.h>
 #include <string.h>
 
+#if CARD_DROPS_MAX != TABLES_VALUE_CARD_DROPS_MAX
+#error "a mod's \"card_drops\" (tables.c) and Game > Card drops must have one range"
+#endif
+
+int CardDrops_Count(void)
+{
+    int wanted = Tables_CardDropsLock(NULL);
+    if (!wanted) wanted = Settings_Get(SET_CARD_DROPS);
+    if (wanted < 1) wanted = 1;
+    if (wanted > CARD_DROPS_MAX) wanted = CARD_DROPS_MAX;
+    return wanted;
+}
+
 void CardDrops_Begin(void)
 {
     memset(&gCardDrops, 0, sizeof(gCardDrops));
@@ -46,11 +59,11 @@ static int owned(int id)
  * card a roll gives (notes/card-drops.md, "Mods"). */
 int CardDrops_Roll(int pool)
 {
-    /* In a tower's duel, the tower's "drops" (tower.h) over the setting. */
-    int wanted = Tower_CardDrops(Settings_Get(SET_CARD_DROPS)), i;
+    /* In a tower's duel, the tower's "drops" (tower.h) over the count a
+     * mod locks or the player set (CardDrops_Count). */
+    int wanted = Tower_CardDrops(CardDrops_Count()), i;
     CardDrops_Begin();
     if (wanted <= 1) return Duel_SelectCardDrop(pool);
-    if (wanted > CARD_DROPS_MAX) wanted = CARD_DROPS_MAX;
     Memories_Rand();
     for (i = 1; i < wanted; i++) {
         int burn, card;

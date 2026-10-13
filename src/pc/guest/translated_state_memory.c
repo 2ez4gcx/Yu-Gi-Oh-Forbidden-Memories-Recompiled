@@ -13,6 +13,11 @@ typedef struct SavedRegion {
     uint64_t host, length, identity;
     uint32_t guest, flags;
 } SavedRegion;
+typedef struct RelocationRegion {
+    uint64_t host, length;
+    unsigned index;
+} RelocationRegion;
+
 struct MemoriesNativeMemoryState {
     unsigned count;
     SavedRegion *saved;
@@ -20,7 +25,14 @@ struct MemoriesNativeMemoryState {
     const uint8_t **payload;
     uint8_t *created;
     int applied;
+    RelocationRegion *relocations;
 };
+static int compare_host(const void *left, const void *right)
+{
+    const RelocationRegion *a = left, *b = right;
+    return (a->host > b->host) - (a->host < b->host);
+}
+
 static int stored(unsigned flags)
 {
     return !(flags & MEMORIES_REGION_CONSTANT) && (flags & (MEMORIES_REGION_GAME | MEMORIES_REGION_HEAP | MEMORIES_REGION_MAPPING));
@@ -64,6 +76,7 @@ void Memories_NativeMemoryFree(MemoriesNativeMemoryState *pending)
     if (!pending->applied && pending->created && pending->current)
         for (unsigned i = 0; i < pending->count; ++i)
             if (pending->created[i]) release((void *)pending->current[i], pending->saved[i].length, pending->saved[i].flags);
+    free(pending->relocations);
     free(pending->saved); free(pending->current); free(pending->payload); free(pending->created); free(pending);
 }
 MemoriesNativeMemoryState *Memories_NativeMemoryPrepare(MemoriesState *state, char *why, size_t size)
@@ -132,6 +145,13 @@ MemoriesNativeMemoryState *Memories_NativeMemoryPrepare(MemoriesState *state, ch
             pending->created[i] = 1;
         }
     }
+    /* Saved regions are non-overlapping, but registry order follows guest
+     * tokens rather than host addresses. Build once, before applying state. */
+    pending->relocations = calloc(count, sizeof(*pending->relocations));
+    if (!pending->relocations) goto invalid;
+    for (unsigned i = 0; i < count; ++i)
+        pending->relocations[i] = (RelocationRegion){pending->saved[i].host, pending->saved[i].length, i};
+    qsort(pending->relocations, count, sizeof(*pending->relocations), compare_host);
     return pending;
 invalid:
     snprintf(why, size, "invalid ARM64 region layout or incompatible native allocations");
@@ -187,20 +207,21 @@ void Memories_NativeMemoryRelocate(MemoriesNativeMemoryState *pending, void *dat
         memcpy(&word, bytes + offset, sizeof(word));
         relocated = word;
         if (word >= old_image && word - old_image < image_size) relocated = new_image + (word - old_image);
-        else for (unsigned i = 0; i < pending->count; ++i) {
-            const SavedRegion *saved = &pending->saved[i];
-            if (word >= saved->host && word - saved->host < saved->length) {
-                relocated = pending->current[i] + (word - saved->host);
-                break;
-            }
-        }
-        /* End iterators are valid C pointers. Prefer an owning region
-         * above when adjacent regions share this address. */
-        if (relocated == word) for (unsigned i = 0; i < pending->count; ++i) {
-            const SavedRegion *saved = &pending->saved[i];
-            if (word == saved->host + saved->length) {
-                relocated = pending->current[i] + saved->length;
-                break;
+        else if (pending->count && word >= pending->relocations[0].host) {
+            /* Upper bound selects the owning region at a shared endpoint.
+             * In a gap, the preceding region may own a one-past iterator.
+             * Pixels/PS1 words outside these ranges need no fixup. */
+            unsigned low = 0, high = pending->count;
+            const RelocationRegion *last = &pending->relocations[high - 1];
+            if (word <= last->host + last->length) {
+                while (low < high) {
+                    unsigned mid = low + (high - low) / 2;
+                    if (pending->relocations[mid].host <= word) low = mid + 1;
+                    else high = mid;
+                }
+                const RelocationRegion *region = &pending->relocations[low - 1];
+                if (word - region->host <= region->length)
+                    relocated = pending->current[region->index] + (word - region->host);
             }
         }
         if (word != relocated) memcpy(bytes + offset, &relocated, sizeof(relocated));

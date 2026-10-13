@@ -1878,9 +1878,13 @@ static void read_life_points(const char *mod, const JsonValue *value)
  *     "spellbinding_circle": n, "shadow_spell": n,
  *     "rank_score": {"start": n, "exodia": n, "deck_out": n},
  *     "starchip_prize": {"S": n, "A": n, "B": n, "C": n, "D": n},
- *     "new_game_starchips": n
+ *     "new_game_starchips": n,
+ *     "card_drops": n
  *
- * Each key's latest mod wins. A section is the key, a "." and the member. */
+ * Each key's latest mod wins. A section is the key, a "." and the member.
+ * "card_drops" locks the cards a won duel deals over the player's Game >
+ * Card drops (drops.c); its retail 0 is "no mod says", and a later mod's
+ * other number is noted beside the earlier mod, which no longer decides. */
 
 static const struct {
     const char *key;
@@ -1901,9 +1905,11 @@ static const struct {
     {"starchip_prize.A", 4, 0, TABLES_VALUE_PRIZE_MAX, "a win gives"},
     {"starchip_prize.S", 5, 0, TABLES_VALUE_PRIZE_MAX, "a win gives"},
     {"new_game_starchips", 0, 0, TABLES_LIMIT_STARCHIPS_MAX, "the game shows (eight digits)"},
+    {"card_drops", 0, 1, TABLES_VALUE_CARD_DROPS_MAX, NULL},
 };
 static long value_set[TABLES_VALUE_COUNT];
 static unsigned char value_given[TABLES_VALUE_COUNT];
+static char card_drops_by[64];      /* the mod whose "card_drops" decides */
 
 static void read_values(const char *mod, const JsonValue *limits)
 {
@@ -1950,10 +1956,26 @@ static void read_values(const char *mod, const JsonValue *limits)
         }
         if (limit_number(mod, where, value, value_keys[i].low, value_keys[i].high,
                          value_keys[i].storage ? value_keys[i].storage : "", &n)) {
+            if (i == TABLES_VALUE_CARD_DROPS) {
+                /* Two mods that lock the drops differently: the one applied
+                 * later decides, and the earlier one says so in the Mods
+                 * window. */
+                if (value_given[i] && value_set[i] != n && strcmp(card_drops_by, mod))
+                    Mods_Note(card_drops_by, "limits: \"card_drops\" %ld is not used: %s, applied later, "
+                              "locks it at %ld", value_set[i], mod, n);
+                snprintf(card_drops_by, sizeof(card_drops_by), "%s", mod);
+            }
             value_set[i] = n;
             value_given[i] = 1;
         }
     }
+}
+
+int Tables_CardDropsLock(const char **mod)
+{
+    int locked = value_given[TABLES_VALUE_CARD_DROPS] ? (int)value_set[TABLES_VALUE_CARD_DROPS] : 0;
+    if (mod) *mod = locked ? card_drops_by : NULL;
+    return locked;
 }
 
 long Tables_Value(int which, long retail)
@@ -1993,14 +2015,15 @@ static void read_limits(const char *mod, const JsonValue *limits)
         static const char *const keys[] = {"stats", "attack", "defense", "life_points", "two_player", "starchips",
                                             "chest", "free_duel_record", "two_player_record", "deck_copies",
                                             "swords_turns", "crush_card", "spellbinding_circle", "shadow_spell",
-                                            "rank_score", "starchip_prize", "new_game_starchips"};
+                                            "rank_score", "starchip_prize", "new_game_starchips", "card_drops"};
         const char *name = Json_Name(Json_At(limits, i));
         size_t k;
         for (k = 0; k < sizeof(keys) / sizeof(keys[0]) && strcmp(name, keys[k]); k++) {}
         if (k == sizeof(keys) / sizeof(keys[0]))
             Mods_Note(mod, "limits: no limit \"%s\" (stats, attack, defense, life_points, two_player, starchips, chest, "
                       "free_duel_record, two_player_record, deck_copies, swords_turns, crush_card, "
-                      "spellbinding_circle, shadow_spell, rank_score, starchip_prize, new_game_starchips)", name);
+                      "spellbinding_circle, shadow_spell, rank_score, starchip_prize, new_game_starchips, card_drops)",
+                      name);
     }
 #define STAT_STORAGE "the game keeps (a 16-bit number; more would mean widening every card record)"
     if (limit_number(mod, "\"stats\"", Json_Member(limits, "stats"), 0, TABLES_LIMIT_STAT_MAX, STAT_STORAGE, &n))
@@ -2430,6 +2453,7 @@ void Tables_Clear(void)
     limit_life_max = limit_record = limit_two_player_record = duelist_life_count = 0;
     limit_starchips = -1;
     memset(value_given, 0, sizeof(value_given));
+    card_drops_by[0] = '\0';
     memset(terrain_bonus, 0, sizeof(terrain_bonus));
     memset(terrain_listed, 0, sizeof(terrain_listed));
     memset(trap_listed, 0, sizeof(trap_listed));

@@ -145,14 +145,6 @@ def screen_mark(frame) -> tuple:
     return frame[28][LEFT_X + 64]
 
 
-def save_review(path: Path, name: str):
-    folder = Path("D:/DecompRecomp/tmp/reviews/busts")
-    try:
-        folder.mkdir(parents=True, exist_ok=True)
-        shutil.copy(path, folder / name)
-    except OSError:
-        pass
-
 
 # --- 1, 2: the tower's story -------------------------------------------------------------------
 
@@ -209,7 +201,6 @@ def phase_story(exe: Path, out: Path):
           talking_shot is not None)
     if talking_shot:
         shutil.copy(talking_shot, out / "b1-talking.png")
-        save_review(talking_shot, "tower-story-talking.png")
     # At the page's end it blinks, when the game's random wait says so.
     blinked = None
     for _ in range(900):
@@ -225,7 +216,6 @@ def phase_story(exe: Path, out: Path):
     check("it blinks: the eyes' variant 1, the blink frame's shut eye on the screen", blinked is not None)
     if blinked:
         shutil.copy(blinked, out / "b2-blink.png")
-        save_review(blinked, "tower-story-blink.png")
     for _ in range(300):
         if piece(g, 0, 1) == 0:
             break
@@ -235,7 +225,6 @@ def phase_story(exe: Path, out: Path):
     calm = pixels(out / "b3-calm.png")
     check(f"calm: its face's mark is calm's green ({screen_mark(calm)}), its eyes open again",
           near(screen_mark(calm), MARKS["calm"]) and near(calm[47][LEFT_X + 50], EYE))
-    save_review(out / "b3-calm.png", "tower-story-calm.png")
     for name, file in (("angry", "b4-angry.png"), ("sad", "b5-sad.png")):
         seen = set()
         next_page(t, seen)
@@ -245,7 +234,6 @@ def phase_story(exe: Path, out: Path):
         check(f"{name}, in place: the same character all along ({sorted(seen)}), expression {record[0x31]}, "
               f"its mark {screen_mark(frame)}",
               seen == {calm_id} and near(screen_mark(frame), MARKS[name]) and record[0x31] in (1, 2))
-        save_review(out / file, f"tower-story-{name}.png")
     # The old forms on the right.
     next_page(t)
     t.shot(out, "b6-character-number.png")
@@ -332,8 +320,6 @@ def phase_campaign(exe: Path, out: Path, baseline: Path | None):
     replaced, replaced_hashes, log = campaign(exe, out, "campaign-bust-replaced", simon(True))
     shutil.copy(replaced, out / "b8-campaign-replaced.png")
     shutil.copy(plain, out / "b9-campaign-retail.png")
-    save_review(replaced, "campaign-simon-replaced.png")
-    save_review(plain, "campaign-simon-retail.png")
     frame = pixels(replaced)
     check("with \"replace_bust\" the log says the campaign's character 1 is Simon's bust",
           "busts: campaign character 1 is Simon Muran's bust" in log)

@@ -110,6 +110,8 @@ class DuelistsTab(Tab):
         self.build_pools(pools)
         self.bust_view = BustView(self, self.sections)
         self.sections.add(self.bust_view.frame, text="Bust")
+        self.sections.bind("<<NotebookTabChanged>>", lambda e: self.bust_view.fill()
+                           if self.sections.select() == str(self.bust_view.frame) else None)
 
     # --- building -------------------------------------------------------------------
 
@@ -975,7 +977,8 @@ class DuelistsTab(Tab):
         if self.project is None:
             return
         self.fill_header()
-        self.bust_view.fill()
+        if self.sections.select() == str(self.bust_view.frame):
+            self.bust_view.fill()       # else when the page is turned to (it draws a whole screen)
         s = self.subject()
         self.tree.heading("retail", text="Disc" if isinstance(s, int) else "Base")
         if self.fixed.fill():

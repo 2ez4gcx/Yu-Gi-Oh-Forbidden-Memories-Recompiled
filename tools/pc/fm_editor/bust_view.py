@@ -212,7 +212,7 @@ class BustView:
     def changed(self, chosen=None):
         self.tab.changed(self.subject())
         b = self.bust()
-        if chosen is not None and b is not None and chosen in b.expressions:
+        if chosen is not None and b is not None and chosen in b.expressions and self.list.exists(str(id(chosen))):
             self.list.selection_set(str(id(chosen)))
             self.draw()
 

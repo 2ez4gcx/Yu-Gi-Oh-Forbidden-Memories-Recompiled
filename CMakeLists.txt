@@ -907,6 +907,11 @@ if(Python3_Interpreter_FOUND)
         add_test(NAME pc_mod_cache
             COMMAND "${Python3_EXECUTABLE}" tools/pc/test_mod_cache.py
             WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+        # What build_mod.py says when the 64-bit targets cannot be built, and
+        # the llvm-mingw it points to (no compiler needed).
+        add_test(NAME pc_build_mod_toolchain
+            COMMAND "${Python3_EXECUTABLE}" tools/pc/test_build_mod_toolchain.py
+            WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
         # check_mod_abi.py unpacks only the release packages whose sha256
         # mod_compat.txt pins (synthetic packages, nothing downloaded).
         add_test(NAME pc_mod_compat_fetch

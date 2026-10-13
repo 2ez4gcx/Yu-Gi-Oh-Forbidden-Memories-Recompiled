@@ -35,6 +35,12 @@ class CardAttributeTest(unittest.TestCase):
         self.assertEqual(p.cards[BASE].attribute, before)
         self.assertTrue(any("attribute" in msg for msg in messages), messages)
 
+    def test_validator_rejects_undeclared_and_reserved_ids(self):
+        p = project()
+        for attribute in (6, 7, 8, 15):
+            p.cards[BASE].attribute = attribute
+            self.assertTrue(any("attribute" in issue.message for issue in validate.validate_card(p, BASE)))
+
     def test_undeclared_digit_string_is_left_out(self):
         p = project()
         before = p.cards[BASE].attribute
@@ -126,6 +132,10 @@ class CardAttributeTest(unittest.TestCase):
             "when": "summon", "do": "boost", "target": "self", "attack": 500, "attribute": 20,
             "for_each": {"whose": "all", "attribute": 20}})
         self.assertFalse(validate.errors(validate.validate_card(p, BASE)))
+
+    def test_standalone_effect_normalization_rejects_undeclared_custom_attribute(self):
+        effect = {"when": "summon", "do": "boost", "attack": 500, "attribute": 20}
+        self.assertIsNone(monster_effects.normalize(effect))
 
 
 if __name__ == "__main__":

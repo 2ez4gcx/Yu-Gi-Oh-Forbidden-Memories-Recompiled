@@ -150,7 +150,8 @@ def _filter(source: dict, out: dict, attribute_resolve=None) -> bool:
     if "attribute" in source:
         a = source["attribute"]
         a = attribute_resolve(a) if attribute_resolve else (_letters_index(a, ATTRIBUTE_NAMES) if isinstance(a, str) else a)
-        if type(a) is not int or not 0 <= a <= 255 or a in (6, 7):
+        if type(a) is not int or not 0 <= a <= 255 or a in (6, 7) or \
+                (attribute_resolve is None and a >= len(ATTRIBUTE_NAMES)):
             return False
         out["attribute"] = ATTRIBUTE_NAMES[a] if a < len(ATTRIBUTE_NAMES) else a
     return True

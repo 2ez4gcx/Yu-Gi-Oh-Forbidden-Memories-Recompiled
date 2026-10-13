@@ -1511,7 +1511,7 @@ class MonsterEffectsTest(unittest.TestCase):
         magic = next(cid for cid, card in sorted(p.cards.items()) if card.type == g.TYPE_MAGIC)
         cid = p.add_card(magic, "magic-monster")
         card = p.cards[cid]
-        card.type, card.attack, card.defense, card.level, card.star1, card.star2 = 0, 1500, 1200, 4, 1, 2
+        card.type, card.attribute, card.attack, card.defense, card.level, card.star1, card.star2 = 0, 0, 1500, 1200, 4, 1, 2
         p.set_monster_effects(cid, [{"when": "summon", "do": "heal", "amount": 500}])
         found = validate.validate_card(p, cid)
         self.assertEqual([i.message for i in found if i.level == "error"], [])

@@ -128,10 +128,7 @@ def _check_card(project: Project, cid: int, out: list):
         add("error", "level is 0 to 12")
     if not 0 <= card.type <= 23:
         add("error", "type is one of the 24 types")
-    # The retail card field has always held four bits, including legacy IDs
-    # 8--15.  Higher IDs need a declaration to survive the runtime registry.
-    if not (type(card.attribute) is int and 0 <= card.attribute <= 15) and \
-            manifest._attribute_choice(card.attribute, project.other.get("attributes")) < 0:
+    if manifest._attribute_choice(card.attribute, project.other.get("attributes")) < 0:
         add("error", "attribute is a retail attribute or a declared id from 8 to 255")
     count = guardian_stars.count(project.other.get("guardian_stars"))
     if not (0 <= card.star1 <= guardian_stars.MAX_STARS and 0 <= card.star2 <= guardian_stars.MAX_STARS):

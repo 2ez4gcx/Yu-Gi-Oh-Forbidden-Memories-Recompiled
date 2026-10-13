@@ -8,7 +8,7 @@ mods; resolving that combined mod order is outside this standalone editor.
 """
 import unittest
 
-from fm_editor import manifest
+from fm_editor import manifest, monster_effects, validate
 from fm_editor.model import Project
 from fm_editor.tests.test_data import fixture
 
@@ -111,6 +111,21 @@ class CardAttributeTest(unittest.TestCase):
             "cards": [{"replace": BASE, "attribute": "é"}]})
         self.assertEqual(p.cards[BASE].attribute, 9)
         self.assertFalse(messages)
+
+    def test_custom_attribute_applies_to_card_and_monster_effects(self):
+        p = project()
+        messages = manifest.apply(p, {"id": "m", "attributes": {"attributes": [{"id": 20, "name": "Metal"}]},
+                                      "cards": [{"replace": BASE, "attribute": 20, "monster_effects": [{
+                                          "when": "summon", "do": "boost", "attack": 500, "attribute": "Metal",
+                                          "for_each": {"attribute": 20}}]}]})
+        self.assertFalse(messages)
+        self.assertEqual(p.cards[BASE].attribute, 20)
+        resolve_attribute = lambda value: manifest._attribute_choice(value, p.other.get("attributes"))
+        effect = p.card_extra[BASE]["monster_effects"][0]
+        self.assertEqual(monster_effects.normalize(effect, p.resolve, resolve_attribute), {
+            "when": "summon", "do": "boost", "target": "self", "attack": 500, "attribute": 20,
+            "for_each": {"whose": "all", "attribute": 20}})
+        self.assertFalse(validate.errors(validate.validate_card(p, BASE)))
 
 
 if __name__ == "__main__":

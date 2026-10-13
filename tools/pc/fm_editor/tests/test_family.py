@@ -315,11 +315,11 @@ class DeckAndDropTest(unittest.TestCase):
         self.assertIn("the prize draw at 0x80021C6C jumps to the mod's code at 0x8000B300, which calls 0x8000B380", report)
         self.assertEqual(kit.extra_draws(f.slus, bytes(slus)).count, 5)
         # Five cards a win: the mod's "limits" "card_drops", which locks
-        # Game > Card drops while it is applied (API 14).
+        # Game > Card drops while it is applied (API 13).
         built = manifest.build(result.project)
         self.assertEqual(built["limits"], {"card_drops": 5})
         self.assertIn("\"limits\" \"card_drops\" 5, which locks Game > Card drops", report)
-        self.assertEqual(compat.required(built)[0], 14)
+        self.assertEqual(compat.required(built)[0], 13)
 
 
 class RulesTest(unittest.TestCase):

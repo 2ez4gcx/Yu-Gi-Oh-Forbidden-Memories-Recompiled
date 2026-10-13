@@ -92,13 +92,13 @@ class FeatureTest(unittest.TestCase):
             with self.subTest(value=value):
                 self.assertEqual(self.needs(value), 11)
 
-    def test_api_14(self):
-        """A mod's lock on the cards a won duel deals: a game of API 13 or
+    def test_api_13(self):
+        """A mod's lock on the cards a won duel deals: a game of API 12 or
         older would leave it out and deal the player's count."""
-        self.assertEqual(self.needs({"limits": {"card_drops": 5}}), 14)
-        self.assertEqual(self.needs({"limits": {"card_drops": 5, "deck_copies": 4}}), 14)
+        self.assertEqual(self.needs({"limits": {"card_drops": 5}}), 13)
+        self.assertEqual(self.needs({"limits": {"card_drops": 5, "deck_copies": 4}}), 13)
         api, reasons = compat.required({"limits": {"card_drops": 99, "attack": 9999}})
-        self.assertEqual(api, 14)
+        self.assertEqual(api, 13)
         self.assertEqual(len(reasons), 1)
         self.assertIn("card_drops", reasons[0])
 
@@ -174,7 +174,7 @@ class StampTest(unittest.TestCase):
         self.assertIn("v0.2.0", compat.release_text(9))
         self.assertIn("v0.2.1-preview.1 or newer", compat.release_text(10))
         self.assertIn("v0.3.0 or newer", compat.release_text(11))
-        self.assertIn("newer than v0.3.0", compat.release_text(14))
+        self.assertIn("newer than v0.3.0", compat.release_text(13))
 
 
 class ExternalPacksTest(unittest.TestCase):

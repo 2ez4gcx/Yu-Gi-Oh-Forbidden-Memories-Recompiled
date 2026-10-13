@@ -936,7 +936,7 @@ S to D, 0 to 1000 each: past 8 the results screen shows one starchip with
 win deals**, 1 to 99, which locks the player's Game > Card drops at that
 number while the mod is applied, its grey value `player` the player's own
 choice, [card drops](../../../notes/card-drops.md#a-mod-that-sets-it), mod
-API 14) and **Records and
+API 13) and **Records and
 2P** (the two-player LP choice and the records), and **Starting LP by
 duelist**: a table of duelists with the LP each side starts with against
 them (the disc's, or one the mod adds, by its name; choose a duelist, type **You** and **Duelist**, **Set**; **Remove**).

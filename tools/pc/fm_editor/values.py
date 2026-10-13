@@ -110,7 +110,7 @@ TIPS = {
     "card_drops": "Every won duel deals exactly this many cards, 1 to 99, whatever the player set in "
                   "Game > Card drops. While the mod is applied the setting shows the mod's number, greyed, "
                   "with the mod's name; the player's own value comes back when the mod is removed. "
-                  "Empty: the player chooses (1 is the console's). Needs the game of mod API 14.",
+                  "Empty: the player chooses (1 is the console's). Needs the game of mod API 13.",
 }
 ALL_FIELDS = tuple(field for _, fields in GROUPS for field in fields)
 FIELD = {field[0]: field for field in ALL_FIELDS}

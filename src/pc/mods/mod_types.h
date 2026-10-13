@@ -1,10 +1,10 @@
 #ifndef MEMORIES_MOD_TYPES_H
 #define MEMORIES_MOD_TYPES_H
-#define MEMORIES_MOD_API 14
+#define MEMORIES_MOD_API 13
 /* API 11 adds no host entry or event: it marks the mod.json features a game
  * of API 10 would leave out (notes/modding.md, "Which game a mod needs"), so
  * a mod that uses them says "min_api": 11 and an older game refuses it.
- * API 14 does the same for "limits": {"card_drops": n}, a lock on the cards
+ * API 13 does the same for "limits": {"card_drops": n}, a lock on the cards
  * a won duel deals (notes/card-drops.md). */
 /* API 3: before hooks may alter arguments/result, or set handled to replace
  * the operation (including cancellation). Highest priority runs first;

@@ -39,8 +39,8 @@ the duels have it back.
   99 and a mod's 5 deal 5.
 - **Code mods** read the lock with `host->limit(host, "card_drops")`: the
   number, or 0 while no mod sets it and the player's setting decides.
-- A game older than mod API 14 would leave the key out and deal the
-  player's count, so a mod that sets it says `"min_api": 14` (the FM Editor
+- A game older than mod API 13 would leave the key out and deal the
+  player's count, so a mod that sets it says `"min_api": 13` (the FM Editor
   writes it).
 
 The cards themselves come as below, from the same rolls: only how many

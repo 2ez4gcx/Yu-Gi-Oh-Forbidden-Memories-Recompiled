@@ -115,7 +115,7 @@ checked as well, when it starts.
 | 9 or less | v0.2.0 | everything not listed below; added cards, duelists, starter pools, packs, the title's menus |
 | 10 | v0.2.1-preview.1 | `card_text_colors`; a card's `monster_effects` or `trap_threshold`; an equip's `bonus_attack`/`bonus_defense`; a pack's `image_style`; an added card (`copy`) of another kind than its base (a monster made a magic card, a magic card a monster or a trap), or whose `model` or `effect` is a card's name; the `MEMORIES_EVENT_MONSTER` event |
 | 11 | v0.3.0 | `assets`, `ui`, `card_layout`, `palette_ramps`; a card's `tags`, or a `frame` of `Gold`, `Green`, `Pink` or `Blue`; a monster effect's `for_each`; `{"remove": "all"}` in `fusions`; a ritual of other than three tributes, or with `tributes_from` `hand` or `both`; the title's `images`, a `scale` in `title` or `menu`; the `limits` `deck_copies`, `swords_turns`, `crush_card`, `spellbinding_circle`, `shadow_spell`, `rank_score`, `starchip_prize` and `new_game_starchips` |
-| 14 | the release after v0.3.0 | the `limits` `card_drops`, a lock on the cards a won duel deals ([card drops](card-drops.md#a-mod-that-sets-it)) |
+| 13 | the release after v0.3.0 | the `limits` `card_drops`, a lock on the cards a won duel deals ([card drops](card-drops.md#a-mod-that-sets-it)) |
 
 The FM Editor writes `min_api` on save as the lowest one of these that has
 everything the mod uses, never lowering one written higher, and its Mod
@@ -128,7 +128,7 @@ feature an older game would leave out raises `MEMORIES_MOD_API`
 (`src/pc/mods/mod_types.h`), lists the feature here and in `compat.py`,
 and keeps every lower `min_api` loading.
 API 12 (v0.3.0 too) added no mod.json feature, only a code mod's sounds.
-When tagging the first API 14 release, replace the unreleased description in
+When tagging the first API 13 release, replace the unreleased description in
 the table and add that tag to `compat.RELEASES`; do not assign an unchosen
 release number in advance.
 

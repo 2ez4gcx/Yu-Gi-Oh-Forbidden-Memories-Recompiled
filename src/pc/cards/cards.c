@@ -519,19 +519,29 @@ static int same_words(const char *a, const char *b)
     return !*a && !*b;
 }
 
+/* Json_Number's long, narrowed to int only when it actually fits -- -1
+ * otherwise, the same sentinel a name choice() does not find already
+ * means. Past int range (e.g. 2^32), narrowing first wraps into some
+ * arbitrary in-range int instead of the deliberately-out-of-range value
+ * every caller's own clamp or rejection expects to see. */
+static int narrow(long raw)
+{
+    return raw < INT_MIN || raw > INT_MAX ? -1 : (int)raw;
+}
+
 /* A number, or one of `names` spelled out. -1 when it is neither. */
 static int choice(const JsonValue *value, const char *const *choices, int count)
 {
     int i;
     const char *text;
     if (!value) return -1;
-    if (Json_TypeOf(value) == JSON_NUMBER) return (int)Json_Number(value, -1);
+    if (Json_TypeOf(value) == JSON_NUMBER) return narrow(Json_Number(value, -1));
     text = Json_String(value, NULL);
     if (!text) return -1;
     for (i = 0; i < count; i++) {
         if (same_words(text, choices[i])) return i;
     }
-    return (int)Json_Number(value, -1);
+    return narrow(Json_Number(value, -1));
 }
 
 
@@ -600,16 +610,12 @@ static int retail_by_name(const char *text)
 int Cards_Reference(const JsonValue *value)
 {
     const char *text;
-    long raw;
     int id;
     if (!value || Json_TypeOf(value) == JSON_NULL) return 0;
     if (Json_TypeOf(value) == JSON_NUMBER) {
-        /* Json_Number is long; Cards_Valid's id is int. Checked before the
-         * narrow, not after: a ref far past int range (e.g. 2^32 + 1) wraps
-         * to a small, perfectly valid id instead of failing Cards_Valid. */
-        raw = Json_Number(value, 0);
-        if (raw < INT_MIN || raw > INT_MAX) return -1;
-        id = (int)raw;
+        /* narrow(): a ref far past int range (e.g. 2^32 + 1) would otherwise
+         * wrap to a small, perfectly valid id instead of failing Cards_Valid. */
+        id = narrow(Json_Number(value, 0));
         return Cards_Valid(id) ? id : -1;
     }
     text = Json_String(value, NULL);
@@ -1210,11 +1216,9 @@ static void add_entry(const char *mod, const char *directory, int index, const J
     if (Json_TypeOf(copy) == JSON_STRING && !isdigit((unsigned char)*Json_String(copy, "")) ) {
         base = retail_by_name(Json_String(copy, ""));
     } else {
-        /* Checked before the narrow to int, not after (Cards_Reference,
-         * just above, same reasoning): a "copy"/"replace" far past int
-         * range would otherwise wrap into 1..CARD_COUNT and pass below. */
-        long raw = Json_Number(copy, 0);
-        base = raw < INT_MIN || raw > INT_MAX ? 0 : (int)raw;
+        /* narrow(): a "copy"/"replace" far past int range would otherwise
+         * wrap into 1..CARD_COUNT and pass the check just below. */
+        base = narrow(Json_Number(copy, 0));
     }
     if (base < 1 || base > CARD_COUNT) {
         Mods_Note(mod, "cards[%d]: \"%s\" must name a card of the disc, 1 to %d", index, replace ? "replace" : "copy",
@@ -1227,7 +1231,7 @@ static void add_entry(const char *mod, const char *directory, int index, const J
     }
     /* "replace" changes the retail card itself, in place: one card, no new
      * id, and nothing of it goes in the save. */
-    count = replace ? 1 : (int)Json_Number(Json_Member(entry, "count"), 1);
+    count = replace ? 1 : narrow(Json_Number(Json_Member(entry, "count"), 1));
     if (!replace && setting && *setting) count = Mods_Setting(mod, setting, count);
     if (count < 0) count = 0;
     if (replace && replaced[base]) {
@@ -1297,14 +1301,25 @@ static void add_entry(const char *mod, const char *directory, int index, const J
         static const char *const stat_keys[2] = {"attack", "defense"};
         int k;
         for (k = 0; k < 2; k++) {
-            if ((value = (int)Json_Number(Json_Member(entry, stat_keys[k]), -1)) < 0) continue;
-            if (value > 0x1FF * 10) {
-                Mods_Note(mod, "cards[%d]: \"%s\" %d is past the %d a card's own stat can be (nine bits of tens); "
-                          "%d used, and \"limits\" or a bonus takes it higher in a duel", index, stat_keys[k], value,
+            /* Compared as the long Json_Number gives, not narrowed to int
+             * first: past int range (e.g. 2^32) would otherwise wrap into
+             * some small int that reads as in range, skipping both the
+             * "past the %d" note below and the clamp that goes with it, and
+             * silently zeroing the stat instead -- exactly what the comment
+             * above says this field never does. */
+            long raw = Json_Number(Json_Member(entry, stat_keys[k]), -1);
+            if (raw < 0) continue;
+            if (raw > 0x1FF * 10) {
+                Mods_Note(mod, "cards[%d]: \"%s\" %ld is past the %d a card's own stat can be (nine bits of tens); "
+                          "%d used, and \"limits\" or a bonus takes it higher in a duel", index, stat_keys[k], raw,
                           0x1FF * 10, 0x1FF * 10);
-            } else if (value % 10) {
-                Mods_Note(mod, "cards[%d]: \"%s\" %d is kept in tens; %d used", index, stat_keys[k], value,
-                          value / 10 * 10);
+                value = 0x1FF * 10;
+            } else {
+                value = (int)raw;
+                if (value % 10) {
+                    Mods_Note(mod, "cards[%d]: \"%s\" %d is kept in tens; %d used", index, stat_keys[k], value,
+                              value / 10 * 10);
+                }
             }
             stats = (stats & ~(0x1FFu << (9 * k))) | ((unsigned)clamp(value / 10, 0, 0x1FF) << (9 * k));
         }
@@ -1363,7 +1378,7 @@ static void add_entry(const char *mod, const char *directory, int index, const J
         if (Stars_Normalize(&kept_first, &kept_second))
             stats = (stats & ~(0xFFu << 18)) | ((unsigned)kept_first << 22) | ((unsigned)kept_second << 18);
     }
-    if ((value = (int)Json_Number(Json_Member(entry, "level"), -1)) >= 0) {
+    if ((value = narrow(Json_Number(Json_Member(entry, "level"), -1))) >= 0) {
         level_attr = (unsigned char)((level_attr & 0xF0) | clamp(value, 0, 12));
     }
     if (Json_Member(entry, "attribute")) {

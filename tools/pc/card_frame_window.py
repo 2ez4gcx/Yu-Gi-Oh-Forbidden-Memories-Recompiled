@@ -16,8 +16,8 @@ way (same integer bins, same half rule), in card pixels (CARD_SIZE), so
 Parameters (everything the placement depends on):
   CARD_SIZE        the frame's on-screen size in card pixels (manifest
                    card_layout.frame.<kind>.width/height)
-  FRAME_TEXELS     the VRAM texture the game squashes any frame PNG to (3x3
-                   tiles of 177x254); keep in sync with FRAME_W/FRAME_H in
+  FRAME_TEXELS     the VRAM texture the game squashes any frame PNG to (2x2
+                   tiles of 255x254); keep in sync with FRAME_W/FRAME_H in
                    card_layout_art.c
   MAX_OVERLAP      how far the art may reach past the window onto the frame's
                    border before a check fails (card pixels)
@@ -35,7 +35,7 @@ import numpy as np
 from PIL import Image
 
 CARD_SIZE = (140, 197)
-FRAME_TEXELS = (531, 762)
+FRAME_TEXELS = (510, 508)
 MAX_OVERLAP = 1.5
 MAX_ASYMMETRY = 1.0
 

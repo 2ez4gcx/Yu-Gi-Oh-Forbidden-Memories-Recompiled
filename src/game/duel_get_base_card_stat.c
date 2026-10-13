@@ -5,6 +5,7 @@
 #include "duel_card.h"
 #ifdef MEMORIES_PC
 #include "pc/cards/tables.h"
+#include "pc/cards/cards.h"
 #endif
 
 /* MATCH (2026-09-05). Was an ASSEMBLY TRANSCRIPTION (Unchiga's port of
@@ -12,8 +13,8 @@
  * this is the C. Flags: default compiler, as -G0. History in docs/PARKED.txt.
  *
  * Reads a card's 32-bit record from gDuel_adwCardStats: the low 9 bits (or bits
- * 9..17 when arg1 is set) times ten, plus Duel_GetTerrainBoost's bonus for the
- * 5-bit field at bits 26..30, clamped to 0..9999 (negative results return
+ * 9..17 when arg1 is set) times ten, plus Duel_GetTerrainBoost's bonus for
+ * the card's logical type, clamped to 0..9999 (negative results return
  * 0, which is why the clamp is a single `return s`).
  *
  * Two shapes carry the match and both are the register allocator's, not
@@ -32,8 +33,6 @@
 s32 Duel_GetBaseCardStat(s32 arg0, s32 arg1) {
     s32 v;
     s32 s;
-    s32 k;
-    s32 *t;
 
     if (arg1 != 0) {
         v = gDuel_adwCardStats[arg0 - 1];
@@ -49,10 +48,12 @@ s32 Duel_GetBaseCardStat(s32 arg0, s32 arg1) {
             v = !s;
         }
     } while (0);
-    t = gDuel_adwCardStats;
-    k = arg0 - 1;
-    s += Duel_GetTerrainBoost((t[k] >> CARD_STAT_TYPE_SHIFT) &
+#ifdef MEMORIES_PC
+    s += Duel_GetTerrainBoost(Cards_Type(arg0));
+#else
+    s += Duel_GetTerrainBoost((gDuel_adwCardStats[arg0 - 1] >> CARD_STAT_TYPE_SHIFT) &
                               CARD_STAT_TYPE_MASK);
+#endif
 
     if (s < 0) {
         return 0;

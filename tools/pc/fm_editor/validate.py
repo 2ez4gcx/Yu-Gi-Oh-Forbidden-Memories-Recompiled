@@ -27,7 +27,7 @@ MANIFEST_KEYS = ("id", "name", "version", "author", "description", "library", "e
                  "font",
                  "chest_overflow", "terrain_bonus", "trap_thresholds", "equip_bonus_default", "passwords",
                  "starter", "starter_pools", "limits", "guardian_stars", "packs", "pack_shop", "card_text_colors", "card_layout",
-                 "palette_ramps", "title", "menu", "ui", "card_types", "monster_types")
+                 "palette_ramps", "title", "menu", "ui", "card_types")
 
 
 @dataclass
@@ -200,35 +200,46 @@ def _check_card(project: Project, cid: int, out: list):
                                    "leaves it out")
     effect = project.retail.cards.get(project.effect_of(cid)) if "effect" in extra else None
     if effect and not card.is_monster() and effect.type != card.type:
-        add("warning", f"its effect is {effect.name}'s, a {TYPE_NAMES[effect.type]} card's: the CPU does not play it, "
-                       f"and as a {TYPE_NAMES[card.type]} card it may do nothing")
+        name = lambda t: project.type_names[t] if 0 <= t < len(project.type_names) and project.type_names[t] else str(t)
+        add("warning", f"its effect is {effect.name}'s, a {name(effect.type)} card's: the CPU does not play it, "
+                       f"and as a {name(card.type)} card it may do nothing")
 
 
 def _check_card_types(project: Project, out: list):
-    """Check the five-bit card-type registry, including its preview alias."""
-    for key in ("card_types", "monster_types"):
-        section = project.other.get(key)
-        if section is None:
+    """Check the runtime registry: IDs, normalized names and display text."""
+    key, section = "card_types", project.other.get("card_types")
+    if section is None:
+        return
+    if not isinstance(section, dict) or not isinstance(section.get("types"), list):
+        out.append(Issue("error", "Mod info", key, "must be an object with a \"types\" list"))
+        return
+    seen = set()
+    names = {"".join(c.lower() for c in name if c.isascii() and c.isalnum()): i
+             for i, name in enumerate(TYPE_NAMES)}
+    for index, entry in enumerate(section["types"]):
+        where = f"{key}.types[{index}]"
+        if not isinstance(entry, dict) or isinstance(entry.get("id"), bool) or not isinstance(entry.get("id"), int) \
+                or not isinstance(entry.get("name"), str):
+            out.append(Issue("error", "Mod info", where, "must have numeric \"id\" and string \"name\""))
             continue
-        if not isinstance(section, dict) or not isinstance(section.get("types"), list):
-            out.append(Issue("error", "Mod info", key, "must be an object with a \"types\" list"))
+        type_, name = entry["id"], entry["name"]
+        if not 0 <= type_ < TYPE_LIMIT:
+            out.append(Issue("error", "Mod info", where,
+                             "id is an existing type (0-23) or a new monster type (24-255)"))
+        elif type_ in seen:
+            out.append(Issue("warning", "Mod info", where, f"redefines type {type_}; the later name wins"))
+        seen.add(type_)
+        if not name.strip():
+            out.append(Issue("error", "Mod info", where, "\"name\" must not be empty"))
             continue
-        seen = set()
-        for index, entry in enumerate(section["types"]):
-            where = f"{key}.types[{index}]"
-            if not isinstance(entry, dict) or isinstance(entry.get("id"), bool) or not isinstance(entry.get("id"), int) \
-                    or not isinstance(entry.get("name"), str):
-                out.append(Issue("error", "Mod info", where, "must have numeric \"id\" and string \"name\""))
-                continue
-            type_ = entry["id"]
-            if not 0 <= type_ < TYPE_LIMIT:
-                out.append(Issue("error", "Mod info", where,
-                                 "id is an existing type (0-23) or a new monster type (24-255)"))
-            elif type_ in seen:
-                out.append(Issue("warning", "Mod info", where, f"redefines type {type_}; the later name wins"))
-            seen.add(type_)
-            if not entry["name"].strip():
-                out.append(Issue("error", "Mod info", where, "\"name\" must not be empty"))
+        normalized = "".join(c.lower() for c in name if c.isascii() and c.isalnum())
+        if not normalized:
+            out.append(Issue("error", "Mod info", where, "\"name\" has no glyph the game can display"))
+        elif normalized in names and names[normalized] != type_:
+            out.append(Issue("error", "Mod info", where,
+                             f"\"name\" is already type {names[normalized]}'s name or retail alias"))
+        else:
+            names[normalized] = type_
 
 
 def _check_tags(project: Project, out: list):

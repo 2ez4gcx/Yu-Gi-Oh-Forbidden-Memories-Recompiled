@@ -8,10 +8,14 @@
 #include <string.h>
 
 #define TYPE_LIMIT 256
-#define BANK 13
-#define PAGE 0
+/* Bank 14 already hosts stars at words 0-63 and duel-UI shelves from word
+ * 256.  The 64-word strip at 64-127 is otherwise unused; 16 x 15 16px,
+ * 4bpp cells fit there without touching either owner. */
+#define BANK 14
+#define PAGE 1
 #define SIDE CARD_ICON_SIDE
 #define CLUT_Y 256
+#define CLUT_X 64
 
 static unsigned char made[TYPE_LIMIT];
 /* A bad PNG must not be decoded and logged on every icon draw.  This is a
@@ -43,7 +47,7 @@ int TypeIcons_IconCell(unsigned code, int *tpage, int *u, int *v, int *clut_x, i
     int type = (int)(code & 0xFFu) + CARD_TYPE_EQUIP + 1;
     int clut;
     if ((code & 0xFF00u) != TYPE_ICON_CODE || !TypeIcons_Cell(type, tpage, u, v, &clut)) return 0;
-    *clut_x = 0;
+    *clut_x = CLUT_X;
     *clut_y = clut >> 6;
     return 1;
 }
@@ -62,7 +66,7 @@ void TypeIcons_Clear(void)
 
 static void store(uint16_t *bank, int type, const unsigned char *pixels)
 {
-    int x, y, slot = type - 24, left = (slot & 15) * SIDE / 4, top = (slot >> 4) * SIDE;
+    int x, y, slot = type - 24, left = PAGE * 64 + (slot & 15) * SIDE / 4, top = (slot >> 4) * SIDE;
     for (y = 0; y < SIDE; y++) for (x = 0; x < SIDE / 4; x++)
         bank[(top + y) * SOFT_GPU_WIDTH + left + x] = (uint16_t)(pixels[y * SIDE / 2 + x * 2] |
                                                                    (pixels[y * SIDE / 2 + x * 2 + 1] << 8));
@@ -80,7 +84,7 @@ static void register_hd_icon(int type, int slot, const char *path)
     if (hd_made[type] || (hd_tried[type] && !cooled_down(retry_clock, hd_failed_at[type]))) return;
     hd_tried[type] = 1;
     TexturePack_BankSpritesUseOwner(TEXTURE_BANK_OWNER_TYPE_ICONS);
-    if (TexturePack_AddBankSprite(BANK, PAGE * 64, 0, 0, 0, CLUT_Y + slot, (slot & 15) * SIDE, (slot >> 4) * SIDE,
+    if (TexturePack_AddBankSprite(BANK, PAGE * 64, 0, 0, CLUT_X, CLUT_Y + slot, (slot & 15) * SIDE, (slot >> 4) * SIDE,
                                   SIDE, SIDE, path)) {
         hd_made[type] = 1;
     } else {
@@ -111,7 +115,7 @@ int TypeIcons_Cell(int type, int *tpage, int *u, int *v, int *clut)
             failed_at[type] = retry_clock;
             return 0;
         }
-        memcpy(&bank[(CLUT_Y + type - 24) * SOFT_GPU_WIDTH], palette, sizeof(palette));
+        memcpy(&bank[(CLUT_Y + type - 24) * SOFT_GPU_WIDTH + CLUT_X], palette, sizeof(palette));
         store(bank, type, pixels);
         slot = type - 24;
         made[type] = 1;
@@ -121,7 +125,7 @@ int TypeIcons_Cell(int type, int *tpage, int *u, int *v, int *clut)
     *tpage = PAGE | (BANK << 11);
     *u = (slot & 15) * SIDE;
     *v = (slot >> 4) * SIDE;
-    *clut = (CLUT_Y + slot) << 6;
+    *clut = ((CLUT_Y + slot) << 6) | (CLUT_X >> 4);
     register_hd_icon(type, slot, path);
     return 1;
 }

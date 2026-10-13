@@ -836,7 +836,12 @@ class RitualsTab(Tab):
                 return
             card = self.project.cards.get(req["card"])
             # A card's own type to start from, for a rule like it.
-            new = {"type": TYPE_NAMES[card.type]} if card is not None and card.is_monster() else {"min_attack": 0}
+            names = getattr(self.project, "type_names", TYPE_NAMES)
+            if card is not None and card.is_monster():
+                value = names[card.type] if 0 <= card.type < len(names) and names[card.type] else card.type
+                new = {"type": value}
+            else:
+                new = {"min_attack": 0}
         changed = [dict(t) for t in tributes]
         changed[index] = new
         self.store(changed, result, origin)

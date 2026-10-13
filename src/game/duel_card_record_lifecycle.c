@@ -178,11 +178,15 @@ u8 *Duel_SetupCardRecord(s32 a, s32 b) {
 #ifdef MEMORIES_PC
     p->defense_modifier = 0;
 #endif
+#ifdef MEMORIES_PC
+    p->terrain_modifier = Duel_GetTerrainBoost(Cards_Type((s16)p->card_id));
+#else
     p->terrain_modifier =
         Duel_GetTerrainBoost(
             (gDuel_adwCardStats[(s16)p->card_id - 1] >>
              CARD_STAT_TYPE_SHIFT) &
             CARD_STAT_TYPE_MASK);
+#endif
 
     base = D_80177EA4;
     q = &base[idx * 2];

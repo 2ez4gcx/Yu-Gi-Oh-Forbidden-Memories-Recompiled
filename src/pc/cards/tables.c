@@ -232,8 +232,9 @@ static int fixed_count, fixed_room;
 static long overflow_starchips;          /* per card the chest has no room for */
 static int chest_limit;                  /* copies the chest keeps; 0: the disc's 250 */
 #define TERRAINS 6                        /* DUEL_TERRAIN_COUNT: Forest to Yami, 1-6 */
-/* Types live in the card record's five-bit field.  The retail terrain table
- * has only 20 rows, but a mod may provide a bonus for any declared type. */
+/* Retail types use the card record's five-bit field; custom monster types
+ * use cards.c's logical type bank.  A mod may provide a bonus for any
+ * declared monster type. */
 #define TABLE_TYPE_LIMIT 256
 static short terrain_bonus[TERRAINS][TABLE_TYPE_LIMIT];
 static unsigned char terrain_listed[TERRAINS][TABLE_TYPE_LIMIT];

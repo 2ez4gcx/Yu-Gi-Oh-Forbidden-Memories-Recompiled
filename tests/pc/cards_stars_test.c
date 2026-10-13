@@ -162,7 +162,7 @@ int Mods_Active(int mod) { (void)mod; return 0; }
 const char *Mods_Id(int mod) { (void)mod; return ""; }
 const char *Mods_Directory(int mod) { (void)mod; return "."; }
 const struct JsonValue *Mods_Manifest(int mod) { (void)mod; return NULL; }
-/* No mod here declares "card_types"/"monster_types": build_monster_types
+/* No mod here declares "card_types": build_monster_types
  * (cards.c) still calls this once, visiting nothing. */
 void Mods_VisitManifests(void (*visit)(const char *id, const char *directory,
                                        const struct JsonValue *manifest, void *context), void *context)

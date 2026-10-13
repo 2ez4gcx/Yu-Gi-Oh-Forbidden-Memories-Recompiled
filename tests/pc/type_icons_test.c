@@ -117,6 +117,14 @@ static void loaded_cells(void)
         assert(tpage == (PAGE | (BANK << 11)));
         assert(u >= 0 && u < 256 && v >= 0 && v < 256);
         assert((clut >> 6) >= CLUT_Y);
+        if (!i) {
+            /* Type cells deliberately occupy bank 14's free page at word
+             * 64, not bank 13's card-layout frame area or the star cells
+             * at word 0.  Their palettes use the matching free x column. */
+            assert(bank[0] == 0);
+            assert(bank[PAGE * 64] == 0x1111);
+            assert(bank[CLUT_Y * SOFT_GPU_WIDTH + CLUT_X] == 0x8000);
+        }
         seen_u[i] = u;
         seen_v[i] = v;
         /* The same id again: no re-decode (made[] already 1), same cell. */

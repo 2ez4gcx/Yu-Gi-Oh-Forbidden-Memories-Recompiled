@@ -54,8 +54,9 @@ def password_text(value):
     return None
 
 
-def _type_value(t: int):
-    return TYPE_NAMES[t] if 0 <= t < len(TYPE_NAMES) else t
+def _type_value(t: int, project=None):
+    names = getattr(project, "type_names", TYPE_NAMES) if project is not None else TYPE_NAMES
+    return names[t] if 0 <= t < len(names) and names[t] else (TYPE_NAMES[t] if 0 <= t < len(TYPE_NAMES) else t)
 
 
 def _attribute_value(a: int):
@@ -66,7 +67,7 @@ def _star_value(s: int):
     return STAR_NAMES[s] if 1 <= s < len(STAR_NAMES) else s
 
 
-def _card_fields(card, base, everything=False) -> dict:
+def _card_fields(card, base, everything=False, project=None) -> dict:
     out = {}
     if everything or card.name != base.name:
         out["name"] = card.name
@@ -77,7 +78,7 @@ def _card_fields(card, base, everything=False) -> dict:
     if everything or card.defense != base.defense:
         out["defense"] = card.defense
     if everything or card.type != base.type:
-        out["type"] = _type_value(card.type)
+        out["type"] = _type_value(card.type, project)
     if everything or card.attribute != base.attribute:
         out["attribute"] = _attribute_value(card.attribute)
     if everything or card.level != base.level:
@@ -96,7 +97,7 @@ def build_cards(project: Project) -> list:
     entries = []
     for cid in sorted(project.retail.cards):
         card, retail = project.cards[cid], project.retail.cards[cid]
-        fields = _card_fields(card, retail)
+        fields = _card_fields(card, retail, project=project)
         for name, value in project.text_cards.get(cid, {}).items():
             if fields.get(name) == value:
                 del fields[name]        # the mod's text file carries it, codes and all
@@ -116,7 +117,7 @@ def build_cards(project: Project) -> list:
         base = project.cards[added.base]
         entry = {"copy": added.base, "id": added.key}
         fields = {"name": card.name}
-        fields.update(_card_fields(card, base))     # what is left out is the base's, as the port has it
+        fields.update(_card_fields(card, base, project=project))     # what is left out is the base's, as the port has it
         if not card.is_monster() and card.type != base.type:
             effect = project.retail.cards.get(project.effect_of(cid))
             # The port refuses a copy made another non-monster without a
@@ -617,6 +618,37 @@ def _choice(value, names):
     return -1
 
 
+def _type_choice(project, value):
+    """The runtime type resolver, including retail aliases after a rename."""
+    choice = _choice(value, getattr(project, "type_names", TYPE_NAMES))
+    if choice >= 0:
+        return choice
+    if isinstance(value, str):
+        choice = _choice(value, TYPE_NAMES)
+        if choice >= 0:
+            return choice
+    return -1
+
+
+def read_card_types(project: Project, section, messages: list):
+    """Read the registry before cards so a card may name a new type."""
+    if section is None:
+        return
+    if not isinstance(section, dict) or not isinstance(section.get("types"), list):
+        messages.append("\"card_types\" is an object with a \"types\" list; left out")
+        return
+    for index, entry in enumerate(section["types"]):
+        where = f"card_types.types[{index}]"
+        if not isinstance(entry, dict) or type(entry.get("id")) is not int or not isinstance(entry.get("name"), str):
+            messages.append(f"{where}: an object with numeric \"id\" and string \"name\"; left out")
+            continue
+        type_, name = entry["id"], entry["name"]
+        if not (0 <= type_ < TYPE_LIMIT) or not name:
+            messages.append(f"{where}: id is 0-23 or 24-255 with a non-empty name; left out")
+            continue
+        project.type_names[type_] = name
+
+
 def _number(value, default=-1):
     """json.c Json_Number: a whole number (2048.0 is one), true as 1, or a
     number written as a string."""
@@ -639,7 +671,7 @@ def _clamp(value, low, high):
     return max(low, min(high, value))
 
 
-def _apply_fields(card, entry: dict, is_replace: bool, messages: list, where: str, stars_section=None, effect_type=None):
+def _apply_fields(project: Project, card, entry: dict, is_replace: bool, messages: list, where: str, stars_section=None, effect_type=None):
     name = entry.get("name")
     if isinstance(name, str) and name:
         card.name = name
@@ -653,7 +685,7 @@ def _apply_fields(card, entry: dict, is_replace: bool, messages: list, where: st
     if value >= 0:
         card.defense = _clamp(value // 10, 0, 0x1FF) * 10
     if "type" in entry:
-        value = _choice(entry["type"], TYPE_NAMES)
+        value = _type_choice(project, entry["type"])
         if value >= 0:
             value = _clamp(value, 0, TYPE_LIMIT - 1)
             if (not is_replace and not is_monster_type(value) and value != card.type and value != effect_type and
@@ -750,7 +782,7 @@ def read_cards(project: Project, entries, messages: list):
         notes = _read_notes(entry, messages, where)
         if is_replace:
             was_monster = is_monster_type(project.cards[base].type)
-            _apply_fields(project.cards[base], entry, True, messages, where, project.other.get("guardian_stars"))
+            _apply_fields(project, project.cards[base], entry, True, messages, where, project.other.get("guardian_stars"))
             _default_stars(project, project.cards[base], entry, was_monster, base)
             if notes:
                 had = project.notes.get(base)
@@ -782,7 +814,7 @@ def read_cards(project: Project, entries, messages: list):
             effect_id = project.effect_of(base)
         effect = project.retail.cards.get(effect_id)
         was_monster = is_monster_type(project.cards[cid].type)
-        _apply_fields(project.cards[cid], entry, False, messages, where, project.other.get("guardian_stars"),
+        _apply_fields(project, project.cards[cid], entry, False, messages, where, project.other.get("guardian_stars"),
                       effect.type if effect else None)
         _default_stars(project, project.cards[cid], entry, was_monster, base)
         added = project.added[cid]
@@ -1031,11 +1063,11 @@ def read_rituals(project: Project, entries, messages: list):
                             req["card"] = cid
                     if "type" in tribute:
                         value = tribute["type"]
-                        named = type_named(value) if isinstance(value, str) else -1
-                        if named < 0 or named >= TYPE_MAGIC:
+                        named = _type_choice(project, value)
+                        if named < 0 or not is_monster_type(named):
                             valid = False
                         else:
-                            req["type"] = TYPE_NAMES[named]
+                            req["type"] = _type_value(named, project)
                     if "fusion_group" in tribute:
                         value = fusion_group_named(tribute["fusion_group"])
                         if not value:
@@ -1324,6 +1356,7 @@ def apply(project: Project, manifest: dict, messages: list = None, default_id: s
     info.settings = settings if isinstance(settings, list) else []
     project.info = info
     project.other = {k: v for k, v in manifest.items() if k not in INFO_KEYS and k not in TABLE_KEYS}
+    read_card_types(project, manifest.get("card_types"), messages)
     read_cards(project, manifest.get("cards"), messages)
     read_fusions(project, manifest.get("fusions"), messages)
     read_equips(project, manifest.get("equips"), messages)

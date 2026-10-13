@@ -250,7 +250,7 @@ class FilterPanel(ttk.LabelFrame):
         if self.project is None:
             return
         lines = [f"{cid:4}  {self.project.cards[cid].name}  (ATK {self.project.cards[cid].attack}, "
-                 f"{TYPE_NAMES[self.project.cards[cid].type] if self.project.cards[cid].type < len(TYPE_NAMES) else '?'})"
+                 f"{self.project.type_names[self.project.cards[cid].type] if 0 <= self.project.cards[cid].type < len(self.project.type_names) and self.project.type_names[self.project.cards[cid].type] else '?'})"
                  for cid in self.chosen]
         show_text(self, f"{self.cget('text')}: {len(lines)} cards", "\n".join(lines) or "(none)", width=70, height=30)
 

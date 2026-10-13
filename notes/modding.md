@@ -115,7 +115,8 @@ checked as well, when it starts.
 | 9 or less | v0.2.0 | everything not listed below; added cards, duelists, starter pools, packs, the title's menus |
 | 10 | v0.2.1-preview.1 | `card_text_colors`; a card's `monster_effects` or `trap_threshold`; an equip's `bonus_attack`/`bonus_defense`; a pack's `image_style`; an added card (`copy`) of another kind than its base (a monster made a magic card, a magic card a monster or a trap), or whose `model` or `effect` is a card's name; the `MEMORIES_EVENT_MONSTER` event |
 | 11 | the release after v0.2.1-preview.1 | `assets`, `ui`, `card_layout`, `palette_ramps`; a card's `tags`, or a `frame` of `Gold`, `Green`, `Pink` or `Blue`; a monster effect's `for_each`; `{"remove": "all"}` in `fusions`; a ritual of other than three tributes, or with `tributes_from` `hand` or `both`; the title's `images`, a `scale` in `title` or `menu`; the `limits` `deck_copies`, `swords_turns`, `crush_card`, `spellbinding_circle`, `shadow_spell`, `rank_score`, `starchip_prize` and `new_game_starchips` |
-| 12 | the release after API 11 | `card_types`: renamed retail types, new monster types and their per-type icons |
+| 12 | the release after API 11 | code-mod sounds (`sound_add`, `sound_play`, `sound_free`) |
+| 13 | the release after API 12 | `card_types`: renamed retail types, new monster types and their per-type icons |
 
 The FM Editor writes `min_api` on save as the lowest one of these that has
 everything the mod uses, never lowering one written higher, and its Mod
@@ -1298,7 +1299,11 @@ Existing IDs retain their game behaviour; a mod may rename any of them. The
 type bank has IDs `24` through `255` for new monster types. Every new type is
 stored beside the disc's five-bit field; untouched original routines receive
 the Dragon monster encoding as a safe compatibility value, while framework
-rules and the custom-type renderers use the banked identity.
+rules and the custom-type renderers use the banked identity. The port-owned
+terrain, equip, ritual, fusion and monster-effect paths use the banked type.
+An original routine that reads the packed retail field directly still treats a
+custom type as Dragon; mods that need to change one of those retail-only
+effects must provide its rule or hook.
 
 ```json
 "card_types": {
@@ -1328,13 +1333,14 @@ HD image where HD rendering is active.
 
 Type IDs are stored in the loaded card tables, so changing an existing ID's name does
 not convert cards. Later active mods replace an earlier name for the same ID.
-A card or rule may use either its numeric ID or its currently declared name.
+A card or rule may use either its numeric ID or its currently declared name;
+the original retail spelling remains an alias after a retail type is renamed,
+so existing rule mods keep working.
 Names are case- and punctuation-insensitive and must be unique across retail
 and custom types; a colliding declaration is rejected. The game warns when a
 display name drops unsupported glyphs; manifests still refer to the original
 UTF-8 name.
-An old preview manifest spelling, `monster_types`, is accepted as an alias;
-new mods should use `card_types` and set `"min_api": 12`.
+Use `card_types` and set `"min_api": 13`.
 
 ## Guardian Stars: names, icons, new stars and matchups
 

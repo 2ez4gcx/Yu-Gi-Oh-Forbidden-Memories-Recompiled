@@ -499,7 +499,8 @@ class CardPicker(tk.Toplevel):
             if not card_matches(self.project, cid, text):
                 continue
             card = self.project.cards[cid]
-            kind = TYPE_NAMES[card.type] if 0 <= card.type < len(TYPE_NAMES) else str(card.type)
+            names = getattr(self.project, "type_names", TYPE_NAMES)
+            kind = names[card.type] if 0 <= card.type < len(names) and names[card.type] else str(card.type)
             self.tree.insert("", "end", iid=str(cid), values=(cid, card.name, kind))
             shown += 1
             if shown >= 800:

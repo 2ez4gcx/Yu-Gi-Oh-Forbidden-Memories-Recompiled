@@ -543,8 +543,8 @@ static const char *const retail_type_names[] = {"Dragon", "Spellcaster", "Zombie
                                                 "Winged Beast", "Fiend", "Fairy", "Insect", "Dinosaur", "Reptile",
                                                 "Fish", "Sea Serpent", "Machine", "Thunder", "Aqua", "Pyro", "Rock",
                                                 "Plant", "Magic", "Trap", "Ritual", "Equip"};
-/* The card record has a five-bit type.  20-23 are the four non-monster
- * kinds, so eight encodings remain for mod-defined monster types. */
+/* The card record has a five-bit retail type.  New monster identities live
+ * in the separate bank below, so they do not consume or wrap those bits. */
 #define CARD_TYPE_LIMIT 256
 static const char *type_names[CARD_TYPE_LIMIT];
 /* Icons are owned copies because a Json document is freed when its mod is
@@ -566,6 +566,7 @@ static const char *const frame_color_names[] = {"Gold", "Green", "Pink", "Blue"}
 
 static int same_words(const char *a, const char *b)
 {
+    if (!a || !b) return 0;
     for (; *a && *b; a++, b++) {
         if (tolower((unsigned char)*a) != tolower((unsigned char)*b)) return 0;
     }
@@ -582,7 +583,7 @@ static int choice(const JsonValue *value, const char *const *choices, int count)
     text = Json_String(value, NULL);
     if (!text) return -1;
     for (i = 0; i < count; i++) {
-        if (same_words(text, choices[i])) return i;
+        if (choices[i] && same_words(text, choices[i])) return i;
     }
     return (int)Json_Number(value, -1);
 }
@@ -593,6 +594,10 @@ static int choice(const JsonValue *value, const char *const *choices, int count)
 static int type_choice(const JsonValue *value)
 {
     int type = choice(value, type_names, CARD_TYPE_LIMIT);
+    const char *text;
+    /* choice() uses display names for the fast, exact case.  A renamed
+     * retail type also keeps its disc spelling as a resolver alias. */
+    if (type < 0 && (text = Json_String(value, NULL))) type = Cards_TypeNamed(text);
     return type >= 0 && type < CARD_TYPE_LIMIT && type_names[type] ? type : -1;
 }
 
@@ -611,9 +616,8 @@ static int same_letters(const char *a, const char *b)
 
 /* "card_types": {"types": [{"id": 24, "name": "Cyberse"}]}.  A
  * declaration for an existing id changes its display/manifest name, never
- * its numeric identity or behaviour.  The record has five type bits: 24-31
- * are the first vacant values in the type bank, and are necessarily monsters.  "monster_types"
- * is the pre-release spelling, retained so early mods keep working. */
+ * its numeric identity or behaviour.  The record has five type bits; IDs
+ * 24-255 live in the type bank and are necessarily monsters. */
 static void add_card_types_section(const char *mod, const char *directory, const JsonValue *section, const char *where)
 {
     const JsonValue *entry;
@@ -657,6 +661,15 @@ static void add_card_types_section(const char *mod, const char *directory, const
                     goto next_type;
                 }
             }
+            /* Retail spellings remain lookup aliases after a rename.  Do
+             * not let a later custom declaration make one ambiguous. */
+            for (other = CARD_TYPE_DRAGON; other <= CARD_TYPE_EQUIP; other++) {
+                if (other != id && same_letters(Json_String(name, ""), retail_type_names[other])) {
+                    Mods_Note(mod, "%s.types[%d]: \"%s\" is already type %d's retail alias; declaration left out",
+                              where, index, Json_String(name, ""), other);
+                    goto next_type;
+                }
+            }
             {
                 unsigned char *encoded = encode_type_name(mod, Json_String(name, ""), where, index);
                 if (!encoded) goto next_type;
@@ -680,7 +693,6 @@ next_type:
 static void add_card_types(const char *mod, const char *directory, const JsonValue *manifest, void *context)
 {
     (void)context;
-    add_card_types_section(mod, directory, Json_Member(manifest, "monster_types"), "monster_types");
     add_card_types_section(mod, directory, Json_Member(manifest, "card_types"), "card_types");
 }
 
@@ -788,6 +800,12 @@ int Cards_TypeNamed(const char *text)
     int type;
     for (type = 0; text && type < CARD_TYPE_LIMIT; type++) {
         if (type_names[type] && same_letters(text, type_names[type])) return type;
+    }
+    /* A retail rename changes what the player sees, not what existing mods
+     * may write in terrain/equip/ritual rules.  Keep the disc spelling as a
+     * permanent lookup alias. */
+    for (type = CARD_TYPE_DRAGON; text && type <= CARD_TYPE_EQUIP; type++) {
+        if (same_letters(text, retail_type_names[type])) return type;
     }
     return -1;
 }

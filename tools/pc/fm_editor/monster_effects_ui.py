@@ -5,7 +5,7 @@ from __future__ import annotations
 import tkinter as tk
 from tkinter import ttk
 
-from . import card_icons, monster_effects as fx
+from . import card_icons, manifest, monster_effects as fx
 from .icon_choice import IconChoice
 from .gamedata import ATTRIBUTE_NAMES, TYPE_MAGIC, TYPE_NAMES
 from .widgets import FormDialog, px, scrolled_tree
@@ -79,7 +79,8 @@ class EffectsBox(ttk.LabelFrame):
             self.note.configure(text="No effects")
         else:
             # Only what is wrong with the list; nothing when it is fine.
-            problems = fx.problems(self.effects, self.project.resolve if self.project else None)
+            problems = fx.problems(self.effects, self.project.resolve if self.project else None,
+                                   self.attribute_choice if self.project else None)
             self.note.configure(text="\n".join(problems))
         if self.note.cget("text"):
             self.note.grid()
@@ -90,17 +91,20 @@ class EffectsBox(ttk.LabelFrame):
         card = self.project.cards.get(cid) if self.project else None
         return card.name if card else f"#{cid}"
 
+    def attribute_choice(self, value):
+        return manifest._attribute_choice(value, self.project.other.get("attributes"))
+
     def fill(self):
         self.tree.delete(*self.tree.get_children())
         for n, effect in enumerate(self.effects):
-            if fx.normalize(effect, self.project.resolve) is None:
+            normalized = fx.normalize(effect, self.project.resolve, self.attribute_choice)
+            if normalized is None:
                 when = effect.get("when", "?") if isinstance(effect, dict) else "?"
                 self.tree.insert("", "end", iid=str(n), values=(when, "(not one the game takes) " +
                                                                 fx.describe_raw(effect)))
                 continue
             self.tree.insert("", "end", iid=str(n), values=(fx.when_label(fx._name(fx.WHEN, effect.get("when"))),
-                                                            fx.describe(fx.normalize(effect, self.project.resolve),
-                                                                        self.label)))
+                                                            fx.describe(normalized, self.label)))
         self.show_buttons()
 
     def selected(self):
@@ -168,13 +172,37 @@ class EffectDialog(FormDialog):
         """app: the window, whose game files give the lists' icons (none without)."""
         self.project, self.label, self.app = project, label, app
         self.result = None
-        effect = fx.normalize(effect, project.resolve) if effect else None
+        effect = fx.normalize(effect, project.resolve, self.attribute_choice) if effect else None
         self.start = effect or {"when": "summon", "do": "boost", "target": "self", "attack": 500}
         super().__init__(master, "Monster effect" if effect is None else "Change the monster effect", self.build,
                          self.read)
 
     def magic_label(self, cid):
         return f"{cid} {self.label(cid)}"
+
+    def attribute_choice(self, value):
+        return manifest._attribute_choice(value, self.project.other.get("attributes"))
+
+    def custom_attribute_labels(self):
+        names, declared = manifest._attribute_registry(self.project.other.get("attributes"))
+        return {(f"{names[ident]} ({ident})" if names[ident] == ANY else names[ident]): ident
+                for ident in sorted(declared)}
+
+    def attribute_names(self):
+        names, declared = manifest._attribute_registry(self.project.other.get("attributes"))
+        labels = self.custom_attribute_labels()
+        retail = [next((label for label, ident in labels.items() if ident == ident_), names[ident_])
+                  for ident_ in range(len(ATTRIBUTE_NAMES))]
+        return [ANY] + retail + [label for label, ident in labels.items() if ident >= len(ATTRIBUTE_NAMES)]
+
+    def attribute_label(self, value):
+        names, declared = manifest._attribute_registry(self.project.other.get("attributes"))
+        if type(value) is int and value in declared:
+            return next(label for label, ident in self.custom_attribute_labels().items() if ident == value)
+        return names[value] if type(value) is int and 0 <= value < len(ATTRIBUTE_NAMES) else value
+
+    def attribute_value(self, label):
+        return self.custom_attribute_labels().get(label, label)
 
     def build(self, dialog, body):
         e = self.start
@@ -203,7 +231,7 @@ class EffectDialog(FormDialog):
                                                                state="readonly", width=30))
         line("type", "Only type", self.choice(body, "type", [ANY] + TYPE_NAMES[:TYPE_MAGIC],
                                               lambda v: TYPE_NAMES.index(v) if v in TYPE_NAMES else None))
-        line("attribute", "Only attribute", self.choice(body, "attribute", [ANY] + ATTRIBUTE_NAMES, self.attribute_icon))
+        line("attribute", "Only attribute", self.choice(body, "attribute", self.attribute_names(), self.attribute_icon))
         pictures = card_icons.photos(self.app, body, 2) if self.app is not None else {}
         for key, label in (("attack", "ATK"), ("defense", "DEF")):
             line(key, label, ttk.Spinbox(body, textvariable=self.vars[key], from_=-fx.BOOST_MAX, to=fx.BOOST_MAX,
@@ -217,7 +245,7 @@ class EffectDialog(FormDialog):
                                               values=[fx.NO_EACH] + list(fx.EACH_LABELS)))
         line("each_type", "Counting type", self.choice(body, "each_type", [ANY] + TYPE_NAMES[:TYPE_MAGIC],
                                                        lambda v: TYPE_NAMES.index(v) if v in TYPE_NAMES else None))
-        line("each_attribute", "Counting attribute", self.choice(body, "each_attribute", [ANY] + ATTRIBUTE_NAMES,
+        line("each_attribute", "Counting attribute", self.choice(body, "each_attribute", self.attribute_names(),
                                                                  self.attribute_icon))
         self.vars["when"].set(fx.when_label(e["when"]))
         self.vars["do"].set(fx.DO_LABELS[fx.DO.index(e["do"])])
@@ -225,14 +253,14 @@ class EffectDialog(FormDialog):
         target = e.get("target", fx.default_target(e["when"], e["do"]))
         self.vars["target"].set(fx.TARGET_LABELS[fx.TARGET.index(target)])
         self.vars["type"].set(e.get("type", ANY))
-        self.vars["attribute"].set(e.get("attribute", ANY))
+        self.vars["attribute"].set(self.attribute_label(e.get("attribute", ANY)))
         self.vars["attack"].set(e.get("attack", 0))
         self.vars["defense"].set(e.get("defense", 0))
         self.vars["amount"].set(e.get("amount", 500))
         each = e.get("for_each")
         self.vars["each"].set(fx.EACH_LABELS[fx.EACH.index(each["whose"])] if each else fx.NO_EACH)
         self.vars["each_type"].set((each or {}).get("type", ANY))
-        self.vars["each_attribute"].set((each or {}).get("attribute", ANY))
+        self.vars["each_attribute"].set(self.attribute_label((each or {}).get("attribute", ANY)))
         for key in ("when", "do", "each"):
             self.vars[key].trace_add("write", lambda *_: self.show_rows())
         self.show_rows()
@@ -245,9 +273,10 @@ class EffectDialog(FormDialog):
         return IconChoice(body, self.app, self.vars[key], values, icon_of, width=30)
 
     def attribute_icon(self, value):
-        if value not in ATTRIBUTE_NAMES:
+        ident = self.attribute_choice(value)
+        if not 0 <= ident < len(ATTRIBUTE_NAMES):
             return None
-        return card_icons.photos(self.app, self).get("attribute", {}).get(ATTRIBUTE_NAMES.index(value))
+        return card_icons.photos(self.app, self).get("attribute", {}).get(ident)
 
     def chosen(self, key, names, labels):
         text = self.vars[key].get()
@@ -303,7 +332,7 @@ class EffectDialog(FormDialog):
                 return "A boost needs ATK or DEF."
             for key in ("type", "attribute"):
                 if self.vars[key].get() not in ("", ANY):
-                    effect[key] = self.vars[key].get()
+                    effect[key] = self.attribute_value(self.vars[key].get()) if key == "attribute" else self.vars[key].get()
         else:
             try:
                 effect["amount"] = int(self.vars["amount"].get().strip())
@@ -316,8 +345,9 @@ class EffectDialog(FormDialog):
             effect["for_each"] = {"whose": whose}
             for key in ("type", "attribute"):
                 if self.vars["each_" + key].get() not in ("", ANY):
-                    effect["for_each"][key] = self.vars["each_" + key].get()
-        effect = fx.normalize(effect, self.project.resolve)
+                    value = self.vars["each_" + key].get()
+                    effect["for_each"][key] = self.attribute_value(value) if key == "attribute" else value
+        effect = fx.normalize(effect, self.project.resolve, self.attribute_choice)
         if effect is None:
             return "The game cannot do that."
         self.result = effect

@@ -27,6 +27,7 @@ static unsigned test_glyphs[256];
 
 #include "../../src/pc/cards/cards.c"
 #include <assert.h>
+#include <limits.h>
 
 int gCard_nCount = CARD_COUNT, gCard_nExtraOwner;
 unsigned short gCard_awBaseId[CARD_TABLE_ID_END], gDuel_awPlayerDeck[1024];
@@ -413,6 +414,119 @@ static void monster_effect_for_each(void)
     assert(!MonsterEffect_EachAllowed(MONSTER_DO_MAGIC) && !MonsterEffect_EachAllowed(MONSTER_DO_DESTROY));
 }
 
+/* A monster-effect's "type" (monster_effects.c filter()) reads Json_Number's
+ * long before narrowing to int: 2^32 must be rejected as out of range, not
+ * silently narrowed first and read back as the valid type 0. */
+static void monster_effect_type_overflow(void)
+{
+    BuildContext context = {0};
+    char error[128];
+    const JsonValue *entry;
+    const MonsterEffect *effects;
+    int i, before = effect_notes;
+    JsonDocument *doc = Json_Parse(
+        "[{\"replace\":25,\"monster_effects\":["
+        "  {\"when\":\"summon\",\"do\":\"boost\",\"target\":\"own\",\"attack\":500,\"type\":4294967296}]}]",
+        error, sizeof(error));
+    assert(doc);
+    for (i = 0, entry = Json_At(Json_Root(doc), 0); entry; i++, entry = Json_Next(entry))
+        add_entry("i", ".", i, entry, &context);
+    assert(Cards_MonsterEffects(25, &effects) == 0);
+    assert(effect_notes == before + 1);
+}
+
+/* Cards_Reference reads Json_Number's long before Cards_Valid's int: a
+ * reference far past int range must not wrap into a valid card id (card 1,
+ * from 2^32 + 1 narrowed to 1 on a typical 64-bit build). */
+static void reference_overflow(void)
+{
+    char error[128];
+    JsonDocument *doc = Json_Parse("4294967297", error, sizeof(error));
+    assert(doc);
+    assert(Cards_Reference(Json_Root(doc)) == -1);
+    Json_Free(doc);
+}
+
+/* add_entry's own "copy"/"replace" id resolution has the same int-narrowing
+ * shape as Cards_Reference, just not through it: an oversized id must be
+ * refused, not silently narrowed into card 1 and applied to it. */
+static void copy_id_overflow(void)
+{
+    BuildContext context = {0};
+    char error[128];
+    const JsonValue *entry;
+    int i, before_count = gCard_nCount;
+    unsigned before_stats = (unsigned)gDuel_adwCardStats[0];
+    JsonDocument *doc = Json_Parse(
+        "[{\"copy\":4294967297,\"id\":\"overflow-copy\",\"attack\":3000},"
+        "{\"replace\":4294967297,\"attack\":3000}]",
+        error, sizeof(error));
+    assert(doc);
+    for (i = 0, entry = Json_At(Json_Root(doc), 0); entry; i++, entry = Json_Next(entry))
+        add_entry("i", ".", i, entry, &context);
+    assert(gCard_nCount == before_count);              /* no copy added */
+    assert((unsigned)gDuel_adwCardStats[0] == before_stats);   /* card 1 (2^32+1 narrowed) untouched */
+}
+
+/* "attack"/"defense" (notes/modding.md): a value the field's own comment
+ * says is always said, never quietly changed. Before the fix, 2^32 (past
+ * int range) narrowed to 0 first, which is neither "> 0x1FF*10" nor "not a
+ * multiple of 10" -- so it skipped both notes and was written as a silent
+ * 0, the one thing the comment says this field never does. */
+static void stat_overflow_attack_defense(void)
+{
+    BuildContext context = {0};
+    char error[128];
+    const JsonValue *entry;
+    int i;
+    JsonDocument *doc;
+    gDuel_adwCardStats[25] = test_stats[25] = STATS(0, SUN, MOON);   /* magic_conversions made it Magic */
+    doc = Json_Parse("[{\"replace\":26,\"attack\":4294967296}]", error, sizeof(error));
+    assert(doc);
+    for (i = 0, entry = Json_At(Json_Root(doc), 0); entry; i++, entry = Json_Next(entry))
+        add_entry("j", ".", i, entry, &context);
+    assert(((unsigned)gDuel_adwCardStats[25] & 0x1FF) == 0x1FF);   /* clamped to the max, not zeroed */
+}
+
+/* choice() (shared by "type", "frame" and "frame_color"): 2^32 + 5 must not
+ * narrow into the valid type 5 (Beast) and get applied -- whatever type the
+ * card already had (Magic, by this point: magic_conversions touched every
+ * card) must still be what it has. */
+static void type_overflow_via_choice(void)
+{
+    BuildContext context = {0};
+    char error[128];
+    const JsonValue *entry;
+    int i;
+    unsigned before = (unsigned)gDuel_adwCardStats[26];
+    JsonDocument *doc = Json_Parse("[{\"replace\":27,\"type\":4294967301}]", error, sizeof(error));
+    assert(doc);
+    for (i = 0, entry = Json_At(Json_Root(doc), 0); entry; i++, entry = Json_Next(entry))
+        add_entry("j", ".", i, entry, &context);
+    assert((unsigned)gDuel_adwCardStats[26] == before);
+}
+
+/* "count" and "level" have the same shape: each oversized value must come
+ * back as narrow()'s own -1 (no copy made / the base's level kept), not an
+ * arbitrary wrapped-around value that happens to still be in range. */
+static void count_and_level_overflow(void)
+{
+    BuildContext context = {0};
+    char error[128];
+    const JsonValue *entry;
+    int i, before_count = gCard_nCount;
+    unsigned char before_level = (unsigned char)(gDuel_abCardLevelAttr[28] & 0xF);
+    JsonDocument *doc = Json_Parse(
+        "[{\"copy\":1,\"id\":\"count-overflow\",\"count\":4294967296},"
+        "{\"replace\":28,\"level\":4294967301}]",
+        error, sizeof(error));
+    assert(doc);
+    for (i = 0, entry = Json_At(Json_Root(doc), 0); entry; i++, entry = Json_Next(entry))
+        add_entry("j", ".", i, entry, &context);
+    assert(gCard_nCount == before_count);   /* "count" narrowed to -1, then clamped to 0 copies */
+    assert((gDuel_abCardLevelAttr[28] & 0xF) == before_level);
+}
+
 /* Copies of magic cards made monsters (as a replace may be): a monster's
  * type, ATK and DEF, stars as a replaced card gets them, out of the magic
  * card's tables; made a Trap without a trap's effect, still refused. */
@@ -592,6 +706,12 @@ int main(void)
     trap_conversions();
     monster_effect_entries();
     monster_effect_for_each();
+    if (LONG_MAX > INT_MAX) monster_effect_type_overflow();
+    if (LONG_MAX > INT_MAX) reference_overflow();
+    if (LONG_MAX > INT_MAX) copy_id_overflow();
+    if (LONG_MAX > INT_MAX) stat_overflow_attack_defense();
+    if (LONG_MAX > INT_MAX) type_overflow_via_choice();
+    if (LONG_MAX > INT_MAX) count_and_level_overflow();
     copies_made_monsters();
     card_effect_entries();
     puts("cards stars, magic and trap conversions: ok");

@@ -16,6 +16,7 @@
 #include "pc/cards/pack_shop.h"
 #include "pc/cards/card_layout.h"
 #include "pc/cards/card_layout_art.h"
+#include "pc/cards/attributes.h"
 #include "pc/debug/log.h"
 #endif
 /*
@@ -586,6 +587,26 @@ void func_80028B08(DisplayObject *obj, s32 arg1) {
     PRM->cxcy.h.cx = win->field_40.h.field_40 + tile;
     PRM->cxcy.h.cy = 0xFF;
 #ifdef MEMORIES_PC
+    {
+        int tpage, u, v, cx, cy;
+        if (Attributes_IconCell(rec->field_3B, &tpage, &u, &v, &cx, &cy)) {
+            PRM->tpage = (u16)tpage;
+            PRM->uv.b.lo = (u8)u;
+            PRM->uv.b.hi = (u8)v;
+            PRM->cxcy.h.cx = (s16)cx;
+            PRM->cxcy.h.cy = (s16)cy;
+        } else if (rec->field_3B >= 8) {
+            /* A bank-icon attribute no active mod declares (its mod got
+             * disabled, or never declared it): lo/cxcy above just read
+             * rec->field_3B as if it were a 0-5 retail index into the
+             * six-icon strip and walked off its end. Draw attribute 0
+             * instead of whatever texel happens to sit past the strip. */
+            PRM->uv.b.lo = 0;
+            PRM->uv.b.hi = PRM->uv.b.hi & 0x80;
+            PRM->cxcy.h.cx = win->field_40.h.field_40;
+            PRM->cxcy.h.cy = 0xFF;
+        }
+    }
     /* A full-bleed mod stretches whatever this slot already draws
      * (retail's own elemental-attribute texture, rec->field_3B/PRM, set up
      * just above -- unchanged, not swapped for anything else) into its own

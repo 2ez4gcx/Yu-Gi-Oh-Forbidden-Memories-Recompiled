@@ -699,7 +699,92 @@ def _clamp(value, low, high):
     return max(low, min(high, value))
 
 
-def _apply_fields(project: Project, card, entry: dict, is_replace: bool, messages: list, where: str, stars_section=None, effect_type=None):
+def _attribute_letters(value: str) -> bytes:
+    """attributes.c same_letters(): punctuation skipped, ASCII folded only.
+
+    The runtime compares UTF-8 bytes rather than Unicode case-folded
+    characters. Keep that deliberately narrow rule here so the editor never
+    resolves a declaration differently from the game.
+    """
+    return bytes(c for c in value.encode("utf-8")
+                 if 48 <= c <= 57 or 65 <= c <= 90 or 97 <= c <= 122 or c >= 0x80).lower()
+
+
+def _attribute_name_has_letters(value: str) -> bool:
+    return bool(_attribute_letters(value))
+
+
+def _attribute_numeric_name(value: str) -> bool:
+    folded = _attribute_letters(value)
+    return bool(folded) and all(48 <= c <= 57 for c in folded)
+
+
+def _attribute_registry(section):
+    """The declarations Attributes_Add() would accept from this manifest.
+
+    The editor loads one mod manifest at a time, so this deliberately models
+    that manifest's registry, including its declaration order. Runtime mods
+    may additionally provide declarations from earlier active mods.
+    """
+    names = list(ATTRIBUTE_NAMES) + [""] * (256 - len(ATTRIBUTE_NAMES))
+    declared = set()
+    entries = section.get("attributes") if isinstance(section, dict) else None
+    if not isinstance(entries, list):
+        return names, declared
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        ident, name = entry.get("id"), entry.get("name")
+        if type(ident) is not int or not isinstance(name, str) or not name:
+            continue
+        if not 0 <= ident <= 255 or ident in (6, 7):
+            continue
+        if not _attribute_name_has_letters(name) or _attribute_numeric_name(name):
+            continue
+        duplicate = any(i != ident and _attribute_letters(name) == _attribute_letters(retail)
+                        for i, retail in enumerate(ATTRIBUTE_NAMES))
+        duplicate = duplicate or any(i != ident and existing and _attribute_letters(name) == _attribute_letters(existing)
+                                     for i, existing in enumerate(names))
+        if duplicate:
+            continue
+        names[ident] = name
+        declared.add(ident)
+    return names, declared
+
+
+def _attribute_choice(value, section) -> int:
+    """The runtime-valid retail or declared attribute represented by value."""
+    names, declared = _attribute_registry(section)
+    found = -1
+    if type(value) is int:
+        found = value
+    elif isinstance(value, str):
+        # Attributes_Find uses strtol(..., 10) before names. Python's int()
+        # accepts trailing whitespace, which strtol does not, so keep the
+        # spelling rule explicit.
+        if re.fullmatch(r"[ \t\n\r\f\v]*[+-]?[0-9]+", value):
+            found = int(value, 10)
+        else:
+            folded = _attribute_letters(value)
+            for i, name in enumerate(ATTRIBUTE_NAMES):
+                if folded == _attribute_letters(name) or folded == _attribute_letters(names[i]):
+                    found = i
+                    break
+            if found < 0:
+                for i in range(len(ATTRIBUTE_NAMES), len(names)):
+                    if names[i] and folded == _attribute_letters(names[i]):
+                        found = i
+                        break
+    # 6 and 7 are the retail magic/trap attributes: never declarable, but a
+    # card may carry them as a number (the editor writes them for a
+    # Magic/Trap card), as the game takes them (cards.c add_entry).
+    if found in (6, 7):
+        return found if type(value) is int else -1
+    return found if 0 <= found < len(ATTRIBUTE_NAMES) or found in declared else -1
+
+
+def _apply_fields(project: Project, card, entry: dict, is_replace: bool, messages: list, where: str,
+                  stars_section=None, attributes_section=None, effect_type=None):
     name = entry.get("name")
     if isinstance(name, str) and name:
         card.name = name
@@ -744,9 +829,12 @@ def _apply_fields(project: Project, card, entry: dict, is_replace: bool, message
     if value >= 0:
         card.level = _clamp(value, 0, 12)
     if "attribute" in entry:
-        value = _choice(entry["attribute"], ATTRIBUTE_NAMES)
+        value = _attribute_choice(entry["attribute"], attributes_section)
         if value >= 0:
-            card.attribute = _clamp(value, 0, 15)
+            card.attribute = _clamp(value, 0, 255)
+        else:
+            messages.append(f"{where}: \"attribute\" is a retail attribute, or an id/name this mod's own "
+                            f"\"attributes\" declares; left out")
     if "frame" in entry:
         value = _choice(entry["frame"], FRAME_NAMES + ["Type"])
         if not 0 <= value <= len(FRAME_NAMES):
@@ -810,7 +898,8 @@ def read_cards(project: Project, entries, messages: list):
         notes = _read_notes(entry, messages, where)
         if is_replace:
             was_monster = is_monster_type(project.cards[base].type)
-            _apply_fields(project, project.cards[base], entry, True, messages, where, project.other.get("guardian_stars"))
+            _apply_fields(project, project.cards[base], entry, True, messages, where, project.other.get("guardian_stars"),
+                          project.other.get("attributes"))
             _default_stars(project, project.cards[base], entry, was_monster, base)
             if notes:
                 had = project.notes.get(base)
@@ -843,7 +932,7 @@ def read_cards(project: Project, entries, messages: list):
         effect = project.retail.cards.get(effect_id)
         was_monster = is_monster_type(project.cards[cid].type)
         _apply_fields(project, project.cards[cid], entry, False, messages, where, project.other.get("guardian_stars"),
-                      effect.type if effect else None)
+                      project.other.get("attributes"), effect.type if effect else None)
         _default_stars(project, project.cards[cid], entry, was_monster, base)
         added = project.added[cid]
         added.drops = _json_bool(entry.get("drops"), True)

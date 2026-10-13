@@ -16,6 +16,7 @@
 #include "tables.h"
 #include "starter.h"
 #include "stars.h"
+#include "attributes.h"
 #include "type_icons.h"
 #include "pc/tower/tower.h"
 #include "packs.h"
@@ -35,6 +36,7 @@
 #include "pc/compat/posix.h"
 #include "game/card_constants.h"
 #include <ctype.h>
+#include <limits.h>
 #include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -81,6 +83,9 @@ static unsigned char not_exodia[EXODIA_PIECE_COUNT];  /* a replaced piece withou
  * left out, FRAME_TYPE "Type" (cards.h Cards_FrameColor). */
 #define FRAME_TYPE 0xFF
 static unsigned char frames[CARD_TABLE_ID_END];
+/* The original table packs an attribute into four bits beside level.  Keep
+ * its retail values for guest code, but let PC cards carry any registry id. */
+static unsigned short attribute_ids[CARD_TABLE_ID_END];
 /* Types past the retail word's five bits. -1 means the packed type is the
  * card's complete identity. The original engine sees their monster fallback
  * (Dragon); port-owned rules call Cards_Type and see this bank value. */
@@ -557,7 +562,6 @@ static char type_icons[CARD_TYPE_LIMIT][TYPE_ICON_PATH];
  * owned, like a card's own name (encode_name), rather than a copy of the
  * manifest's UTF-8, which the game's text stream cannot read directly. */
 static unsigned char *type_name_text[CARD_TYPE_LIMIT];
-static const char *const attribute_names[] = {"Light", "Dark", "Earth", "Water", "Fire", "Wind"};
 /* The frames, in the order of their palettes (CARD_FRAME_*); "type" is the
  * card's own type's again. */
 static const char *const frame_names[] = {"Monster", "Magic", "Trap", "Ritual", "Purple", "Orange", "Type"};
@@ -574,19 +578,29 @@ static int same_words(const char *a, const char *b)
     return !*a && !*b;
 }
 
+/* Json_Number's long, narrowed to int only when it actually fits -- -1
+ * otherwise, the same sentinel a name choice() does not find already
+ * means. Past int range (e.g. 2^32), narrowing first wraps into some
+ * arbitrary in-range int instead of the deliberately-out-of-range value
+ * every caller's own clamp or rejection expects to see. */
+static int narrow(long raw)
+{
+    return raw < INT_MIN || raw > INT_MAX ? -1 : (int)raw;
+}
+
 /* A number, or one of `names` spelled out. -1 when it is neither. */
 static int choice(const JsonValue *value, const char *const *choices, int count)
 {
     int i;
     const char *text;
     if (!value) return -1;
-    if (Json_TypeOf(value) == JSON_NUMBER) return (int)Json_Number(value, -1);
+    if (Json_TypeOf(value) == JSON_NUMBER) return narrow(Json_Number(value, -1));
     text = Json_String(value, NULL);
     if (!text) return -1;
     for (i = 0; i < count; i++) {
         if (choices[i] && same_words(text, choices[i])) return i;
     }
-    return (int)Json_Number(value, -1);
+    return narrow(Json_Number(value, -1));
 }
 
 /* A card type can be written by number or name, but an unclaimed spare
@@ -766,7 +780,9 @@ int Cards_Reference(const JsonValue *value)
     int id;
     if (!value || Json_TypeOf(value) == JSON_NULL) return 0;
     if (Json_TypeOf(value) == JSON_NUMBER) {
-        id = (int)Json_Number(value, 0);
+        /* narrow(): a ref far past int range (e.g. 2^32 + 1) would otherwise
+         * wrap to a small, perfectly valid id instead of failing Cards_Valid. */
+        id = narrow(Json_Number(value, 0));
         return Cards_Valid(id) ? id : -1;
     }
     text = Json_String(value, NULL);
@@ -840,16 +856,13 @@ int Cards_Type(int id)
 
 int Cards_AttributeNamed(const char *text)
 {
-    int attribute;
-    for (attribute = 0; text && attribute < (int)(sizeof(attribute_names) / sizeof(attribute_names[0])); attribute++) {
-        if (same_letters(text, attribute_names[attribute])) return attribute;
-    }
-    return -1;
+    Attributes_Build();
+    return Attributes_Find(text);
 }
 
 int Cards_Attribute(int id)
 {
-    return Cards_Valid(id) ? gDuel_abCardLevelAttr[id] >> 4 : -1;
+    return Cards_Valid(id) ? attribute_ids[id] : -1;
 }
 
 int Cards_Level(int id)
@@ -1389,6 +1402,7 @@ static void add_entry(const char *mod, const char *directory, int index, const J
     int ai_effect = 0, ai_effect_given = 0, spell_or_trap;
     unsigned int trap_threshold;
     unsigned char level_attr, frame;
+    unsigned short attribute;
     unsigned int tags;
     if (Json_TypeOf(entry) != JSON_OBJECT) {
         Mods_Note(mod, "cards[%d] is not an object", index);
@@ -1397,7 +1411,9 @@ static void add_entry(const char *mod, const char *directory, int index, const J
     if (Json_TypeOf(copy) == JSON_STRING && !isdigit((unsigned char)*Json_String(copy, "")) ) {
         base = retail_by_name(Json_String(copy, ""));
     } else {
-        base = (int)Json_Number(copy, 0);
+        /* narrow(): a "copy"/"replace" far past int range would otherwise
+         * wrap into 1..CARD_COUNT and pass the check just below. */
+        base = narrow(Json_Number(copy, 0));
     }
     if (base < 1 || base > CARD_COUNT) {
         Mods_Note(mod, "cards[%d]: \"%s\" must name a card of the disc, 1 to %d", index, replace ? "replace" : "copy",
@@ -1410,7 +1426,7 @@ static void add_entry(const char *mod, const char *directory, int index, const J
     }
     /* "replace" changes the retail card itself, in place: one card, no new
      * id, and nothing of it goes in the save. */
-    count = replace ? 1 : (int)Json_Number(Json_Member(entry, "count"), 1);
+    count = replace ? 1 : narrow(Json_Number(Json_Member(entry, "count"), 1));
     if (!replace && setting && *setting) count = Mods_Setting(mod, setting, count);
     if (count < 0) count = 0;
     if (replace && replaced[base]) {
@@ -1471,6 +1487,7 @@ static void add_entry(const char *mod, const char *directory, int index, const J
     }
     was_monster = Cards_IsMonsterType((int)((stats >> 26) & 0x1F));
     level_attr = gDuel_abCardLevelAttr[base];
+    attribute = attribute_ids[base];
     /* A card's own ATK and DEF are nine bits of tens in its stats word
      * (gDuel_adwCardStats): 0 to 5110 in steps of 10. A mod's "limits" raise
      * what a monster may reach with its bonuses, not this; more would mean a
@@ -1480,14 +1497,25 @@ static void add_entry(const char *mod, const char *directory, int index, const J
         static const char *const stat_keys[2] = {"attack", "defense"};
         int k;
         for (k = 0; k < 2; k++) {
-            if ((value = (int)Json_Number(Json_Member(entry, stat_keys[k]), -1)) < 0) continue;
-            if (value > 0x1FF * 10) {
-                Mods_Note(mod, "cards[%d]: \"%s\" %d is past the %d a card's own stat can be (nine bits of tens); "
-                          "%d used, and \"limits\" or a bonus takes it higher in a duel", index, stat_keys[k], value,
+            /* Compared as the long Json_Number gives, not narrowed to int
+             * first: past int range (e.g. 2^32) would otherwise wrap into
+             * some small int that reads as in range, skipping both the
+             * "past the %d" note below and the clamp that goes with it, and
+             * silently zeroing the stat instead -- exactly what the comment
+             * above says this field never does. */
+            long raw = Json_Number(Json_Member(entry, stat_keys[k]), -1);
+            if (raw < 0) continue;
+            if (raw > 0x1FF * 10) {
+                Mods_Note(mod, "cards[%d]: \"%s\" %ld is past the %d a card's own stat can be (nine bits of tens); "
+                          "%d used, and \"limits\" or a bonus takes it higher in a duel", index, stat_keys[k], raw,
                           0x1FF * 10, 0x1FF * 10);
-            } else if (value % 10) {
-                Mods_Note(mod, "cards[%d]: \"%s\" %d is kept in tens; %d used", index, stat_keys[k], value,
-                          value / 10 * 10);
+                value = 0x1FF * 10;
+            } else {
+                value = (int)raw;
+                if (value % 10) {
+                    Mods_Note(mod, "cards[%d]: \"%s\" %d is kept in tens; %d used", index, stat_keys[k], value,
+                              value / 10 * 10);
+                }
             }
             stats = (stats & ~(0x1FFu << (9 * k))) | ((unsigned)clamp(value / 10, 0, 0x1FF) << (9 * k));
         }
@@ -1557,11 +1585,24 @@ static void add_entry(const char *mod, const char *directory, int index, const J
         if (Stars_Normalize(&kept_first, &kept_second))
             stats = (stats & ~(0xFFu << 18)) | ((unsigned)kept_first << 22) | ((unsigned)kept_second << 18);
     }
-    if ((value = (int)Json_Number(Json_Member(entry, "level"), -1)) >= 0) {
+    if ((value = narrow(Json_Number(Json_Member(entry, "level"), -1))) >= 0) {
         level_attr = (unsigned char)((level_attr & 0xF0) | clamp(value, 0, 12));
     }
-    if ((value = choice(Json_Member(entry, "attribute"), attribute_names, 6)) >= 0) {
-        level_attr = (unsigned char)((level_attr & 0x0F) | (clamp(value, 0, 15) << 4));
+    if (Json_Member(entry, "attribute")) {
+        const JsonValue *attribute_value = Json_Member(entry, "attribute");
+        long raw_attribute = Json_TypeOf(attribute_value) == JSON_NUMBER ? Json_Number(attribute_value, -1) : -1;
+        /* 6 and 7 are retail's magic/trap presentation values: never
+         * declarable, but a card may still be given one (as before API 16;
+         * the FM Editor writes them for cards made Magic or Trap). */
+        value = raw_attribute == 6 || raw_attribute == 7 ? (int)raw_attribute : Attributes_Value(attribute_value);
+        if (value < 0) {
+            Mods_Note(mod, "cards[%d]: \"attribute\" is an id 0-5 or 8-255, or a declared attribute name; left out", index);
+        } else {
+            attribute = (unsigned short)value;
+            /* Guest code still sees a legal nibble. The real value is in
+             * attribute_ids and all PC rule readers reach Cards_Attribute. */
+            level_attr = (unsigned char)((level_attr & 0x0F) | ((value < 8 ? value : 0) << 4));
+        }
     }
     /* Optional secondary fusion groups. A new card inherits its retail base when omitted.
      * Supplying fusion_groups gives the card its own membership instead. */
@@ -1760,6 +1801,7 @@ static void add_entry(const char *mod, const char *directory, int index, const J
         /* A monster with no star: star 0 is neutral from now on (stars.h). */
         if (Cards_IsMonsterType((int)((stats >> 26) & 0x1F)) && !(stats & (0xFu << 22))) Stars_NoteNoStar();
         gDuel_abCardLevelAttr[id] = level_attr;
+        attribute_ids[id] = attribute;
         frames[id] = frame;
         tag_masks[id] = tags;
         names[id] = name && *name ? encode_name(mod, name, n, id) : NULL;
@@ -1830,12 +1872,14 @@ void Cards_Build(void)
     int id, use;
     if (built) return;
     built = 1;
+    Attributes_Build();
     build_monster_types();
     memset(extended_types, 0xFF, sizeof(extended_types));
     gCard_nCount = CARD_COUNT;
     memcpy(gDuel_adwCardStats, (const void *)(uintptr_t)RETAIL_STATS, CARD_COUNT * sizeof(int));
     memcpy(gCard_asNameSortKey, (const void *)(uintptr_t)RETAIL_SORT_KEYS, CARD_COUNT * sizeof(short));
     memcpy(gDuel_abCardLevelAttr, (const void *)(uintptr_t)RETAIL_LEVEL_ATTR, CARD_ID_END);
+    for (id = CARD_ID_FIRST; id <= CARD_COUNT; id++) attribute_ids[id] = gDuel_abCardLevelAttr[id] >> 4;
     for (id = 0; id <= CARD_COUNT; id++) gCard_awBaseId[id] = (unsigned short)id;
     context = calloc(1, sizeof(*context));
     if (!context) return;

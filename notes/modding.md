@@ -70,6 +70,7 @@ editors write, is fine):
 | `passwords` | each card's password and starchip price on the Password screen, below |
 | `limits` | the numbers the game caps (ATK and DEF, life points, starchips, the chest, the records) and the cards a won duel deals (`card_drops`), below |
 | `guardian_stars` | the stars' names and icons, stars 11 to 15, and what each star gets against each other, below |
+| `attributes` | the six retail attribute names, and new monster attributes from the port's attribute bank, below |
 | `card_text_colors` | the color a card's name, description and guardian star are written in on its details, below |
 | `palette_ramps` | the game's eight text color ramps, and ramps of the mod's own for its code to draw with, below |
 | `starter` | the forty cards a new game begins with, one deck or a list of them, below |
@@ -118,6 +119,7 @@ checked as well, when it starts.
 | 13 | the release after v0.3.0 | the `limits` `card_drops`, a lock on the cards a won duel deals ([card drops](card-drops.md#a-mod-that-sets-it)) |
 | 14 | the release after v0.3.0 | `tower`; a duelist's `tower_only`, or `unlock` `tower`; a menu item's action `tower` ([Tower mode](tower-mode.md)) |
 | 15 | the release after v0.3.0 | `card_types`: renamed retail types, new monster types and their per-type icons |
+| 16 | the release after v0.3.0 | mod-defined card attributes (`attributes`) |
 
 The FM Editor writes `min_api` on save as the lowest one of these that has
 everything the mod uses, never lowering one written higher, and its Mod
@@ -1348,6 +1350,39 @@ and custom types; a colliding declaration is rejected. The game warns when a
 display name drops unsupported glyphs; manifests still refer to the original
 UTF-8 name.
 Use `card_types` and set `"min_api": 15`.
+
+## Attributes: names and new attributes
+
+Cards keep their attribute in four bits. The game uses `Light`, `Dark`,
+`Earth`, `Water`, `Fire` and `Wind` (ids 0 through 5); ids 6 and 7 are
+reserved by its magic/trap presentation. A mod can rename the retail six and
+declare new monster attributes, ids 8 through 255. The names can then be
+used everywhere a card attribute is accepted: cards, an equip's `bonus_if`,
+and a monster effect's attribute filter.
+
+```json
+"attributes": {
+    "attributes": [
+        {"id": 0, "name": "Radiant"},
+        {"id": 8, "name": "Metal", "icon": "icons/metal.png"},
+        {"id": 9, "name": "Void"}
+    ]
+},
+"cards": [
+    {"replace": "Blue-eyes White Dragon", "attribute": "Metal"}
+]
+```
+
+Later mods replace a name for the same id. Attribute ids are deliberately
+fixed in a mod: cards and rule tables keep the nibble, so changing an id's
+meaning changes every card that uses it. Names need at least one letter or
+number and cannot normalize to a numeric attribute id (so `8-` is not a
+valid name). Every declared attribute may
+also give `icon` a PNG to draw it from the attribute texture bank. Custom
+attribute icons always use the PNG's palette and scale through the texture
+pack at the game's internal resolution. Give it a numeric id in hand-written
+mods when sharing with older tools that do not yet know its name.
+Use `attributes` and set `"min_api": 16`.
 
 ## Guardian Stars: names, icons, new stars and matchups
 

@@ -56,13 +56,15 @@ enum {
 
 typedef struct MonsterEffect {
     unsigned char when, action, target;
-    signed char type, attribute;     /* a boost's or destroy's filter: -1 any; type is read as an
+    signed char type;                /* a boost's or destroy's type filter: -1 any; read as an
                                         unsigned char, so a custom type 128-254 is stored negative */
+    signed short attribute;          /* attribute-bank id, -1 any */
     unsigned short card;             /* MONSTER_DO_MAGIC: the retail magic card */
     short attack, defense;           /* MONSTER_DO_BOOST */
     int amount;                      /* MONSTER_DO_HEAL, MONSTER_DO_DAMAGE */
     unsigned char each;              /* MONSTER_EACH_*: a boost, heal or damage made once per monster counted */
-    signed char each_type, each_attribute;   /* what is counted: -1 any */
+    signed char each_type;
+    signed short each_attribute;     /* what is counted: -1 any */
 } MonsterEffect;
 
 extern const char *const MonsterEffect_WhenNames[MONSTER_WHEN_COUNT];

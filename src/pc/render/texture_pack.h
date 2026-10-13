@@ -92,7 +92,7 @@ int TexturePack_BankEntryLevelFor(int entry, int scale);
 int TexturePack_BankKeyLive(unsigned key);
 unsigned TexturePack_BankGeneration(void);
 enum { TEXTURE_BANK_OWNER_STARS = 1, TEXTURE_BANK_OWNER_LAYOUT_FRAME, TEXTURE_BANK_OWNER_LAYOUT_DIGITS,
-       TEXTURE_BANK_OWNER_DUEL_UI, TEXTURE_BANK_OWNER_TYPE_ICONS };
+       TEXTURE_BANK_OWNER_DUEL_UI, TEXTURE_BANK_OWNER_TYPE_ICONS, TEXTURE_BANK_OWNER_ATTRIBUTE_ICONS };
 void TexturePack_BankSpritesUseOwner(unsigned owner);
 void TexturePack_BankSpritesClear(unsigned owner);
 

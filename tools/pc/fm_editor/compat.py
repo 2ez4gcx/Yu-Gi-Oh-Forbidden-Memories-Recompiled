@@ -19,7 +19,7 @@ from pathlib import Path
 from .gamedata import FRAME_COLOR_NAMES, TYPE_MAGIC
 from .model import type_named
 
-HOST_API = 15
+HOST_API = 16
 
 # The release each mod API first shipped in, for the hints. An API past the
 # last listed is newer than every release.
@@ -217,6 +217,9 @@ def features(manifest: dict, project=None) -> list:
     # --- API 15 -------------------------------------------------------------
     if "card_types" in manifest:
         add(15, "custom card types (\"card_types\")")
+    # --- API 16 -------------------------------------------------------------
+    if "attributes" in manifest:
+        add(16, "mod-defined card attributes (\"attributes\")")
     return out
 
 

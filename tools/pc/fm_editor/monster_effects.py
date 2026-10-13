@@ -91,7 +91,7 @@ def _name(names, value) -> str | None:
     return key if key in names else None
 
 
-def normalize(effect: dict, resolve=None, type_names=None) -> dict | None:
+def normalize(effect: dict, resolve=None, attribute_resolve=None, type_names=None) -> dict | None:
     """The entry with its names in the game's spelling, or None when the
     game would leave it out. `resolve` turns a card reference into an id;
     `type_names` is the mod's type bank (Project.type_names), for its own
@@ -119,7 +119,7 @@ def normalize(effect: dict, resolve=None, type_names=None) -> dict | None:
                 out[key] = value
         if do == "boost" and "attack" not in out and "defense" not in out:
             return None
-        if not _filter(effect, out, type_names):
+        if not _filter(effect, out, attribute_resolve, type_names):
             return None
     else:
         amount = effect.get("amount")
@@ -134,12 +134,12 @@ def normalize(effect: dict, resolve=None, type_names=None) -> dict | None:
         if whose is None:
             return None
         out["for_each"] = {"whose": whose}
-        if not _filter(each, out["for_each"], type_names):
+        if not _filter(each, out["for_each"], attribute_resolve, type_names):
             return None
     return out
 
 
-def _filter(source: dict, out: dict, type_names=None) -> bool:
+def _filter(source: dict, out: dict, attribute_resolve=None, type_names=None) -> bool:
     """`source`'s "type" and "attribute" into `out` by name; False when the
     game would not take one (monster_effects.c filter())."""
     names = type_names or TYPE_NAMES
@@ -158,14 +158,15 @@ def _filter(source: dict, out: dict, type_names=None) -> bool:
         out["type"] = names[t] if t < len(names) and names[t] else TYPE_NAMES[t]
     if "attribute" in source:
         a = source["attribute"]
-        a = _letters_index(a, ATTRIBUTE_NAMES) if isinstance(a, str) else a
-        if not isinstance(a, int) or isinstance(a, bool) or not 0 <= a < 6:
+        a = attribute_resolve(a) if attribute_resolve else (_letters_index(a, ATTRIBUTE_NAMES) if isinstance(a, str) else a)
+        if type(a) is not int or not 0 <= a <= 255 or a in (6, 7) or \
+                (attribute_resolve is None and a >= len(ATTRIBUTE_NAMES)):
             return False
-        out["attribute"] = ATTRIBUTE_NAMES[a]
+        out["attribute"] = ATTRIBUTE_NAMES[a] if a < len(ATTRIBUTE_NAMES) else a
     return True
 
 
-def problems(effects, resolve=None, type_names=None) -> list:
+def problems(effects, resolve=None, attribute_resolve=None, type_names=None) -> list:
     """What the game would say of a card's "monster_effects"."""
     if effects is None:
         return []
@@ -179,7 +180,7 @@ def problems(effects, resolve=None, type_names=None) -> list:
         if taken == MAX_EFFECTS:
             out.append(f"at most {MAX_EFFECTS} monster effects; the rest (from effect {n + 1}) are left out")
             break
-        if normalize(effect, resolve, type_names) is None:
+        if normalize(effect, resolve, attribute_resolve, type_names) is None:
             out.append(f"monster effect {n + 1} is not one the game takes ({describe_raw(effect)})")
         else:
             taken += 1

@@ -1,9 +1,11 @@
 #ifndef MEMORIES_MOD_TYPES_H
 #define MEMORIES_MOD_TYPES_H
-#define MEMORIES_MOD_API 15
+#define MEMORIES_MOD_API 16
 /* API 15: card_types names the existing type ids and declares monster ids
  * 24-255, with optional per-custom-type icons. It has no host entry: cards
  * and gameplay tables resolve its names. */
+/* API 16: "attributes" renames the retail six and declares monster
+ * attributes 8-255, with optional icons; no host entry either. */
 /* API 11 adds no host entry or event: it marks the mod.json features a game
  * of API 10 would leave out (notes/modding.md, "Which game a mod needs"), so
  * a mod that uses them says "min_api": 11 and an older game refuses it.

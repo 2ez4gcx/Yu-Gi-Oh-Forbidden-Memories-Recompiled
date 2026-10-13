@@ -329,7 +329,15 @@ static void sort_plain_sprite(const Sprite *sprite, u32 *ot, unsigned pri, int m
 {
     u32 *packet = (u32 *)(uintptr_t)D_800FE240;
     u32 attribute = sprite->attribute;
-    packet[1] = 0xe1000200u | ((attribute >> 17) & 0x180) | (sprite->tpage & 0x1f) | ((attribute >> 23) & 0x60);
+    /* Bits 11-14 of tpage name a software-GPU bank (soft_gpu.c's set_page;
+     * star_icons.c, attribute_icons.c, card_layout_art.c and duel_ui.c all
+     * OR ICON_BANK<<11 or similar into a tpage they hand the game). Real
+     * hardware never used these bits, so a retail tpage's are always 0, and
+     * passing them through costs real sprites nothing. Masked off here
+     * before, a bank-naming sprite drawn through GsSortFastSprite always
+     * read real VRAM's page 0 instead -- soft_gpu.c's set_page() reads this
+     * word's bits 11-14 unmasked once it gets there. */
+    packet[1] = 0xe1000200u | ((attribute >> 17) & 0x180) | (sprite->tpage & 0x781f) | ((attribute >> 23) & 0x60);
     packet[2] = sprite_color(sprite, 0x64000000u);
     packet[3] = ((u32)(sprite->x + D_800FE0BC - mx) & 0xffff) | ((u32)(sprite->y + D_800FE0BE - my) << 16);
     packet[4] = sprite->u | ((u32)sprite->v << 8) | sprite_clut(sprite);

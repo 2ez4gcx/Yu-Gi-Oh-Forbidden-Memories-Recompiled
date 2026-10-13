@@ -27,6 +27,7 @@
  */
 #include "tower.h"
 #include "pc/free_duel/duelists.h"
+#include "pc/free_duel/busts.h"
 #include "pc/cards/cards.h"
 #include "pc/cards/disc_art.h"
 #include "pc/cards/tables.h"
@@ -441,6 +442,50 @@ static int pool_character(int art)
     return 0;
 }
 
+/* The F6 id a duelist's bust record is told as this story: its replaced
+ * campaign character for the bust's first record (busts.h, replace_bust),
+ * else one of the characters the disc keeps empty, as a tower's PNG. */
+static int pool_bust(int bust, int record)
+{
+    int k, value = TOWER_POOL_BUST + record;
+    const u16 *clut;
+    const u8 *bank;
+    if (Busts_Character(bust) && Busts_Replacing(Busts_Character(bust)) == record) return Busts_Character(bust);
+    if (record < 0 || !Busts_Record(record, &clut, &bank) || value > 0xFF) return 0;
+    for (k = 0; k < TOWER_POOL_SIZE; k++) {
+        if (gTower.pool[k] == value) return pool_ids[k];
+    }
+    for (k = 0; k < TOWER_POOL_SIZE; k++) {
+        if (!gTower.pool[k]) {
+            gTower.pool[k] = (u8)value;
+            return pool_ids[k];
+        }
+    }
+    LOG(LOG_MODS, "tower: a story shows at most %d pictures of the mod's; a bust's is left out", TOWER_POOL_SIZE);
+    return 0;
+}
+
+/* Duelist `duelist` on a side: its bust's expression (by the cast's name,
+ * else by the codes' number), or the campaign's character it is shown as
+ * -- a disc duelist whose bust only adds expressions, named without one
+ * of them. */
+static int duelist_character(int duelist, const TowerCast *cast, int *expression)
+{
+    int bust = Duelists_Bust(duelist), e, record, slot;
+    *expression = cast->expression;
+    if (bust < 0 || (!cast->expression_name[0] && duelist < DUELISTS_RETAIL_COUNT && !Duelists_ReplacesBust(duelist)))
+        return Tower_DuelistCharacter(duelist);
+    e = cast->expression_name[0] ? Busts_Named(bust, cast->expression_name) : Busts_Ordered(bust, cast->expression);
+    if (e < 0) e = Busts_Default(bust);
+    if (!Busts_Place(bust, e, &record, &slot)) {
+        LOG(LOG_MODS, "tower: %s's bust was not made; the campaign's character is shown",
+            Duelists_Name(duelist) ? Duelists_Name(duelist) : "a duelist");
+        return Tower_DuelistCharacter(duelist);
+    }
+    *expression = slot;
+    return pool_bust(bust, record);
+}
+
 /* What a cast stands for on the stage of floor `floor_duelist`'s story. */
 static Side side_of(const TowerCast *cast, int floor_duelist)
 {
@@ -450,8 +495,9 @@ static Side side_of(const TowerCast *cast, int floor_duelist)
     switch (cast->kind) {
     case TOWER_CAST_RETAIL: side.fx = cast->id; break;
     case TOWER_CAST_ART: side.fx = pool_character(cast->id); break;
+    case TOWER_CAST_DUELIST: side.fx = duelist_character(cast->duelist, cast, &side.expression); break;
     case TOWER_CAST_OPPONENT:
-        side.fx = Tower_DuelistCharacter(floor_duelist);
+        side.fx = duelist_character(floor_duelist, cast, &side.expression);
         side.duelist = TOWER_SPEAKER_FLOOR;
         break;
     }

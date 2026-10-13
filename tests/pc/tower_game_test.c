@@ -49,6 +49,10 @@ int Paths_Contained(const char *relative) { return relative && relative[0] != '/
 int Duelists_BaseId(int duelist) { return duelist > 39 ? 1 : duelist; }
 const char *Duelists_Name(int duelist) { (void)duelist; return "a duelist"; }
 void Tower_MakeArt(TowerConfig *config) { (void)config; }
+/* No duelist has a bust of its own here (busts.h). */
+int Duelists_Bust(int duelist) { (void)duelist; return -1; }
+int Duelists_ReplacesBust(int duelist) { (void)duelist; return 0; }
+int Busts_Named(int bust, const char *name) { (void)bust; (void)name; return -1; }
 /* The duelists' conditions: "beat" is met by the save's first byte. */
 int Duelists_ConditionsMet(const void *state, const char *beat, int wins, int story, const char *card, int copies)
 {

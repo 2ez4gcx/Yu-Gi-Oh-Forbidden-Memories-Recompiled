@@ -73,6 +73,21 @@ int Paths_Contained(const char *relative) { return relative && relative[0] != '/
 int Duelists_BaseId(int duelist) { return duelist == 40 ? 1 : duelist; }
 const char *Duelists_Name(int duelist) { return duelist == 7 ? "Seto" : "a duelist"; }
 void Tower_MakeArt(TowerConfig *config) { (void)config; }
+/* Busts (busts.h): the added Ghost (40) has one of three expressions,
+ * Seto (7) one that adds two to the campaign's character, Teana (2) one
+ * that replaces hers when `teana_replaces`. */
+static int teana_replaces;
+int Duelists_Bust(int duelist) { return duelist == 40 ? 0 : duelist == 7 ? 1 : duelist == 2 ? 2 : -1; }
+int Duelists_ReplacesBust(int duelist) { return duelist == 2 && teana_replaces; }
+int Busts_Named(int bust, const char *name)
+{
+    static const char *const names[3][3] = {{"calm", "angry", "sad"}, {"smug", "shocked", ""}, {"stern", "", ""}};
+    int k;
+    for (k = 0; bust >= 0 && bust < 3 && k < 3; k++) {
+        if (names[bust][k][0] && !strcmp(names[bust][k], name)) return k;
+    }
+    return -1;
+}
 
 int Tables_TerrainNamed(const char *text)
 {
@@ -82,7 +97,7 @@ int Tables_TerrainNamed(const char *text)
     return -1;
 }
 
-static JsonDocument *documents[32];
+static JsonDocument *documents[64];
 static int document_count;
 
 static void read_as(const char *mod, const char *text)
@@ -91,7 +106,7 @@ static void read_as(const char *mod, const char *text)
     JsonDocument *document = Json_Parse(text, error, sizeof(error));
     if (!document) fprintf(stderr, "%s\n", error);
     CHECK(document != NULL);
-    CHECK(document_count < 32);
+    CHECK(document_count < (int)(sizeof(documents) / sizeof(documents[0])));
     documents[document_count++] = document;
     Tower_Read(mod, "folder", Json_Root(document));
 }
@@ -597,10 +612,87 @@ static void guards_read(void)
     CHECK(tower->floors[0].unlock_opponent == -1);
 }
 
+/* A duelist's bust on the stage (busts.h): {"duelist", "expression"} by
+ * name, the codes' number, the old forms beside them, and the mistakes. */
+static void busts_cast(void)
+{
+    const TowerConfig *tower;
+    const TowerLine *line;
+    Tower_Reset();
+    forget();
+    teana_replaces = 0;
+    read_as("b", "{\"tower\": {\"intro\": {\"characters\": {\"left\": {\"duelist\": \"Ghost\", \"expression\": \"angry\"},"
+                 " \"right\": \"Seto\"}, \"lines\": [\"One.\","
+                 "  {\"text\": \"Two.\", \"characters\": {\"left\": {\"duelist\": \"Ghost\", \"expression\": 2},"
+                 "   \"right\": {\"duelist\": \"Seto\", \"expression\": \"smug\"}}},"
+                 "  {\"text\": \"Three.\", \"characters\": {\"left\": 4, \"right\": \"art/hero.png\"}},"
+                 "  {\"text\": \"Four.\", \"characters\": {\"left\": {\"duelist\": \"Ghost\"},"
+                 "   \"right\": {\"duelist\": \"Seto\", \"expression\": 1}}}]},"
+                 " \"floors\": [{\"duelist\": \"Ghost\", \"before\": {\"characters\": {\"right\":"
+                 "  {\"duelist\": \"opponent\", \"expression\": \"sad\"}}, \"lines\": [\"Hi.\"]}}]}}");
+    tower = Tower_Config();
+    CHECK(tower && notes == 0);
+    line = line_of(tower->intro, 0);
+    CHECK(line->cast[0].kind == TOWER_CAST_DUELIST && line->cast[0].duelist == 40 &&
+          !strcmp(line->cast[0].expression_name, "angry"));
+    /* A disc duelist whose bust only adds expressions: the campaign's
+     * character until one of its names is asked for. */
+    CHECK(line->cast[1].kind == TOWER_CAST_RETAIL && line->cast[1].id == 0x04 && line->cast[1].duelist == 7);
+    line = line_of(tower->intro, 1);
+    CHECK(line->cast[0].kind == TOWER_CAST_DUELIST && line->cast[0].expression == 2 && !line->cast[0].expression_name[0]);
+    CHECK(line->cast[1].kind == TOWER_CAST_DUELIST && !strcmp(line->cast[1].expression_name, "smug"));
+    line = line_of(tower->intro, 2);
+    CHECK(line->cast[0].kind == TOWER_CAST_RETAIL && line->cast[0].id == 4 && line->cast[1].kind == TOWER_CAST_ART);
+    line = line_of(tower->intro, 3);
+    CHECK(line->cast[0].kind == TOWER_CAST_DUELIST && line->cast[0].expression == 0 && !line->cast[0].expression_name[0]);
+    CHECK(line->cast[1].kind == TOWER_CAST_RETAIL && line->cast[1].id == 0x04 && line->cast[1].expression == 1);
+    line = line_of(tower->floors[0].before, 0);
+    CHECK(line->cast[1].kind == TOWER_CAST_OPPONENT && !strcmp(line->cast[1].expression_name, "sad"));
+
+    /* Replacing the campaign's character, a disc duelist is its bust's
+     * even without a name. */
+    Tower_Reset();
+    forget();
+    teana_replaces = 1;
+    read_as("b", "{\"tower\": {\"intro\": {\"characters\": {\"left\": \"Teana\"}, \"lines\": [\"One.\"]},"
+                 " \"floors\": [{\"duelist\": \"Seto\"}]}}");
+    CHECK(Tower_Config() && notes == 0);
+    CHECK(line_of(Tower_Config()->intro, 0)->cast[0].kind == TOWER_CAST_DUELIST);
+    teana_replaces = 0;
+
+    /* The mistakes: a name the bust has not, a name for a duelist without
+     * a bust, a name for a campaign character or an image, a name the
+     * floor's opponent's bust has not. */
+    Tower_Reset();
+    forget();
+    read_as("b", "{\"tower\": {\"intro\": {\"characters\": {\"left\": {\"duelist\": \"Ghost\", \"expression\": \"glad\"},"
+                 " \"right\": {\"duelist\": \"Simon Muran\", \"expression\": \"calm\"}}, \"lines\": [\"One.\","
+                 "  {\"text\": \"Two.\", \"characters\": {\"left\": {\"character\": 4, \"expression\": \"calm\"},"
+                 "   \"right\": {\"image\": \"art/hero.png\", \"duelist\": \"Ghost\", \"expression\": \"calm\"}}}]},"
+                 " \"floors\": [{\"duelist\": \"Ghost\", \"before\": {\"characters\": {\"right\":"
+                 "  {\"duelist\": \"opponent\", \"expression\": \"glad\"}}, \"lines\": [\"Hi.\"]}},"
+                 "  {\"duelist\": \"Simon Muran\", \"after\": {\"characters\": {\"right\":"
+                 "  {\"duelist\": \"opponent\", \"expression\": \"calm\"}}, \"lines\": [\"Bye.\"]}}]}}");
+    tower = Tower_Config();
+    CHECK(tower && notes == 6);
+    CHECK(heard("bust has no expression \"glad\"; its default is shown instead"));
+    CHECK(heard("has no bust of its own (its duelists entry's \"bust\"); \"expression\" is 0 to 3 here"));
+    CHECK(heard("\"expression\" by name is a duelist's bust's (\"duelist\" and \"expression\"); a campaign character's is 0 to 3"));
+    CHECK(heard("\"expression\" by name is the duelist's bust's; with an \"image\" the image is shown"));
+    CHECK(heard("the opponent's bust has no expression \"glad\"; its default is shown instead"));
+    CHECK(heard("the opponent, a duelist, has no bust of its own; \"expression\" by name is left out"));
+    line = line_of(tower->intro, 0);
+    CHECK(line->cast[0].kind == TOWER_CAST_DUELIST && !line->cast[0].expression_name[0]);
+    CHECK(line->cast[1].kind == TOWER_CAST_RETAIL && line->cast[1].id == 0x01 && !line->cast[1].expression_name[0]);
+    CHECK(!line_of(tower->floors[0].before, 0)->cast[1].expression_name[0]);
+    CHECK(!line_of(tower->floors[1].after, 0)->cast[1].expression_name[0]);
+}
+
 int main(void)
 {
     int i;
     defaults();
+    busts_cast();
     every_key();
     last_wins();
     mistakes();

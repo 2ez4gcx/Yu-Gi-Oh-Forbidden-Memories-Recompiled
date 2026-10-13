@@ -1311,6 +1311,35 @@ its repairs exist for; in this mode that thread only watches for stalls.
 It is the model the deterministic runs (the smoke fixtures) have always used,
 with real time instead of synthetic steps.
 
+The watching thread (`Win32_StartWatch`) has no 1 ms timer: it waits on its
+stop event for 100 ms at a time, checks the heartbeat and goes back to
+sleep, at `THREAD_PRIORITY_HIGHEST`, which is above the main thread's and
+so still runs while the main thread spins. Until 2026-10-11 it kept the
+interrupt clock's 1 ms high-resolution timer at `TIME_CRITICAL` and only
+skipped the tick, waking about 700 times a second for nothing. Measured in a
+duel on Windows (60 s of real-time VBlanks through `tools/pc/yfm_control.py`,
+two to five runs of each; thread figures from `NtQuerySystemInformation`):
+
+| build | watch thread before | after | process context switches/s, before / after |
+|---|---|---|---|
+| 32-bit | 695-698 wakeups/s, 3.4-5.0 ms CPU/s, priority 15 | 10.0/s, under 0.3 ms CPU/s | 1254-1322 / 505-747 |
+| 64-bit | 694-698 wakeups/s, 2.5-6.4 ms CPU/s, priority 15 | 9.9-10.0/s, under 0.3 ms CPU/s | 1171-1292 / 539-810 |
+
+A stall is still reported about 5 s after the last VSync
+(`MEMORIES_CRASH_TEST=hang` and `spin`, both builds, `hang-<pid>.txt` and
+`.dmp`): 5.06-5.11 s against 4.99-5.01 s before, at most about two
+periods (0.2 s) later.
+Frame pacing does not depend on that timer: `Platform_WaitVBlank`'s 0.5 ms
+`nanosleep` returns at once with winpthreads (it sleeps whole milliseconds,
+rounded down), so the main thread polls the time; and an armed 1 ms
+high-resolution timer does not change what a `nanosleep` sleeps (checked in
+a test program: 2 ms sleeps took 15.7 ms with or without one). VBlanks
+stayed at 59.94 a second and the sequencer's mean lateness at 52-175 us
+either way (the worst single values are the busy machine's).
+`MEMORIES_CLOCK=interrupt` keeps the 1 ms timer at `TIME_CRITICAL` (its
+thread at about 2600 context switches a second, as before, suspending the
+main thread on each wakeup).
+
 Why it holds: every loop in which the game waits for something its interrupt
 code sets goes through one of those calls (`Main_AdvanceFrame`, the VBlank
 waits; `File_WaitForTransfers` calls `Main_AdvanceFrame` each turn). In a
@@ -3261,7 +3290,10 @@ What differs from Linux, and why:
   to the interrupted instruction. Code outside the executable (C runtime,
   SDL, drivers) is never interrupted; a tick missed there is taken by
   `Win32_ServiceInterrupt` from `Platform_WaitVBlank`. `pc/compat/signal.h`
-  maps `sigprocmask`/`pthread_sigmask` on SIGALRM to that hold flag.
+  maps `sigprocmask`/`pthread_sigmask` on SIGALRM to that hold flag. That
+  is the interrupt clock (`MEMORIES_CLOCK=interrupt`); with the default,
+  cooperative one the thread only watches for stalls, ten times a second
+  ("Cooperative clock").
 - **Faults.** A vectored exception handler in `image.c` does what the
   SIGSEGV/SIGTRAP handlers do (guest-call redirect, low-address fixup); the
   guest-call redirect is the second net behind the branch thunks, since it

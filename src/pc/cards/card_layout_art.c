@@ -866,6 +866,22 @@ static unsigned int title_source_hash(const uint16_t *vram, int src_x, int src_y
     return hash;
 }
 
+/* Title glyphs are fetched from one PS1 texture page.  Do not let a malformed
+ * sprite read into the next page (or past software VRAM) while making its
+ * white mask. */
+static int title_source_fits(int src_x, int src_y, int depth, int source_u, int source_v)
+{
+    int texels_per_word;
+    int last_word;
+
+    if (depth < 0 || depth > 2 || source_u < 0 || source_v < 0 ||
+        source_u > 256 - TITLE_W || source_v > 256 - TITLE_H) return 0;
+    texels_per_word = depth == 0 ? 4 : depth == 1 ? 2 : 1;
+    last_word = src_x + (source_u + TITLE_W - 1) / texels_per_word;
+    return src_x >= 0 && src_y >= 0 && last_word < SOFT_GPU_WIDTH &&
+           src_y + source_v + TITLE_H <= SOFT_GPU_HEIGHT;
+}
+
 static void title_mask_output(int *tpage, int *u, int *v, int *clut, int *w, int *h)
 {
     *tpage = LAYOUT_TPAGE(TITLE_PAGE_X, TITLE_PAGE_Y);
@@ -886,7 +902,8 @@ int CardLayoutArt_TitleCell(int source_tpage, int source_u, int source_v, int so
     unsigned int hash;
     int x, y;
 
-    if (!bank || !vram || source_w != TITLE_W || source_h != TITLE_H || depth == 3) {
+    if (!bank || !vram || source_w != TITLE_W || source_h != TITLE_H ||
+        !title_source_fits(src_x, src_y, depth, source_u, source_v)) {
         if (!title_unavailable_reported || title_unavailable_tpage != source_tpage ||
             title_unavailable_u != source_u || title_unavailable_v != source_v) {
             LOG(LOG_CARD_LAYOUT, "title mask: unavailable (bank=%p vram=%p tpage=0x%x depth=%d uv=%d,%d size=%d,%d)",

@@ -1053,7 +1053,9 @@ disagree. Three keys say it:
 - `frame_styles`: name -> `{"image", "hand_image", "hand_color", "width", "height", "full_bleed"}`.
   `image` is relative to the mod's directory, as a `title` mod's pictures
   are, drawn as one textured quad behind everything else, at `width`/`height`
-  (140x196 with neither given). `hand_color` (the older spelling
+  (140x196 with neither given). A frame may be smaller, but its dimensions
+  are capped at 140x196 so it cannot cover the Library name bar or Deck
+  Builder information panel. `hand_color` (the older spelling
   `hand_colour` is still read; `hand_color` wins when a style has both)
   is one of the disc's six frame
   colors, `gold`, `green`, `pink`, `blue`, `purple` or `orange` (the colors

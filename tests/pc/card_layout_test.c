@@ -445,7 +445,7 @@ static void styles_by_tag_and_size(void)
     fake_effects[1] = 1;   /* a god with effects: the tag rule comes first */
     CHECK(style_of(1, "/mods/x/god.png") == CARD_FRAME_PURPLE);
     CHECK(!CardLayout_IsSpell());
-    CHECK(CardLayout_Get(CARD_LAYOUT_FRAME).w == 150 && CardLayout_Get(CARD_LAYOUT_FRAME).h == 200);
+    CHECK(CardLayout_Get(CARD_LAYOUT_FRAME).w == 140 && CardLayout_Get(CARD_LAYOUT_FRAME).h == 196);
 }
 
 static void styles_rule_setting(void)
@@ -774,6 +774,38 @@ static void per_style_layout(void)
     CHECK(p.x == 85 && p.y == 0x9D);                  /* x from the style, y retail's -- not the layout's 108 */
 }
 
+/* The card viewer's left-side footprint is fixed.  Manifest dimensions may
+ * make a frame smaller, but cannot let either style format cover its right
+ * information panel or the Library name bar. */
+static void frame_box_is_bounded(void)
+{
+    CardLayoutPlacement p;
+
+    reset();
+    add_mod("x", "/mods/x",
+            "{\"id\": \"x\", \"card_layout\": {\"frame_styles\": {\"wide\": {\"image\": \"wide.png\","
+            "\"hand_color\": \"purple\", \"width\": 999, \"height\": 999},"
+            "\"small\": {\"image\": \"small.png\", \"hand_color\": \"purple\", \"width\": 80, \"height\": 100}},"
+            "\"default_style\": \"wide\"}}",
+            1, "full_bleed", 1);
+    CardLayout_SetCard(0);
+    p = CardLayout_Get(CARD_LAYOUT_FRAME);
+    CHECK(p.w == 140 && p.h == 196);
+    snprintf(fake_frame_style[0], sizeof(fake_frame_style[0]), "small");
+    CardLayout_SetCard(0);
+    p = CardLayout_Get(CARD_LAYOUT_FRAME);
+    CHECK(p.w == 80 && p.h == 100);
+
+    reset();
+    add_mod("legacy", "/mods/legacy",
+            "{\"id\": \"legacy\", \"card_layout\": {\"frame\": {\"monster\": {\"image\": \"wide.png\","
+            "\"width\": 999, \"height\": 999}}}}",
+            1, "full_bleed", 1);
+    CardLayout_SetCard(0);
+    p = CardLayout_Get(CARD_LAYOUT_FRAME);
+    CHECK(p.w == 140 && p.h == 196);
+}
+
 int main(void)
 {
     retail_defaults();
@@ -805,6 +837,7 @@ int main(void)
     digits_from_mod();
     color_tint();
     per_style_layout();
+    frame_box_is_bounded();
     reset();
     printf("card layout: ok\n");
     return 0;

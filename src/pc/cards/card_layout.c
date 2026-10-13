@@ -12,6 +12,11 @@ static const char *const element_names[CARD_LAYOUT_ELEMENT_COUNT] = {
     "frame", "title", "description", "level_stars", "attribute", "atk", "def", "art"
 };
 
+/* The viewer reserves exactly this retail card-plate footprint.  A custom
+ * frame may be smaller, but never extend into its Library/Deck Builder UI. */
+#define CARD_LAYOUT_FRAME_MAX_W 140
+#define CARD_LAYOUT_FRAME_MAX_H 196
+
 /* cards.h's CARD_FRAME_* order, named as "frame"'s own sub-keys. */
 static const char *const frame_kind_names[CARD_FRAME_COUNT] = {
     "monster", "magic", "trap", "ritual", "purple", "orange"
@@ -135,6 +140,15 @@ static void rect(const JsonValue *part, int *x, int *y, int *w, int *h, int dx, 
     *y = (int)Json_Number(Json_Member(part, "y"), dy);
     *w = (int)Json_Number(Json_Member(part, "width"), dw);
     *h = (int)Json_Number(Json_Member(part, "height"), dh);
+}
+
+static int frame_box_dimension(const JsonValue *frame, const char *key, int fallback, int maximum)
+{
+    double value = Json_Number(Json_Member(frame, key), fallback);
+
+    if (value < 1) return fallback;
+    if (value > maximum) return maximum;
+    return (int)value;
 }
 
 /* `part` ("color": {"r": ..., "g": ..., "b": ...}), each 0x80 (no change)
@@ -303,11 +317,9 @@ static int resolve_style(const LayoutSource *source, int card, CardLayoutStyle *
     const char *card_style = Cards_FrameStyle(card);
 
     memset(out, 0, sizeof(*out));
-    /* The retail viewer's card plate occupies 140x196 units.  A style may
-     * deliberately choose another size, but its omitted width/height must
-     * not make the replacement cover neighbouring viewer panels. */
-    out->width = 140;
-    out->height = 196;
+    /* The retail viewer's card plate occupies at most 140x196 units. */
+    out->width = CARD_LAYOUT_FRAME_MAX_W;
+    out->height = CARD_LAYOUT_FRAME_MAX_H;
     out->spell_layout = cls == CARD_CLASS_SPELL || cls == CARD_CLASS_EQUIP || cls == CARD_CLASS_RITUAL_SPELL ||
                         cls == CARD_CLASS_TRAP;
     if (!styles) {
@@ -333,8 +345,8 @@ static int resolve_style(const LayoutSource *source, int card, CardLayoutStyle *
         out->color = kind;
         out->full_bleed = 1;
         snprintf(out->name, sizeof(out->name), "%s", frame_kind_names[kind]);
-        out->width = (int)Json_Number(Json_Member(frame, "width"), 140);
-        out->height = (int)Json_Number(Json_Member(frame, "height"), 196);
+        out->width = frame_box_dimension(frame, "width", CARD_LAYOUT_FRAME_MAX_W, CARD_LAYOUT_FRAME_MAX_W);
+        out->height = frame_box_dimension(frame, "height", CARD_LAYOUT_FRAME_MAX_H, CARD_LAYOUT_FRAME_MAX_H);
         if (want_image)
             mod_file(source->mod, Json_String(Json_Member(frame, "image"), NULL), "\"frame\"", out->image,
                      sizeof(out->image));
@@ -371,8 +383,8 @@ static int resolve_style(const LayoutSource *source, int card, CardLayoutStyle *
      * deliberately omit it: they still select a hand palette, but preserve
      * the retail large-card plate for every card that does not opt in. */
     out->full_bleed = Json_Bool(Json_Member(style, "full_bleed"), image && *image);
-    out->width = (int)Json_Number(Json_Member(style, "width"), 140);
-    out->height = (int)Json_Number(Json_Member(style, "height"), 196);
+    out->width = frame_box_dimension(style, "width", CARD_LAYOUT_FRAME_MAX_W, CARD_LAYOUT_FRAME_MAX_W);
+    out->height = frame_box_dimension(style, "height", CARD_LAYOUT_FRAME_MAX_H, CARD_LAYOUT_FRAME_MAX_H);
     if (want_image)
     {
         mod_file(source->mod, image, "\"frame_styles\" style", out->image,
@@ -481,8 +493,8 @@ void CardLayout_SetCard(int card_id)
     memset(&current, 0, sizeof(current));
     current.spell_layout = cls == CARD_CLASS_SPELL || cls == CARD_CLASS_EQUIP || cls == CARD_CLASS_RITUAL_SPELL ||
                            cls == CARD_CLASS_TRAP;
-    current.width = 140;
-    current.height = 196;
+    current.width = CARD_LAYOUT_FRAME_MAX_W;
+    current.height = CARD_LAYOUT_FRAME_MAX_H;
     if (full_bleed_of(&source) && resolve_style(&source, card_id, &style, 1)) current = style;
 }
 
@@ -555,8 +567,8 @@ CardLayoutPlacement CardLayout_Get(CardLayoutElement element)
 
     switch (element) {
     case CARD_LAYOUT_FRAME: {
-        /* The current card's frame style, "width" x "height" (140x196 unless
-         * the style says): the retail viewer's own card-plate footprint.
+        /* The current card's frame style, at most 140x196: the retail
+         * viewer's own card-plate footprint.
          * A style's optional back_image uses this same box. */
         p.visible = !full_bleed;
         p.w = current.width;

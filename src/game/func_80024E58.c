@@ -17,6 +17,9 @@
 #include "display_object_config.h"
 #include "../unmatched.h"
 #include "func_80024E58.h"
+#ifdef MEMORIES_PC
+#include "pc/cards/cards.h"
+#endif
 
 #define DUEL_EFFECT_REQUEST_VIEW(request) \
     ((DuelEffectRequest *)(request))

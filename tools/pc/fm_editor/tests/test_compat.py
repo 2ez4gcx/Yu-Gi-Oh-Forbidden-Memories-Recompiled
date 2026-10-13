@@ -93,7 +93,7 @@ class FeatureTest(unittest.TestCase):
                 self.assertEqual(self.needs(value), 11)
 
     def test_api_12(self):
-        self.assertEqual(self.needs({"attributes": {"attributes": [{"id": 8, "name": "Metal"}]}}), 12)
+        self.assertEqual(self.needs({"attributes": {"attributes": [{"id": 8, "name": "Metal"}]}}), 13)
 
     def test_reasons_are_the_highest_apis(self):
         api, reasons = compat.required({"card_text_colors": {}, "ui": {}, "limits": {"swords_turns": 5}})

@@ -21,6 +21,9 @@ sha256 v0.1.2 linux 2ef326fad001284a6dddbc1cfc33561a16d61d8656a180a586eba42275ab
 baseline v0.2.0
 sha256 v0.2.0 windows bf1db67397f60f6f12b845c21ce82cef3051e6b67d4f82e284e8c9bf359824ab
 sha256 v0.2.0 linux c6dfa734174ef1432ba5cb4b085f3a59a6d4e53bdd4763db249f2e4c897fde68
+baseline v0.3.0
+sha256 v0.3.0 windows 40f1fedd363c0db193f8d67dff48c49ebc375f5aa903279fd70d7c622ccb63a6
+sha256 v0.3.0 linux 4b205351fb753882660174986ce7cdc92279d89c382b809be27678344cd89d73
 
 # The Cheats menu's functions now say whether they did anything (0 before a
 # game is loaded); a caller built against v0.1.2's void ignores eax.

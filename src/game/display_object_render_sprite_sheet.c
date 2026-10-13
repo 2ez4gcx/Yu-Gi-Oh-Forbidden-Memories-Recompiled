@@ -253,7 +253,13 @@ retry:
      * VIEWER_SLOT both ever pass this object's own constructor
      * (func_800291E0). A style's own back_image replaces retail's swirl
      * outright; "" leaves it alone. */
-    if (object == gDuel_pCardViewerCard) {
+    /* `gDuel_pCardViewerCard` is a screen-owned publication pointer, not a
+     * lifetime-tracked handle.  Closing the viewer releases resource slot 3
+     * but leaves that pointer intact; a later menu object can reuse the same
+     * slot/address.  Require slot 3 to still own this object as well, so a
+     * stale viewer pointer cannot turn an unrelated title-menu sprite into a
+     * card back. */
+    if (object == gDuel_pCardViewerCard && D_800EA0E8[3].object_00 == object) {
         s32 back_tpage, back_u, back_v, back_clut, back_w, back_h;
         s32 card_id = (s16)D_800EA0E8[3].field_30;
         if (CardLayoutArt_BackCell(card_id, &back_tpage, &back_u, &back_v, &back_clut, &back_w, &back_h)) {

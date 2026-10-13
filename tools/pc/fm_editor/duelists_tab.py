@@ -17,6 +17,7 @@ from pathlib import Path
 from tkinter import messagebox, ttk
 
 from . import duelist_rules, file_dialogs, fixed_decks, pngio, pools as poolmath, portrait, roster
+from .bust_view import BustView
 from .fixed_deck_view import FixedDeckView
 from .gamedata import (AI_FIELD_LABELS, AI_FIELDS, AI_SEARCH, DUELIST_COUNT, DUELIST_NAMES, POOL_LABELS, POOL_TOTAL,
                        POOLS, RANK_ABOVE, RANK_RETAIL, RANK_RULES, RANK_STEPS, SIGHT_DUELISTS, STORY_FREE_DUEL)
@@ -101,7 +102,14 @@ class DuelistsTab(Tab):
         right.pack(side="left", fill="both", expand=True, padx=(10, 0))
         self.build_header(right)
         ttk.Separator(right).pack(fill="x", pady=(8, 6))
-        self.build_pools(right)
+        # Its pools, and its bust (bust_view.py): a page each, under the header.
+        self.sections = ttk.Notebook(right)
+        self.sections.pack(fill="both", expand=True)
+        pools = ttk.Frame(self.sections, padding=(0, 6, 0, 0))
+        self.sections.add(pools, text="Pools")
+        self.build_pools(pools)
+        self.bust_view = BustView(self, self.sections)
+        self.sections.add(self.bust_view.frame, text="Bust")
 
     # --- building -------------------------------------------------------------------
 
@@ -191,6 +199,8 @@ class DuelistsTab(Tab):
         ttk.Button(actions, text="Picture...", command=self.choose_picture).pack(side="left", padx=(0, 4))
         self.revert_face_button = ttk.Button(actions, text="Disc's face", command=self.revert_picture)
         self.revert_face_button.pack(side="left")
+        ttk.Button(actions, text="Bust", command=lambda: self.sections.select(self.bust_view.frame)).pack(
+            side="left", padx=(4, 0))
         page = ttk.Frame(header)
         page.pack(side="right", anchor="n")
         top = ttk.Frame(page)
@@ -221,7 +231,7 @@ class DuelistsTab(Tab):
         frame, self.tree = scrolled_tree(right, [("id", "#"), ("name", "Card"), ("type", "Type"),
                                                  ("atk", "ATK"), ("def", "DEF"), ("w", "Weight"),
                                                  ("pct", "Chance"), ("retail", "Disc"), ("state", "Status")],
-                                         [50, 220, 100, 50, 50, 60, 60, 60, 70], 14, selectmode="extended",
+                                         [50, 214, 100, 50, 50, 60, 60, 60, 70], 14, selectmode="extended",
                                          sort_numeric=("id", "atk", "def", "w", "pct", "retail"))
         frame.pack(fill="both", expand=True, pady=4)
         self.tree.bind("<<TreeviewSelect>>", lambda e: self.pick_row())
@@ -334,6 +344,8 @@ class DuelistsTab(Tab):
                 parts.append("renamed")
             if e is not None and (e.portrait is not None or e.portrait_path):
                 parts.append("face")
+            if e is not None and e.bust is not None:
+                parts.append("bust, campaign's too" if e.replace_bust else "bust")
             if fixed_decks.deck_of(p, s):
                 parts.append("fixed deck")
             elif any({c: w for c, w in p.pools[s][pool].items() if w} != p.retail.pools[s][pool] for pool in POOLS):
@@ -345,6 +357,8 @@ class DuelistsTab(Tab):
         # Its page row says it is added: what it has of its own beside its base's.
         if s.portrait is not None or s.portrait_path:
             parts.append("face")
+        if s.bust is not None:
+            parts.append("bust")
         if fixed_decks.deck_of(p, s):
             parts.append("fixed deck")
         elif any({c: w for c, w in s.pools[pool].items() if w} != p.retail.pools[s.base][pool] for pool in POOLS):
@@ -961,6 +975,7 @@ class DuelistsTab(Tab):
         if self.project is None:
             return
         self.fill_header()
+        self.bust_view.fill()
         s = self.subject()
         self.tree.heading("retail", text="Disc" if isinstance(s, int) else "Base")
         if self.fixed.fill():

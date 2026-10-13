@@ -223,7 +223,8 @@ def canon_story(value):
 #
 # A side is none, a character's number (1-64), a duelist, "opponent", or a PNG
 # ("flip" turns it; "as Seto" says whose it is); "expression 2" after a
-# character's number or a duelist.
+# character's number or a duelist, or "expression angry" (a duelist's bust's,
+# by its name; "expression \"very angry\"" when the name has a space).
 
 # "#8 @Seto: words": a campaign portrait, a speaker, or both, then the words.
 LINE_RE = re.compile(r"^(?:#(\d+|speaker|none)\s*)?(?:@([^:]*))?:\s?(.*)$", re.I)
@@ -281,7 +282,11 @@ def _cast_text(value) -> str:
         words.append(f"duelist {who}" if who.isdigit() or who.lower() in ("none", "flip", "expression") else who)
     if cast.get("flip"):
         words.append("flip")
-    if cast.get("expression"):
+    if isinstance(cast.get("expression"), str):
+        name = cast["expression"]
+        words += ["expression", name if name and " " not in name and '"' not in name and not name.isdigit()
+                  else '"' + name.replace('"', "") + '"']
+    elif cast.get("expression"):
         words += ["expression", str(cast["expression"])]
     if "image" in cast and cast.get("duelist") not in (None, ""):
         words += ["as", str(cast["duelist"])]
@@ -303,8 +308,15 @@ def _cast_value(text: str):
     expression = flip = None
     while True:
         words = text.split()
-        if len(words) >= 2 and words[-2].lower() == "expression" and words[-1].isdigit():
+        quoted = re.search(r'\s+expression\s+"([^"]*)"\s*$', text, re.I)
+        if quoted and expression is None:
+            expression = quoted.group(1)
+            text = text[:quoted.start()].strip()
+        elif len(words) >= 2 and words[-2].lower() == "expression" and words[-1].isdigit():
             expression = int(words[-1])
+            text = " ".join(words[:-2])
+        elif len(words) >= 3 and words[-2].lower() == "expression" and not _is_png(" ".join(words[:-2])):
+            expression = words[-1]
             text = " ".join(words[:-2])
         elif len(words) >= 2 and words[-1].lower() == "flip":
             flip = True
@@ -519,12 +531,24 @@ def set_tower_only(project, key: str, on: bool) -> bool:
 
 # --- checks ---------------------------------------------------------------------------------
 
-def check(tower, duelist_named, card_named) -> list:
+class _Named:
+    """duelist_named, carrying bust_of for the sides' checks."""
+
+    def __init__(self, named, bust_of):
+        self.named, self.bust_of = named, bust_of
+
+    def __call__(self, text):
+        return self.named(text)
+
+
+def check(tower, duelist_named, card_named, bust_of=None) -> list:
     """What the game would note of a "tower" (tower_config.c): [(level,
     where, message)]. An error is something it leaves out (a floor, a deck,
     the whole tower); a warning what it reads otherwise than meant.
-    duelist_named(text) is a duelist or None, card_named(text) a card or 0."""
+    duelist_named(text) is a duelist or None, card_named(text) a card or 0,
+    bust_of(text) a duelist's bust (bust.Bust) or None."""
     out = []
+    duelist_named = _Named(duelist_named, bust_of)
     if tower is None:
         return out
 
@@ -632,8 +656,24 @@ def _check_cast(value, where, duelist_named, add):
     for key in cast:
         if key not in CAST_KEYS:
             add("warning", where, f"unknown key \"{key}\"")
-    if "expression" in cast and (_number(cast["expression"]) is None or not 0 <= _number(cast["expression"]) <= 3):
-        add("warning", f"{where}.expression", "is 0 to 3")
+    expression = cast.get("expression")
+    if isinstance(expression, str):
+        bust_of = getattr(duelist_named, "bust_of", None)
+        who = cast.get("duelist")
+        if "duelist" not in cast or "image" in cast or "character" in cast:
+            add("warning", f"{where}.expression", "by name is a duelist's bust's ({\"duelist\": ..., \"expression\": "
+                                                  "...}); left out")
+        elif bust_of is not None and str(who).lower() != "opponent" and duelist_named(who) is not None:
+            from . import bust as bustm
+            b = bust_of(who)
+            if b is None:
+                add("warning", f"{where}.expression", f"{who} has no bust of its own (the Duelists tab's Bust); "
+                                                      "left out")
+            elif bustm.find(b, expression) is None:
+                add("warning", f"{where}.expression", f"{who}'s bust has no expression \"{expression}\"; its "
+                                                      "default is shown")
+    elif "expression" in cast and (_number(expression) is None or not 0 <= _number(expression) <= 3):
+        add("warning", f"{where}.expression", "is 0 to 3, or the name of a duelist's bust's")
     if "image" in cast:
         image = cast["image"]
         if not isinstance(image, str) or not image.lower().endswith(".png"):

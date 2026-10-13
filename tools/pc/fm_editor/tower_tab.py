@@ -11,7 +11,7 @@ import tkinter as tk
 from pathlib import Path
 from tkinter import messagebox, ttk
 
-from . import duelist_rules, file_dialogs, pngio, roster, tower, tower_art
+from . import bust as bustm, duelist_rules, file_dialogs, pngio, roster, tower, tower_art
 from .tabs import Tab
 from .widgets import ScrolledForm
 
@@ -251,7 +251,7 @@ class TowerTab(Tab):
         characters = [str(n) for n in range(1, tower.CHARACTERS + 1) if n not in tower.EMPTY_CHARACTERS]
         box = ttk.Combobox(frame, textvariable=self.stage_character, values=characters, state="readonly", width=6)
         box.grid(row=1, column=0, sticky="w", pady=(2, 0))
-        box.bind("<<ComboboxSelected>>", lambda e: self._preview())
+        box.bind("<<ComboboxSelected>>", lambda e: self._show_kind(False))
         self.stage_side = tk.StringVar(value="left")
         sides = ttk.Frame(frame)
         sides.grid(row=1, column=1, columnspan=2, sticky="w", pady=(2, 0))
@@ -270,13 +270,72 @@ class TowerTab(Tab):
         ttk.Button(buttons, text="Character PNG...", command=self._character_png).pack(side="left", padx=4)
         self.stage_flip = tk.BooleanVar()
         ttk.Checkbutton(buttons, text="flip", variable=self.stage_flip).pack(side="left")
+        # A duelist's bust in one of its expressions (the Duelists tab's Bust).
+        busts = ttk.Frame(frame)
+        busts.grid(row=3, column=0, columnspan=3, sticky="w", pady=(2, 0))
+        self.stage_duelist = tk.StringVar()
+        self.stage_duelists = ttk.Combobox(busts, textvariable=self.stage_duelist, state="readonly", width=18,
+                                           postcommand=self._bust_duelists)
+        self.stage_duelists.pack(side="left")
+        self.stage_duelists.bind("<<ComboboxSelected>>", lambda e: (self._bust_expressions(), self._show_kind(True)))
+        self.stage_bust_expression = tk.StringVar()
+        self.stage_bust_expressions = ttk.Combobox(busts, textvariable=self.stage_bust_expression, state="readonly",
+                                                   width=12)
+        self.stage_bust_expressions.pack(side="left", padx=(4, 0))
+        self.stage_bust_expressions.bind("<<ComboboxSelected>>", lambda e: self._show_kind(True))
+        ttk.Button(busts, text="Bust", command=self._bust).pack(side="left", padx=(4, 0))
+        Tip(self.stage_duelists, "A duelist with a bust of its own (the Duelists tab's Bust) and one of its "
+                                 "expressions: [left: Ghost expression angry].")
         pictures = ttk.Frame(frame)
-        pictures.grid(row=3, column=0, columnspan=3, sticky="w", pady=(2, 0))
+        pictures.grid(row=4, column=0, columnspan=3, sticky="w", pady=(2, 0))
         self.scene_picture = ttk.Label(pictures, text="(the scenes and characters show with the game's files)")
         self.scene_picture.pack(side="left")
         self.character_picture = ttk.Label(pictures)
         self.character_picture.pack(side="left", padx=(6, 0))
         self._photos = {}
+
+    def _show_kind(self, bust: bool):
+        """The picture beside the pickers: the campaign character chosen, or
+        the duelist's bust in the expression chosen."""
+        self.bust_shown = bust
+        self._preview()
+
+    def _bust_names(self) -> dict:
+        """{the name a story uses: the duelist} of every duelist with a bust."""
+        out = {}
+        if self.project is None:
+            return out
+        for d in range(1, len(self.project.pools)):
+            if roster.bust_of(self.project, d) is not None:
+                out[roster.shown_name(self.project, d)] = d
+        for e in roster.copies(self.project):
+            if e.bust is not None:
+                out[roster.identity(self.project, e)] = e
+        return out
+
+    def _bust_duelists(self):
+        names = list(self._bust_names())
+        self.stage_duelists.configure(values=names)
+        if names and self.stage_duelist.get() not in names:
+            self.stage_duelist.set(names[0])
+            self._bust_expressions()
+
+    def _bust_expressions(self):
+        who = self._bust_names().get(self.stage_duelist.get())
+        b = roster.bust_of(self.project, who) if who is not None else None
+        names = [e.name for e in bustm.order(b)] if b is not None else []
+        self.stage_bust_expressions.configure(values=names)
+        if self.stage_bust_expression.get() not in names:
+            self.stage_bust_expression.set(names[0] if names else "")
+        self._preview()
+
+    def _bust(self):
+        who, expression = self.stage_duelist.get().strip(), self.stage_bust_expression.get().strip()
+        if not who:
+            return
+        words = who + (f" expression {expression}" if expression and " " not in expression else
+                       f' expression "{expression}"' if expression else "")
+        self._insert(f"[{self.stage_side.get()}: {words}]")
 
     def _photo(self, key, image, size):
         if image is None:
@@ -293,6 +352,13 @@ class TowerTab(Tab):
         (tower_art.py) and kept in memory; nothing of the disc's is written."""
         files = getattr(self.app, "files", None)
         wa = getattr(files, "wa", None) if files is not None else None
+        if getattr(self, "bust_shown", False):
+            who = self._bust_names().get(self.stage_duelist.get())
+            b = roster.bust_of(self.project, who) if who is not None else None
+            e = bustm.find(b, self.stage_bust_expression.get()) if b is not None else None
+            image = bustm.picture(e.image) if e is not None else None
+            photo = self._photo(("bust", e.image), image, THUMB_CHARACTER) if image is not None else None
+            self.character_picture.configure(image=photo or "")
         if wa is None:
             return
         number = tower.scene_number(self.stage_scene.get())
@@ -300,6 +366,8 @@ class TowerTab(Tab):
             scene = (number // 100) << 8 | (number % 100 // 10) << 4 | number % 10
             photo = self._photo(("scene", number), tower_art.scene_image(wa, scene), THUMB_SCENE)
             self.scene_picture.configure(image=photo or "", text="" if photo else "(none)")
+        if getattr(self, "bust_shown", False):
+            return
         character = int(self.stage_character.get() or 0)
         photo = self._photo(("character", character), tower_art.character_image(wa, character), THUMB_CHARACTER)
         self.character_picture.configure(image=photo or "")
@@ -847,7 +915,8 @@ class TowerTab(Tab):
         if self.project is None:
             return
         problems = tower.check(self.project.other.get("tower"), lambda name: roster.named(self.project, name),
-                               lambda name: self.project.resolve(name))
+                               lambda name: self.project.resolve(name),
+                               lambda name: roster.bust_of(self.project, roster.named(self.project, name)))
         self.status.configure(text="\n".join(f"{level}: {where}: {message}" for level, where, message in problems))
         for index, floor in enumerate(self.floors):
             if isinstance(floor, dict) and self.list.exists(str(index)):

@@ -45,7 +45,7 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import pngio, portrait
+from . import bust as bustm, pngio, portrait
 from .gamedata import DUELIST_COUNT, DUELIST_NAMES, POOLS
 from .model import KEY_RE, duelist_named, letters
 
@@ -73,6 +73,8 @@ class RosterDuelist:
     slot: object = None             # the id it asks for, 40-127, or None for the first free place
     portrait: bytes = field(default=None, repr=False)   # its PNG's bytes, or None: its base's face
     portrait_path: str = None       # "portrait" as written, when the PNG is not portraits/<key>.png
+    bust: object = field(default=None, repr=False)      # its bust (bust.Bust), or None: the campaign's character
+    replace_bust: bool = False      # "replace_bust": a disc duelist's bust is the campaign's too
     pools: dict = field(default=None, repr=False)       # a copy's {pool: {card: weight}}, as the game deals them
     kept: dict = field(default_factory=dict)    # pool -> {name as written: weight} naming no card here
     extra: dict = field(default_factory=dict)   # the entry's other keys (ai, unlock, ranks...) as written
@@ -307,6 +309,12 @@ def duplicate(project, e: RosterDuelist) -> RosterDuelist:
     other.written = None
     other.slot = None
     other.portrait_path = None
+    other.replace_bust = False
+    if other.bust is not None:      # its own files, under its own id
+        other.bust.written = None
+        other.bust.unread = False
+        for x in other.bust.expressions:
+            x.image_path, x.talk_paths, x.blink_path = None, [None] * len(x.talk), None
     other.name = (e.name or DUELIST_NAMES[e.base]) + " 2"
     other.key = free_key(project, slug(other.name))
     if other.pools is None:
@@ -338,7 +346,8 @@ def take_over(project, d: int) -> RosterDuelist:
 
 def prune(project, e: RosterDuelist):
     """A replacement that no longer changes anything is no entry at all."""
-    if e.replace and not e.name and e.portrait is None and not e.portrait_path and not e.extra:
+    if e.replace and not e.name and e.portrait is None and not e.portrait_path and not e.extra and \
+            e.bust is None and not e.replace_bust:
         if e in project.roster:
             project.roster.remove(e)
 
@@ -374,6 +383,41 @@ def revert_portrait(project, s):
 def has_portrait(project, s) -> bool:
     e = replacement(project, s) if isinstance(s, int) else s
     return e is not None and (e.portrait is not None or bool(e.portrait_path))
+
+
+def bust_of(project, s):
+    """A duelist's bust, None for none (a disc duelist's is on its replacement)."""
+    e = replacement(project, s) if isinstance(s, int) else s
+    return e.bust if e is not None else None
+
+
+def give_bust(project, s, png: bytes, name: str = "default"):
+    """A bust of one expression, for a duelist without one; a disc
+    duelist's goes on its replacement."""
+    e = take_over(project, s) if isinstance(s, int) else s
+    if e.bust is None:
+        pngio.decode(png)
+        e.bust = bustm.short(png, name)
+    return e.bust
+
+
+def drop_bust(project, s):
+    """Its bust gone: the campaign's character again."""
+    e = replacement(project, s) if isinstance(s, int) else s
+    if e is None:
+        return
+    e.bust = None
+    e.replace_bust = False
+    prune(project, e)
+
+
+def set_replace_bust(project, s, on: bool):
+    """A disc duelist's "replace_bust", on its replacement."""
+    if not isinstance(s, int):
+        raise ValueError("replace_bust is for a duelist of the disc's; an added duelist's bust is its own already")
+    e = take_over(project, s)
+    e.replace_bust = bool(on)
+    prune(project, e)
 
 
 def rename_key(project, e: RosterDuelist, key: str):
@@ -460,7 +504,10 @@ def _read_entry(project, value, key, origin: str, where: str, messages: list):
     # A folder's file takes its id from its name, and an "id" in it is
     # passed over: kept as written, like anything else the editor has no
     # field for.
-    taken = {"copy", "replace", "portrait"} | ({"id"} if origin != "folder" else set())
+    taken = {"copy", "replace", "portrait", "bust"} | ({"id"} if origin != "folder" else set())
+    if isinstance(value.get("replace_bust"), bool):
+        e.replace_bust = value["replace_bust"]
+        taken.add("replace_bust")
     if isinstance(name, str):
         taken.add("name")
     if e.slot is not None:
@@ -498,6 +545,12 @@ def _read_portrait(project, e: RosterDuelist, folder, messages: list):
         return
     e.portrait = data
     project.roster_owned.add(rel)
+
+
+def _read_bust(e: RosterDuelist, folder, messages: list, project):
+    if e.written is None or "bust" not in e.written:
+        return
+    e.bust = bustm.read(e.written["bust"], folder, f"duelist {e.key}", messages, project.roster_owned)
 
 
 def read(project, value, folder, messages: list):
@@ -554,6 +607,7 @@ def read(project, value, folder, messages: list):
                 messages.append(f"{where}: {e.key} is already taken; the game leaves this one out")
             project.roster.append(e)
             _read_portrait(project, e, folder, messages)
+            _read_bust(e, folder, messages, project)
     if folder is None:
         return
     directory = Path(folder) / "duelists"
@@ -581,6 +635,7 @@ def read(project, value, folder, messages: list):
         project.roster.append(e)
         project.roster_owned.add(rel)
         _read_portrait(project, e, folder, messages)
+        _read_bust(e, folder, messages, project)
 
 
 def read_pool_folders(project, folder, messages: list):
@@ -668,6 +723,10 @@ def entry(e: RosterDuelist, with_id: bool) -> dict:
         out["slot"] = e.slot
     if e.portrait_path:
         out["portrait"] = e.portrait_path
+    if e.bust is not None:
+        out["bust"] = bustm.value(e.bust, e.key)
+    if e.replace_bust:
+        out["replace_bust"] = True
     for k, v in e.extra.items():
         out.setdefault(k, v)
     if e.written is not None and json.dumps(e.written, sort_keys=True) == json.dumps(out, sort_keys=True):
@@ -704,6 +763,8 @@ def files(project, decks: dict, drops: dict) -> dict:
             out[f"duelists/{e.key}.json"] = dumps(entry(e, False)).encode("utf-8")
         if e.portrait is not None:
             out[portrait_file(e)] = e.portrait
+        if e.bust is not None:
+            out.update(bustm.files(e.bust, e.key))
         if e.copy and e in decks:
             out[f"decks/{e.key}.json"] = dumps(decks[e]).encode("utf-8")
         if e.copy and e in drops:
@@ -783,6 +844,15 @@ def check(project, out: list):
             add("error", f"no room left: the grid holds ids up to {LAST_SLOT}")
         if e.portrait is not None and picture(e.portrait) is None:
             add("error", "its portrait is not a PNG the game can read")
+        if e.bust is not None:
+            bustm.check(e.bust, e.replace_bust if e.replace else None, add)
+        if e.replace_bust and not e.replace:
+            add("error", "replace_bust is for a duelist of the disc's (a replacement); the game leaves it out")
+        elif e.replace_bust and e.bust is None:
+            add("warning", "replace_bust without a bust of its own changes nothing")
+        elif e.replace_bust and not bustm.campaign_character(e.base):
+            add("warning", f"the campaign shows {DUELIST_NAMES[e.base]} as no character: replace_bust changes "
+                           "nothing there")
         duelist_rules.check(project, e, add)
         if e.copy and e.pools is not None:
             for pool in POOLS:

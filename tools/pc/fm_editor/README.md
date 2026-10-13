@@ -544,9 +544,12 @@ face goes to that duelist, ◀ ▶ turn the page), **Name and place...** (its
 name, id, base and slot), **Unlock, play, ranks...** (when the grid shows
 it, how it plays, how a duel against it is scored) and
 **Picture...**/**Disc's face** (below). The list's **Status** column says
-what a duelist has of its own (`face`, `locked`, `plays`, `ranks`...).
+what a duelist has of its own (`face`, `bust`, `locked`, `plays`, `ranks`...).
 
-Then, per opponent (the mod's own as well as the disc's), its **Pools**: **Deck**, **S/A-POW drops**, **B/C/D
+Under the header, two pages: its **Pools** and its **Bust** (below; the
+header's **Bust** button turns to it).
+
+Per opponent (the mod's own as well as the disc's), its **Pools**: **Deck**, **S/A-POW drops**, **B/C/D
 drops** and **S/A-TEC drops**: each card's weight, its chance, the retail
 weight, and the total against 2048 (**Scale to 2048 (100%)** scales a pool
 back to 2048 the way the port does). **Add a card...**, **Weight**/**Set**,
@@ -616,6 +619,40 @@ are, and its deck may be a **Fixed deck** too; they are saved in
 * **Rank scoring** (`ranks`): the ten rules, each the disc's (unticked,
   shown greyed) or five [threshold, change] pairs of its own, the last
   threshold "above".
+
+#### The bust: the large character
+
+The **Bust** page is the duelist's large character, the one the campaign's
+dialogue and a tower's stories stand on the box ([`bust`](../../../notes/more-duelists.md#bust--the-large-character)),
+with named expressions. Down the left, its expressions in the order the game
+numbers them (the default first, `(default)`), with the frames each has;
+**Add...** (a PNG with clear parts, and its name), **Rename...** (or a
+double-click), **Remove**, **Default**, and ▲ ▼ to order the rest. In the
+middle, the screen at the console's 320 x 240 with the chosen expression
+standing where the game stands it (its middle over the **left** or **right**
+side's place, its bottom on the box, a picture over 256 x 256 shrunk to fit),
+as its **Picture**, **Talk 1**, **Talk 2** or **Blink**: a talking or blink
+frame drawn over the picture, as the game draws it. On the right,
+**Picture...** changes it, **Talking...** adds a frame of the mouth open (up
+to four), **No talk** takes the last away, **Blink...** and **No blink** the
+eyes shut, **No bust** the whole bust. An expression without a talking frame
+does not speak, without a blink frame does not blink.
+
+For one of the disc's duelists the bust is written on its replacement and
+only **adds** expressions a tower's stories may name; the campaign keeps its
+character. **The campaign's character too** (`replace_bust`) makes it the
+campaign's: it asks first, and the line under it says what it changes
+(every scene that shows that character, and the other duelists that are the
+same character: Seto's is Seto 2nd's and Seto 3rd's too). An added
+duelist's bust is its own wherever a story shows it.
+
+The pictures are saved in `busts/<id>/` (`<expression>.png`,
+`<expression>-talk1.png`, `<expression>-blink.png`); a bust read from a mod
+keeps its own paths. Conflicts says what the game would read otherwise (a
+frame of another size than the default's, which it stretches; a default that
+is none of them; a fifth expression on, which comes in as another character;
+`replace_bust` on a duelist the campaign shows as nobody). A bust needs mod
+API 17.
 
 What it writes is the shortest form that says the same (`{"search": 12}`
 for byte 0 alone), and an entry's own while it still reads the same; a key
@@ -1089,6 +1126,10 @@ the options below says what each does.
 - **Stage:** writes a story's bracketed lines (`[scene: ...]`, `[left:
   ...]`, `[right: ...]`, `[pan: ...]`) into the story last clicked, with
   pictures of the disc's scenes and characters made from your game files.
+  Its last row picks a duelist with a bust (the Duelists tab's **Bust**) and
+  one of its expressions, and **Bust** writes `[left: Ghost expression
+  angry]` (an expression's name with a space is in quotes); its picture
+  shows beside.
 - **Story:** what is told before the first climb, at the top and after a
   loss. A line is a page or more of the box; `@left:`, `@right:` or
   `@Seto: ...` says who speaks, `#8: ...` adds one of the campaign's 25
@@ -1106,8 +1147,9 @@ the options below says what each does.
   lines before the duel and after a win.
 
 The line above the form lists what the game would leave out or read
-otherwise (the same as Conflicts' **Tower** area). A tower needs mod API 14,
-which Mod info then shows and the save writes as `min_api`. What the form
+otherwise (the same as Conflicts' **Tower** area), an expression a duelist's
+bust does not have among them. A tower needs mod API 14 (17 with a story's
+expression by name), which Mod info then shows and the save writes as `min_api`. What the form
 cannot show (a key of a later game) is kept as written.
 
 ### Mod info
@@ -1368,7 +1410,10 @@ record are shown as retail fusions and marked.
   `duelists/<id>.json`. An entry holds `copy` (or `replace`), `name`, `slot`
   and `portrait` as the tab has them and every other key as written; one
   that says what it said when read is written as it was. A face is
-  `portraits/<id>.png` (or the path its `"portrait"` names). An added
+  `portraits/<id>.png` (or the path its `"portrait"` names). A bust is
+  `"bust"` and `"replace_bust"` in the entry, its pictures under
+  `busts/<id>/` (or the paths it was read with; one whose pictures could not
+  be read is written as it was). An added
   duelist's pools are its own files, `decks/<id>.json` and
   `drops/<id>.json`, written against its base's disc pools (which the game
   edits for it) and only when they differ; a disc duelist's go in mod.json's

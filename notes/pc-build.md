@@ -386,6 +386,40 @@ layout, a slot's details go on lines under its name and the hints wrap
 the box is narrower than them (`centred_words`, `deck_menu.c`); the text
 gets smaller only when even that does not fit.
 
+The mods' overlays (`MemoriesMod.overlay`) are drawn under the pad while it
+shows: `draw_overlay` (`sdl.c`) calls `Hud_DrawMods` first, then
+`TouchPadArt_Draw`, then `Hud_Draw` (which leaves the mods out that frame
+and still counts their rectangle in `Hud_Bounds`) and `Menu_Draw`. A mod's
+full-screen panel (a drop list on Triangle, say) used to cover the pad, so
+the player could not see where to tap; the pad's touches always reached it
+(`TouchPad_Finger` runs in the event pump, and mods take no touch). So,
+with the pad, the order from the bottom is: picture, mods, pad, then the
+HUD (frame rate, fusion helper, rank meter, Free Duel progress, title
+text) with the save/deck slot menus over it, and the menu bar (over the
+HUD while a menu is open or the full statistics show, under it otherwise,
+as before). Without the pad (`TouchPad_Shown` 0: a desktop unless View >
+Touch controls is Show, or Automatic after a touch on a touch screen) the
+mods keep their place in `Hud_Draw`,
+over the HUD and under the slot menus: window shots of the 32-bit build
+with a full-screen test overlay at the title (`MEMORIES_WINDOW_SHOT`,
+deterministic, stepped by `yfm_control.py`) are byte-identical to
+origin/master's with the HUD off, and differ only in the frame-rate digits
+with `MEMORIES_SHOW_HUD=1` (the mod over the box, as before). The x11
+backend has no touch pad and is unchanged.
+
+**Touch pad's free span (proposed, not done).** `TouchPad_FreeSpan(&left,
+&right)` gives the columns between the pad's two sides, which the save and
+deck slot menus keep to (`Menu_SetOverlayArea`). A mod has no such call,
+so its panel either spans the pad (now under it, the buttons see-through
+over it) or guesses. A host entry at the end of `MemoriesModHost` (a new
+API number), `overlay_free_span(host, &left, &right)`, valid inside the
+overlay callback and giving the whole width when the pad is hidden, would
+let a mod lay out between the pad's columns. The pad showing, hiding or
+moving already recomposes the overlay (`menu_dirty`), which runs every
+overlay callback again, so the span read there is always current; only a
+mod that keeps a layout worked out outside the callback would need to
+watch it.
+
 Esc quits (it closes an open menu first): it is the default key of Game >
 Controls' **Exit game**. With **File > Confirm before quitting** on (the
 default) it asks "Quit the game?" first: Quit or Keep playing, Keep playing

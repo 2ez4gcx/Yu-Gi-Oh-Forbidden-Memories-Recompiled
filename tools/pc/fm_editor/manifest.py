@@ -24,7 +24,7 @@ from pathlib import Path
 
 from .gamedata import (FUSION_GROUPS, RITUAL_ORIGINS, RITUAL_REQUIREMENT_KEYS, RITUAL_TRIBUTE_MAX, fusion_group_named, ATTRIBUTE_NAMES, CARD_COUNT, DECK_SIZE, DUELIST_NAMES, FRAME_COLOR_NAMES, FRAME_NAMES, POOLS, STAR_NAMES,
                        EQUIP_BONUS_MAX, STARTER_WEIGHT_LIMIT, TYPE_NAMES, TYPE_MAGIC, TYPE_LIMIT, GameData, is_monster_type)
-from .model import AddedCard, ModInfo, Project, StarterDeck, duelist_named, type_named, KEY_RE
+from .model import AddedCard, ModInfo, Project, StarterDeck, duelist_named, same_letters, KEY_RE
 from . import art, board_art, campaign_map, compat, fixed_decks, guardian_stars, packs as packmath, pools as poolmath, roster
 
 INFO_KEYS = ("id", "name", "version", "author", "description")
@@ -620,12 +620,17 @@ def _choice(value, names):
 
 def _type_choice(project, value):
     """The runtime type resolver, including retail aliases after a rename."""
-    choice = _choice(value, getattr(project, "type_names", TYPE_NAMES))
-    if choice >= 0:
+    names = getattr(project, "type_names", TYPE_NAMES)
+    choice = _choice(value, names)
+    # cards.c accepts a numeric choice only when the slot is registered.
+    if 0 <= choice < len(names) and names[choice]:
         return choice
     if isinstance(value, str):
-        choice = _choice(value, TYPE_NAMES)
+        choice = next((i for i, name in enumerate(names) if name and same_letters(value, name)), -1)
         if choice >= 0:
+            return choice
+        choice = next((i for i, name in enumerate(TYPE_NAMES) if same_letters(value, name)), -1)
+        if choice >= 0 and choice < len(names) and names[choice]:
             return choice
     return -1
 
@@ -645,6 +650,20 @@ def read_card_types(project: Project, section, messages: list):
         type_, name = entry["id"], entry["name"]
         if not (0 <= type_ < TYPE_LIMIT) or not name:
             messages.append(f"{where}: id is 0-23 or 24-255 with a non-empty name; left out")
+            continue
+        normalized = "".join(c.lower() for c in name if c.isascii() and c.isalnum())
+        # Match add_card_types_section(): a later declaration may replace its
+        # own ID, but must not shadow another active spelling or a retail
+        # alias retained after that retail type was renamed.
+        collision = next((other for other, other_name in enumerate(project.type_names)
+                          if other != type_ and other_name and
+                          "".join(c.lower() for c in other_name if c.isascii() and c.isalnum()) == normalized), None)
+        if collision is None:
+            collision = next((other for other, other_name in enumerate(TYPE_NAMES)
+                              if other != type_ and
+                              "".join(c.lower() for c in other_name if c.isascii() and c.isalnum()) == normalized), None)
+        if collision is not None:
+            messages.append(f'{where}: "{name}" is already type {collision}\'s name or retail alias; declaration left out')
             continue
         project.type_names[type_] = name
 
@@ -961,7 +980,10 @@ def equip_rules(project: Project, entries, messages: list, kept: list = None) ->
         for allow, key in ((True, "add"), (False, "remove")):
             targets = entry.get(key)
             for target in targets if isinstance(targets, list) else []:
-                t = type_named(target) if isinstance(target, str) else -1
+                # tables.c checks a type name before a card reference.  Use
+                # the project registry so custom types and retail aliases
+                # behave exactly as they do in the game.
+                t = _type_choice(project, target) if isinstance(target, str) else -1
                 if t >= 0 and project.resolve(target) <= 0:
                     rules.append((equip, EQUIP_TYPE, t, allow, order))
                     continue

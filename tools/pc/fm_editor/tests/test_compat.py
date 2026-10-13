@@ -106,6 +106,27 @@ class FeatureTest(unittest.TestCase):
         self.assertEqual(p.cards[1].type, 24)
         self.assertEqual(manifest.build(p)["cards"][0]["type"], "Cyberse")
 
+    def test_type_import_uses_runtime_collisions_aliases_and_equips(self):
+        p = Project(fixture().game())
+        messages = manifest.apply(p, {
+            "card_types": {"types": [
+                {"id": 0, "name": "Wyrm"},
+                {"id": 24, "name": "Cyberse"},
+                {"id": 25, "name": "Dragon"},
+            ]},
+            "cards": [{"replace": 1, "type": "Dragon"}],
+            "equips": [{"card": 660, "add": ["Cyberse"]}],
+        })
+        self.assertEqual(p.type_names[0], "Wyrm")
+        self.assertEqual(p.type_names[24], "Cyberse")
+        self.assertIsNone(p.type_names[25])
+        self.assertEqual(p.cards[1].type, 0)       # Dragon is Wyrm's retail alias.
+        self.assertEqual(manifest._type_choice(p, "Cyber-Se"), 24)
+        self.assertEqual(manifest._type_choice(p, 25), -1)
+        self.assertTrue(any("already type 0" in message for message in messages))
+        self.assertIn((660, manifest.EQUIP_TYPE, 24, True, 1),
+                      manifest.equip_rules(p, [{"card": 660, "add": ["Cyberse"]}], []))
+
     def test_reasons_are_the_highest_apis(self):
         api, reasons = compat.required({"card_text_colors": {}, "ui": {}, "limits": {"swords_turns": 5}})
         self.assertEqual(api, 11)

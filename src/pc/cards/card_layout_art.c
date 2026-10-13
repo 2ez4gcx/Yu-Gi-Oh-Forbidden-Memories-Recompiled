@@ -317,9 +317,12 @@ int CardLayoutArt_FieldBackCell(int card_id, int *tpage, int *u, int *v, int *cl
  * bh <= 254, and the same bound covers bw since both share this ceiling). */
 #define BACK_PAGE_X 896
 #define BACK_PAGE_Y 256
-/* The back's pixel rectangle is only 70 words wide at its widest, leaving
- * x=768..1023 free for its full 256-word CLUT below the image. */
+/* The pixels occupy x=896..1023, y=256..510 at most.  Keep the full-width
+ * palette at the bank's final row instead of directly below a variable-size
+ * image: rows below a short image are also used by the fixed small assets in
+ * the x=640..895 band. */
 #define BACK_CLUT_X 768
+#define BACK_CLUT_Y 511
 #define BACK_MAX_SIDE 254
 static char back_path[1040];
 static char back_bank_path[1040];
@@ -376,20 +379,20 @@ int CardLayoutArt_BackCell(int card_id, int *tpage, int *u, int *v, int *clut, i
             }
         }
         bank_pad_edge(bank, BACK_PAGE_X, BACK_PAGE_Y, bw, bh);
-        memcpy(&bank[(BACK_PAGE_Y + bh + 1) * SOFT_GPU_WIDTH + BACK_CLUT_X], back_clut, sizeof(back_clut));
+        memcpy(&bank[BACK_CLUT_Y * SOFT_GPU_WIDTH + BACK_CLUT_X], back_clut, sizeof(back_clut));
         snprintf(back_bank_path, sizeof(back_bank_path), "%s", key);
         back_built_w = bw;
         back_built_h = bh;
         if (back_png_w > 0 && back_png_h > 0) {
             TexturePack_BankSpritesUseOwner(TEXTURE_BANK_OWNER_LAYOUT_FRAME);
-            TexturePack_AddBankSprite(FRAME_BANK, BACK_PAGE_X, BACK_PAGE_Y, 1, BACK_CLUT_X, BACK_PAGE_Y + bh + 1, 0, 0,
+            TexturePack_AddBankSprite(FRAME_BANK, BACK_PAGE_X, BACK_PAGE_Y, 1, BACK_CLUT_X, BACK_CLUT_Y, 0, 0,
                                       bw, bh, path);
         }
     }
     *tpage = LAYOUT_TPAGE(BACK_PAGE_X, BACK_PAGE_Y);
     *u = 0;
     *v = 0;
-    *clut = ((BACK_PAGE_Y + back_built_h + 1) << 6) | (BACK_CLUT_X / 16);
+    *clut = (BACK_CLUT_Y << 6) | (BACK_CLUT_X / 16);
     *w = back_built_w;
     *h = back_built_h;
     return 1;
@@ -753,13 +756,13 @@ int CardLayoutArt_DigitCell(int digit, int dim, int *tpage, int *u, int *v, int 
 /* Bank 13 lower-half allocation (all coordinates are halfwords):
  *
  *   menu       pixels 384..391, y256..272; CLUT 384..639, y273
- *   title      pixels 640..687, y256..270; CLUT 640..895, y271
+ *   title      pixels 640..687, y256..269; CLUT 640..895, y270
  *   library    pixels 640..645, y280..294; CLUT 640..895, y295
  *   field      pixels 384..409, y300..360; CLUT 384..639, y361
  *   field back pixels 640..665, y300..360; CLUT 640..895, y361
  *   ATK label  pixels 384..447, y370..433; CLUT 384..639, y434
  *   DFD label  pixels 640..703, y370..433; CLUT 640..895, y434
- *   card back  pixels 896..1023, y256..510; CLUT 768..1023 below it
+ *   card back  pixels 896..1023, y256..510; CLUT 768..1023, y511
  *
  * Full 256-entry CLUT widths are called out because treating them as one
  * 128-word page was the source of prior menu/label corruption. */
@@ -836,6 +839,42 @@ int CardLayoutArt_StatLabelCell(int dfd, int *tpage, int *u, int *v, int *clut, 
 #define TITLE_H 14
 #define TITLE_PAGE_X 640
 #define TITLE_PAGE_Y 256
+typedef struct {
+    int source_tpage, source_u, source_v;
+    unsigned int hash;
+    int valid;
+} TitleMaskCache;
+static TitleMaskCache title_mask_cache;
+static int title_unavailable_reported;
+static int title_unavailable_tpage, title_unavailable_u, title_unavailable_v;
+
+static unsigned int title_source_hash(const uint16_t *vram, int src_x, int src_y, int depth, int source_u, int source_v)
+{
+    unsigned int hash = 2166136261u;
+    int x, y;
+
+    for (y = 0; y < TITLE_H; y++) {
+        for (x = 0; x < TITLE_W; x++) {
+            int tx = source_u + x, ty = source_v + y;
+            uint16_t word = vram[(src_y + ty) * SOFT_GPU_WIDTH + src_x +
+                                 (depth == 0 ? tx / 4 : depth == 1 ? tx / 2 : tx)];
+            int pixel = depth == 0 ? (word >> ((tx & 3) * 4)) & 15 :
+                        depth == 1 ? (word >> ((tx & 1) * 8)) & 255 : word;
+            hash = (hash ^ (unsigned int)pixel) * 16777619u;
+        }
+    }
+    return hash;
+}
+
+static void title_mask_output(int *tpage, int *u, int *v, int *clut, int *w, int *h)
+{
+    *tpage = LAYOUT_TPAGE(TITLE_PAGE_X, TITLE_PAGE_Y);
+    *u = *v = 0;
+    *clut = ((TITLE_PAGE_Y + TITLE_H) << 6) | (TITLE_PAGE_X / 16);
+    *w = TITLE_W;
+    *h = TITLE_H;
+}
+
 int CardLayoutArt_TitleCell(int source_tpage, int source_u, int source_v, int source_w, int source_h,
                             int *tpage, int *u, int *v, int *clut, int *w, int *h)
 {
@@ -844,12 +883,28 @@ int CardLayoutArt_TitleCell(int source_tpage, int source_u, int source_v, int so
     int page_x = TITLE_PAGE_X, page_y = TITLE_PAGE_Y;
     int clut_y = page_y + TITLE_H, depth = (source_tpage >> 7) & 3;
     int src_x = (source_tpage & 0xF) * 64, src_y = ((source_tpage >> 4) & 1) * 256;
+    unsigned int hash;
     int x, y;
 
     if (!bank || !vram || source_w != TITLE_W || source_h != TITLE_H || depth == 3) {
-        LOG(LOG_CARD_LAYOUT, "title mask: unavailable (bank=%p vram=%p tpage=0x%x depth=%d uv=%d,%d size=%d,%d)",
-            (void *)bank, (const void *)vram, source_tpage, depth, source_u, source_v, source_w, source_h);
+        if (!title_unavailable_reported || title_unavailable_tpage != source_tpage ||
+            title_unavailable_u != source_u || title_unavailable_v != source_v) {
+            LOG(LOG_CARD_LAYOUT, "title mask: unavailable (bank=%p vram=%p tpage=0x%x depth=%d uv=%d,%d size=%d,%d)",
+                (void *)bank, (const void *)vram, source_tpage, depth, source_u, source_v, source_w, source_h);
+            title_unavailable_reported = 1;
+            title_unavailable_tpage = source_tpage;
+            title_unavailable_u = source_u;
+            title_unavailable_v = source_v;
+        }
         return 0;
+    }
+    title_unavailable_reported = 0;
+    hash = title_source_hash(vram, src_x, src_y, depth, source_u, source_v);
+    if (title_mask_cache.valid && title_mask_cache.source_tpage == source_tpage &&
+        title_mask_cache.source_u == source_u && title_mask_cache.source_v == source_v &&
+        title_mask_cache.hash == hash) {
+        title_mask_output(tpage, u, v, clut, w, h);
+        return 1;
     }
     for (y = 0; y < TITLE_H; y++) {
         for (x = 0; x < TITLE_W; x += 2) {
@@ -870,11 +925,12 @@ int CardLayoutArt_TitleCell(int source_tpage, int source_u, int source_v, int so
     }
     memset(&bank[clut_y * SOFT_GPU_WIDTH + page_x], 0, 256 * sizeof(uint16_t));
     bank[clut_y * SOFT_GPU_WIDTH + page_x + 1] = 0x7FFF;
-    *tpage = LAYOUT_TPAGE(page_x, page_y);
-    *u = *v = 0;
-    *clut = (clut_y << 6) | (page_x / 16);
-    *w = TITLE_W;
-    *h = TITLE_H;
+    title_mask_cache.source_tpage = source_tpage;
+    title_mask_cache.source_u = source_u;
+    title_mask_cache.source_v = source_v;
+    title_mask_cache.hash = hash;
+    title_mask_cache.valid = 1;
+    title_mask_output(tpage, u, v, clut, w, h);
     LOG(LOG_CARD_LAYOUT, "title mask: bank=%d tpage=0x%x clut=0x%x from tpage=0x%x depth=%d uv=%d,%d",
         FRAME_BANK, *tpage, *clut, source_tpage, depth, source_u, source_v);
     return 1;
@@ -897,6 +953,7 @@ static void layout_bank_registrations_lost(void)
     digits_bank_path[0] = 0;
     stat_labels[0].bank_path[0] = 0;
     stat_labels[1].bank_path[0] = 0;
+    title_mask_cache.valid = 0;
 }
 
 void CardLayoutArt_Prewarm(void)

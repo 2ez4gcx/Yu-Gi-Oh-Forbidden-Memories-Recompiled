@@ -401,6 +401,27 @@ static void monster_effect_for_each(void)
     assert(!MonsterEffect_EachAllowed(MONSTER_DO_MAGIC) && !MonsterEffect_EachAllowed(MONSTER_DO_DESTROY));
 }
 
+/* A monster-effect's "type" (monster_effects.c filter()) reads Json_Number's
+ * long before narrowing to int: 2^32 must be rejected as out of range, not
+ * silently narrowed first and read back as the valid type 0. */
+static void monster_effect_type_overflow(void)
+{
+    BuildContext context = {0};
+    char error[128];
+    const JsonValue *entry;
+    const MonsterEffect *effects;
+    int i, before = effect_notes;
+    JsonDocument *doc = Json_Parse(
+        "[{\"replace\":25,\"monster_effects\":["
+        "  {\"when\":\"summon\",\"do\":\"boost\",\"target\":\"own\",\"attack\":500,\"type\":4294967296}]}]",
+        error, sizeof(error));
+    assert(doc);
+    for (i = 0, entry = Json_At(Json_Root(doc), 0); entry; i++, entry = Json_Next(entry))
+        add_entry("i", ".", i, entry, &context);
+    assert(Cards_MonsterEffects(25, &effects) == 0);
+    assert(effect_notes == before + 1);
+}
+
 /* Copies of magic cards made monsters (as a replace may be): a monster's
  * type, ATK and DEF, stars as a replaced card gets them, out of the magic
  * card's tables; made a Trap without a trap's effect, still refused. */
@@ -580,6 +601,7 @@ int main(void)
     trap_conversions();
     monster_effect_entries();
     monster_effect_for_each();
+    monster_effect_type_overflow();
     copies_made_monsters();
     card_effect_entries();
     puts("cards stars, magic and trap conversions: ok");

@@ -104,11 +104,12 @@ static int filter(const char *mod, int index, int n, const char *where, const Js
     const JsonValue *value = Json_Member(object, "type");
     int v;
     if (value) {
-        v = Json_TypeOf(value) == JSON_NUMBER ? (int)Json_Number(value, -1) : Cards_TypeNamed(Json_String(value, ""));
-        if (v < 0 || v >= CARD_TYPE_MAGIC) {
+        long raw = Json_TypeOf(value) == JSON_NUMBER ? Json_Number(value, -1) : Cards_TypeNamed(Json_String(value, ""));
+        if (raw < 0 || raw >= CARD_TYPE_MAGIC) {
             Mods_Note(mod, "cards[%d]: monster_effects[%d]: %s\"type\" must be a monster type", index, n, where);
             return 0;
         }
+        v = (int)raw;
         *type = (signed char)v;
     }
     value = Json_Member(object, "attribute");

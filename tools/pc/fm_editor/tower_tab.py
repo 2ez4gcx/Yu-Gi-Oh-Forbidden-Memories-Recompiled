@@ -136,13 +136,14 @@ class TowerTab(Tab):
         frame.pack(fill="x")
         self._entry(frame, 0, "name", "Name")
         self._entry(frame, 1, "label", "Menu button", hint="31 letters at most; TOWER without")
-        self._entry(frame, 2, "music", "Music", width=8, hint="a song id, 0x000-0xFFF; the Free Duel screen's without")
+        music = self._entry(frame, 2, "music", "Music", width=8, hint="a song id, 0x000-0xFFF")
+        Tip(music, "The song the tower's screen plays. Empty: the Free Duel screen's.")
         ttk.Label(frame, text="Opens").grid(row=3, column=0, sticky="w")
         self.vars["unlock"] = tk.StringVar(value="always")
         unlock = ttk.Combobox(frame, textvariable=self.vars["unlock"], values=tower.UNLOCKS, state="readonly", width=14)
         unlock.grid(row=3, column=1, sticky="w", padx=(4, 0))
         unlock.bind("<<ComboboxSelected>>", lambda e: self.commit())
-        ttk.Label(frame, style="Hint.TLabel", text="after_ending: once the save has seen the ending").grid(
+        ttk.Label(frame, style="Hint.TLabel", text="after_ending: the ending seen").grid(
             row=3, column=2, sticky="w", padx=(4, 0))
         conditions = ttk.Frame(frame)
         conditions.grid(row=4, column=0, columnspan=3, sticky="w", pady=(2, 0))
@@ -162,7 +163,7 @@ class TowerTab(Tab):
                             state="readonly", width=14)
         lose.grid(row=5, column=1, sticky="w", padx=(4, 0))
         lose.bind("<<ComboboxSelected>>", lambda e: self.commit())
-        ttk.Label(frame, style="Hint.TLabel", text="back to the last checkpoint, or to floor 1").grid(
+        ttk.Label(frame, style="Hint.TLabel", text="last checkpoint, or floor 1").grid(
             row=5, column=2, sticky="w", padx=(4, 0))
         ttk.Label(frame, text="Scene").grid(row=6, column=0, sticky="w")
         self.vars["scene"] = tk.StringVar()
@@ -170,18 +171,21 @@ class TowerTab(Tab):
         scene.grid(row=6, column=1, sticky="w", padx=(4, 0))
         scene.bind("<<ComboboxSelected>>", lambda e: self.commit())
         scene.bind("<FocusOut>", lambda e: self.commit())
-        ttk.Label(frame, style="Hint.TLabel", text="a story's when it names none; torch corridor without").grid(
+        Tip(scene, "The background of a story that names no scene of its own. Empty: the torch corridor.")
+        ttk.Label(frame, style="Hint.TLabel", text="when a story names none").grid(
             row=6, column=2, sticky="w", padx=(4, 0))
         self.vars["dim"] = tk.BooleanVar()
-        ttk.Checkbutton(frame, text="Draw the character not speaking darker (the campaign only keeps it still)",
-                        variable=self.vars["dim"], command=self.commit).grid(row=7, column=0, columnspan=3, sticky="w")
+        dim = ttk.Checkbutton(frame, text="Draw the character not speaking darker", variable=self.vars["dim"],
+                              command=self.commit)
+        dim.grid(row=7, column=0, columnspan=3, sticky="w")
+        Tip(dim, "The campaign only keeps the one not speaking still; ticked, the tower also draws it darker.")
         ttk.Label(frame, text="Leaving").grid(row=8, column=0, sticky="w")
         self.vars["on_leave"] = tk.StringVar(value="resume")
         leave = ttk.Combobox(frame, textvariable=self.vars["on_leave"], values=tower.ON_LEAVE, state="readonly",
                              width=14)
         leave.grid(row=8, column=1, sticky="w", padx=(4, 0))
         leave.bind("<<ComboboxSelected>>", lambda e: self.commit())
-        ttk.Label(frame, style="Hint.TLabel", text="resume where they were, or back to the checkpoint / floor 1").grid(
+        ttk.Label(frame, style="Hint.TLabel", text="resume, checkpoint or floor 1").grid(
             row=8, column=2, sticky="w", padx=(4, 0))
         Tip(leave, "What LEAVE (or any other way out of the tower) does to the climb. resume: the player comes "
                    "back where they were. checkpoint: back to the floor after the last checkpoint won. restart: "
@@ -194,7 +198,7 @@ class TowerTab(Tab):
         drops.bind("<<ComboboxSelected>>", lambda e: self.commit())
         drops.bind("<FocusOut>", lambda e: self.commit())
         drops.bind("<Return>", lambda e: self.commit())
-        ttk.Label(frame, style="Hint.TLabel", text="1-99 cards a won duel; player: Game > Card drops").grid(
+        ttk.Label(frame, style="Hint.TLabel", text="1-99; player: Game > Card drops").grid(
             row=9, column=2, sticky="w", padx=(4, 0))
         Tip(drops, "The cards a won tower duel gives on its results screen, whatever the player set Game > "
                    "Card drops to (up to 99). \"player\" follows that setting. A floor's reward is given as well.")
@@ -452,9 +456,9 @@ class TowerTab(Tab):
         self.list.heading("field", text="Field")
         self.list.heading("rules", text="Rules")
         self.list.column("#0", width=40)
-        self.list.column("duelist", width=180)
+        self.list.column("duelist", width=160)
         self.list.column("field", width=80)
-        self.list.column("rules", width=220)
+        self.list.column("rules", width=190)
         self.list.pack(fill="x")
         self.list.bind("<<TreeviewSelect>>", lambda e: self.pick())
         buttons = ttk.Frame(frame)

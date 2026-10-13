@@ -31,8 +31,7 @@ unsigned char D_8009B26C, D_8009B368, gDuel_bOpponentID;
 unsigned short gDuel_awPlayerDeck[0x340];     /* the running save, SaveDataState */
 static unsigned char *save = (unsigned char *)gDuel_awPlayerDeck;
 
-static int notes;
-void Mods_Note(const char *id, const char *format, ...) { (void)id; (void)format; notes++; }
+void Mods_Note(const char *id, const char *format, ...) { (void)id; (void)format; }
 int Mods_LoadedCount(void) { return 0; }
 int Mods_Loaded(int index) { return index; }
 int Mods_Active(int mod) { (void)mod; return 1; }

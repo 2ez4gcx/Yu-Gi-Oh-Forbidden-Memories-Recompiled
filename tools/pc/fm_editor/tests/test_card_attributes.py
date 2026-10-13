@@ -37,7 +37,7 @@ class CardAttributeTest(unittest.TestCase):
 
     def test_validator_rejects_undeclared_and_reserved_ids(self):
         p = project()
-        for attribute in (6, 7, 8, 15):
+        for attribute in (8, 15):
             p.cards[BASE].attribute = attribute
             self.assertTrue(any("attribute" in issue.message for issue in validate.validate_card(p, BASE)))
 
@@ -77,7 +77,7 @@ class CardAttributeTest(unittest.TestCase):
         p = project()
         before = p.cards[BASE].attribute
         manifest_json = {"id": "m", "attributes": {"attributes": [{"id": 6, "name": "Spell"}]},
-                         "cards": [{"replace": BASE, "attribute": 6}]}
+                         "cards": [{"replace": BASE, "attribute": "Spell"}]}
         messages = manifest.apply(p, manifest_json)
         self.assertEqual(p.cards[BASE].attribute, before)
         self.assertTrue(messages)

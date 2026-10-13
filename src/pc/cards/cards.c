@@ -1382,14 +1382,19 @@ static void add_entry(const char *mod, const char *directory, int index, const J
         level_attr = (unsigned char)((level_attr & 0xF0) | clamp(value, 0, 12));
     }
     if (Json_Member(entry, "attribute")) {
-        value = Attributes_Value(Json_Member(entry, "attribute"));
+        const JsonValue *attribute_value = Json_Member(entry, "attribute");
+        long raw_attribute = Json_TypeOf(attribute_value) == JSON_NUMBER ? Json_Number(attribute_value, -1) : -1;
+        /* 6 and 7 are retail's magic/trap presentation values: never
+         * declarable, but a card may still be given one (as before API 13;
+         * the FM Editor writes them for cards made Magic or Trap). */
+        value = raw_attribute == 6 || raw_attribute == 7 ? (int)raw_attribute : Attributes_Value(attribute_value);
         if (value < 0) {
             Mods_Note(mod, "cards[%d]: \"attribute\" is an id 0-5 or 8-255, or a declared attribute name; left out", index);
         } else {
             attribute = (unsigned short)value;
             /* Guest code still sees a legal nibble. The real value is in
              * attribute_ids and all PC rule readers reach Cards_Attribute. */
-            level_attr = (unsigned char)((level_attr & 0x0F) | ((value < 6 ? value : 0) << 4));
+            level_attr = (unsigned char)((level_attr & 0x0F) | ((value < 8 ? value : 0) << 4));
         }
     }
     /* Optional secondary fusion groups. A new card inherits its retail base when omitted.

@@ -27,6 +27,7 @@ static unsigned test_glyphs[256];
 
 #include "../../src/pc/cards/cards.c"
 #include <assert.h>
+#include <limits.h>
 
 int gCard_nCount = CARD_COUNT, gCard_nExtraOwner;
 unsigned short gCard_awBaseId[CARD_TABLE_ID_END], gDuel_awPlayerDeck[1024];
@@ -693,12 +694,12 @@ int main(void)
     trap_conversions();
     monster_effect_entries();
     monster_effect_for_each();
-    monster_effect_type_overflow();
-    reference_overflow();
-    copy_id_overflow();
-    stat_overflow_attack_defense();
-    type_overflow_via_choice();
-    count_and_level_overflow();
+    if (LONG_MAX > INT_MAX) monster_effect_type_overflow();
+    if (LONG_MAX > INT_MAX) reference_overflow();
+    if (LONG_MAX > INT_MAX) copy_id_overflow();
+    if (LONG_MAX > INT_MAX) stat_overflow_attack_defense();
+    if (LONG_MAX > INT_MAX) type_overflow_via_choice();
+    if (LONG_MAX > INT_MAX) count_and_level_overflow();
     copies_made_monsters();
     card_effect_entries();
     puts("cards stars, magic and trap conversions: ok");

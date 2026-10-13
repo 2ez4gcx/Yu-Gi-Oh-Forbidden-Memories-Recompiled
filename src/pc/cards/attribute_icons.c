@@ -27,7 +27,9 @@
  * both with a margin, rather than interleaving around their exact rows. */
 #define ICON_Y 16
 #define CLUT_Y 272
-#define CELL_LIMIT 224   /* (CLUT_Y - ICON_Y) / CARD_ICON_SIDE * ICON_COLS: ICON_Y's own capacity, the tighter of the two */
+/* The CLUT rows stop at 479: duel_ui.c's pictures keep their palettes in
+ * rows 480-511 of this bank, across x 0-255. */
+#define CELL_LIMIT 208   /* 480 - CLUT_Y */
 static unsigned char made[ATTRIBUTES_MAX + 1];   /* 0 not yet, 1 made */
 static unsigned char has_cell[ATTRIBUTES_MAX + 1];
 static short cell_for[ATTRIBUTES_MAX + 1];

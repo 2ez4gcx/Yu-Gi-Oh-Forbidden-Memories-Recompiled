@@ -715,6 +715,11 @@ def _attribute_choice(value, section) -> int:
                     if names[i] and folded == _attribute_letters(names[i]):
                         found = i
                         break
+    # 6 and 7 are the retail magic/trap attributes: never declarable, but a
+    # card may carry them as a number (the editor writes them for a
+    # Magic/Trap card), as the game takes them (cards.c add_entry).
+    if found in (6, 7):
+        return found if type(value) is int else -1
     return found if 0 <= found < len(ATTRIBUTE_NAMES) or found in declared else -1
 
 

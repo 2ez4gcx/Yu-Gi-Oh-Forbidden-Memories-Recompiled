@@ -22,19 +22,21 @@ static int defined;
 static const char *reading_directory;   /* the mod's folder while its tower is read */
 
 /* Every line's text and every PNG made, freed with the tower. */
-static void free_lines(void)
+static void free_tower_lines(TowerConfig *tower)
 {
     int i;
-    for (i = 0; i < config.line_count; i++) free(config.lines[i].text);
-    free(config.lines);
-    config.lines = NULL;
-    config.line_count = config.line_room = 0;
-    for (i = 0; i < config.art_count; i++) {
-        free(config.arts[i].texels);
-        free(config.arts[i].bank);
+    for (i = 0; i < tower->line_count; i++) free(tower->lines[i].text);
+    free(tower->lines);
+    tower->lines = NULL;
+    tower->line_count = tower->line_room = 0;
+    for (i = 0; i < tower->art_count; i++) {
+        free(tower->arts[i].texels);
+        free(tower->arts[i].bank);
     }
-    config.art_count = 0;
+    tower->art_count = 0;
 }
+
+static void free_lines(void) { free_tower_lines(&config); }
 
 /* --- the campaign's scenes and characters ---------------------------------- */
 
@@ -801,9 +803,9 @@ void Tower_Read(const char *mod, const char *directory, const JsonValue *manifes
     static const char *const known[] = {"name", "label", "music", "unlock", "on_lose", "on_leave", "drops",
                                         "save_states", "cheats", "scene", "dim", "intro", "ending", "lose",
                                         "floors"};
+    static TowerConfig earlier;
     const JsonValue *tower = Json_Member(manifest, "tower"), *part, *floor;
-    char previous[64];
-    int index = 0;
+    int index = 0, had_previous;
     if (!tower) return;
     if (Json_TypeOf(tower) != JSON_OBJECT) {
         Mods_Note(mod, "\"tower\" is an object (notes/tower-mode.md)");
@@ -814,9 +816,12 @@ void Tower_Read(const char *mod, const char *directory, const JsonValue *manifes
         Mods_Note(mod, "tower: \"floors\" is a list of at least one floor ({\"duelist\": \"Seto\"}); no tower");
         return;
     }
-    snprintf(previous, sizeof(previous), "%s", defined ? config.mod : "");
-    if (previous[0]) Mods_Note(previous, "tower: %s's tower, loaded after this mod, is the one the menu offers", mod);
-    Tower_Reset();
+    /* An earlier mod's tower is kept aside until this one has a floor: a
+     * tower with none leaves the earlier one in place. */
+    had_previous = defined;
+    if (had_previous) earlier = config;
+    memset(&config, 0, sizeof(config));
+    defined = 0;
     reading_directory = directory;
     check_keys(mod, "tower", tower, known, sizeof(known) / sizeof(known[0]));
     snprintf(config.mod, sizeof(config.mod), "%s", mod);
@@ -883,9 +888,19 @@ void Tower_Read(const char *mod, const char *directory, const JsonValue *manifes
     }
     reading_directory = NULL;
     if (!config.floor_count) {
-        Mods_Note(mod, "tower: no floor can be fought; no tower");
+        if (had_previous) Mods_Note(mod, "tower: no floor can be fought; %s's tower stays the one the menu offers",
+                                    earlier.mod);
+        else Mods_Note(mod, "tower: no floor can be fought; no tower");
         Tower_Reset();
+        if (had_previous) {
+            config = earlier;
+            defined = 1;
+        }
         return;
+    }
+    if (had_previous) {
+        Mods_Note(earlier.mod, "tower: %s's tower, loaded after this mod, is the one the menu offers", mod);
+        free_tower_lines(&earlier);
     }
     defined = 1;
 }

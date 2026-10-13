@@ -42,7 +42,7 @@ sys.path.insert(0, str(ROOT / "tools/pc"))
 from yfm_control import ControlError, Game, MODE  # noqa: E402
 
 MOD = ROOT / "tests/pc/tower/tower-test"
-MENU, DUEL, TOWER, FREE_DUEL, ANIMATED_BATTLE = 8, 3, 17, 6, 1
+MENU, DUEL, TOWER, FREE_DUEL, ANIMATED_BATTLE = 8, 3, 13, 6, 1
 BLUE_EYES, JOB_CHANGE_MIRROR, MONSTER_EYE, KURIBOH, SUMMONED_SKULL = 1, 103, 402, 58, 22
 DRAGON_TREASURE, NITEMARE, GHOST = 315, 38, 40
 DECK = f"{BLUE_EYES},{JOB_CHANGE_MIRROR},{MONSTER_EYE}"
@@ -234,7 +234,7 @@ def phase_climb(exe: Path, out: Path) -> Tower:
     t.shot(out, "01-menu-with-tower.png")
     g.press("cross", hold=4, after=10)
     g.wait_until(lambda g: g.mode() == TOWER, 900, what="the tower")
-    check("the tower's button opens the tower's screen (mode 17)", g.mode() == TOWER)
+    check("the tower's button opens the tower's screen (mode 13)", g.mode() == TOWER)
     g.step(150)
     t.shot(out, "02-intro.png")
     t.until_said("tower: status")

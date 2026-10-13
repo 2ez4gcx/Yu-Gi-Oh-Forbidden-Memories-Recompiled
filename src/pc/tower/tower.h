@@ -36,9 +36,10 @@ struct JsonValue;
  * (title_menu.c); none of the game's eleven choices nor the debug menu's
  * 11, so Main_ApplyMenuSelection's PC side takes it. */
 #define TOWER_MENU_SELECTION 12
-/* The tower's own screen: a mode past the game's seventeen, which Main_Loop
- * runs itself (main_loop.c) rather than growing the game's table. */
-#define TOWER_MODE 17
+/* The tower's own screen: the game's unused developer-mode slot, whose empty
+ * runner runs it (main_mode_runners.c). Main_Loop and the mode table are the
+ * game's, so save states from before tower mode still load. */
+#define TOWER_MODE 13
 
 enum { TOWER_RULE_NO_FUSIONS = 1, TOWER_RULE_NO_EQUIPS = 2 };
 enum { TOWER_ON_LOSE_CHECKPOINT, TOWER_ON_LOSE_RESTART };
@@ -304,7 +305,7 @@ void Tower_UnlockRetailDuelists(const TowerFloor *floor);
 
 /* Main_ApplyMenuSelection took TOWER_MENU_SELECTION. */
 void Tower_Enter(void);
-/* Main_Loop, mode TOWER_MODE (tower_screen.c). */
+/* Mode TOWER_MODE's runner, from Main_RunUnusedDeveloperMode (tower_screen.c). */
 void Tower_RunMode(void);
 /* Text_Resolve: the screen's text by string id, NULL for any other. */
 const unsigned char *Tower_Text(int id);

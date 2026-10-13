@@ -202,6 +202,13 @@ static void last_wins(void)
     CHECK(!strcmp(Tower_Mod(), "second") && !strcmp(Tower_Config()->name, "Two"));
     CHECK(Tower_Config()->floor_count == 2 && Tower_Config()->floors[0].duelist == 7);
     CHECK(notes == 1 && heard("[first] tower: second's tower"));
+    /* A later tower with no floor that can be fought leaves this one. */
+    forget();
+    read_as("third", "{\"tower\": {\"name\": \"Three\", \"floors\": [{\"duelist\": \"Nobody\"}]}}");
+    CHECK(!strcmp(Tower_Mod(), "second") && !strcmp(Tower_Config()->name, "Two"));
+    CHECK(Tower_Config()->floor_count == 2 && Tower_Config()->floors[0].duelist == 7);
+    CHECK(heard("[third] tower: no floor can be fought; second's tower stays") &&
+          !heard("[second] tower: third's tower"));
 }
 
 static void mistakes(void)

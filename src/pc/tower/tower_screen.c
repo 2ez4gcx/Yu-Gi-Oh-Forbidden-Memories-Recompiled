@@ -1,5 +1,5 @@
-/* The tower's screen (tower.h): mode TOWER_MODE, which Main_Loop runs
- * itself (main_loop.c), entered from the title's second menu and come back
+/* The tower's screen (tower.h): mode TOWER_MODE, run by the game's unused
+ * developer-mode runner (main_mode_runners.c), entered from the title's second menu and come back
  * to after every floor's duel.
  *
  * Everything on it is the game's own: its text boxes with their window,

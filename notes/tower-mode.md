@@ -514,7 +514,7 @@ mod without its tower.
 | `src/pc/game/zz_tower_storage.c` | `gTower`, and what only game code reaches: the box's layout reset, the title's wall, the stage up and down, a mod's scene put in VRAM, a mod's character in the cache |
 | `src/game/script_image_objects.c`, `display_effect_resource_setup.c` | the two hooks (`#ifdef MEMORIES_PC`): a mod's scene id, a mod's character |
 | `src/pc/guest/state.c`, `src/pc/platform/title_jump.c`, `menu.c`, `src/pc/debug/cheats.c`, `src/pc/cards/drops.c` | the rules of the run: save states, the Debug jumps, the Cheats menu and the cards a win asking the tower (`Tower_Guard`, `Tower_CheatsOff`, `Tower_CardDrops`) |
-| `src/game/main_loop.c` | mode 17, the tower's, run beside the game's seventeen rather than growing the table |
+| `src/game/main_mode_runners.c` | mode 13, the game's unused developer-mode slot, runs the tower's screen; `Main_Loop` and the mode table stay the game's, so older save states still load |
 | `src/game/main_apply_menu_selection.c` | the button's choice (12, none of the game's) |
 | `src/pc/platform/title_config.c`, `title_menu.c` | the button, the action, dimmed while locked |
 

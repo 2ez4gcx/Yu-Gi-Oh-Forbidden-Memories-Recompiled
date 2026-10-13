@@ -239,7 +239,7 @@ static void guards(void)
     /* The defaults: drops 1, states and cheats as the player has them. */
     tower_of("{\"tower\": {\"floors\": [{\"duelist\": 2}]}}");
     memset(&gTower, 0, sizeof(gTower));
-    D_8009B26C = 17 | 0xC0;
+    D_8009B26C = TOWER_MODE | 0xC0;
     D_8009B368 = 0;
     assert(Tower_Active() && !Tower_Guard(TOWER_GUARD_SAVE_STATE, 1, why, sizeof(why)) &&
            !Tower_Guard(TOWER_GUARD_CHEAT, 1, why, sizeof(why)) && !Tower_CheatsOff());
@@ -263,7 +263,7 @@ static void guards(void)
     assert(Tower_Guard(TOWER_GUARD_CHEAT, 1, why, sizeof(why)) && Tower_CheatsOff());
     assert(Tower_Guard(TOWER_GUARD_JUMP, 1, why, sizeof(why)) && strstr(why, "jump or a restart") && notices == 3);
     gTower.armed = 0;
-    D_8009B26C = 17 | 0xC0;   /* the tower's screen, its stories */
+    D_8009B26C = TOWER_MODE | 0xC0;   /* the tower's screen, its stories */
     assert(Tower_Guard(TOWER_GUARD_SAVE_STATE, 0, why, sizeof(why)) && Tower_CheatsOff());
     assert(!Tower_Guard(TOWER_GUARD_JUMP, 0, why, sizeof(why)));   /* a jump from the screen is banked as LEAVE is */
     D_8009B26C = 8 | 0xC0;    /* the title's menus: none of it */
@@ -285,7 +285,7 @@ static void guards(void)
         assert(gTower.progress.floor == 2);
     }
     Tower_Reset();
-    D_8009B26C = 17 | 0xC0;
+    D_8009B26C = TOWER_MODE | 0xC0;
     assert(!Tower_Active() && !Tower_Guard(TOWER_GUARD_SAVE_STATE, 1, why, sizeof(why)));   /* no tower: no mod */
     D_8009B26C = 0;
     D_8009B368 = 0;

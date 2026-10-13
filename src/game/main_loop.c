@@ -12,7 +12,6 @@
 #ifdef MEMORIES_PC
 #include "pc/platform/title_jump.h"
 #include "pc/saves/deck_menu.h"
-#include "pc/tower/tower.h"
 #endif
 
 void Main_Loop(void) {
@@ -29,13 +28,6 @@ void Main_Loop(void) {
             D_8009B26C = v | 0x80;
             Main_ResetFrontendRuntime();
         } else {
-#ifdef MEMORIES_PC
-            /* The tower's screen: a mode past the game's table, run here
-               rather than by growing the table, whose place in the game's
-               data the save states rely on (pc/tower/tower.h). */
-            if ((v & 0x1F) == TOWER_MODE) Tower_RunMode();
-            else
-#endif
             gMain_apfnModeRunner[v & 0x1F]();
             if ((D_8009B26C & 0x40) == 0) Fade_WaitOut();
         }

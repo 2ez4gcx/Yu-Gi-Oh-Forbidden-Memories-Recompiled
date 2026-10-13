@@ -104,8 +104,14 @@ static int filter(const char *mod, int index, int n, const char *where, const Js
     int v;
     if (value) {
         v = Json_TypeOf(value) == JSON_NUMBER ? (int)Json_Number(value, -1) : Cards_TypeNamed(Json_String(value, ""));
-        if (v < 0 || v >= CARD_TYPE_MAGIC) {
+        if (v < 0 || !Cards_IsMonsterType(v)) {
             Mods_Note(mod, "cards[%d]: monster_effects[%d]: %s\"type\" must be a monster type", index, n, where);
+            return 0;
+        }
+        /* The filter is a byte whose 0xFF is "any" (MonsterEffect.type). */
+        if (v == 0xFF) {
+            Mods_Note(mod, "cards[%d]: monster_effects[%d]: %s\"type\" 255 cannot filter a monster effect", index,
+                      n, where);
             return 0;
         }
         *type = (signed char)v;

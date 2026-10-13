@@ -19,7 +19,7 @@ from pathlib import Path
 from .gamedata import FRAME_COLOR_NAMES, TYPE_MAGIC
 from .model import type_named
 
-HOST_API = 14
+HOST_API = 15
 
 # The release each mod API first shipped in, for the hints. An API past the
 # last listed is newer than every release.
@@ -214,6 +214,9 @@ def features(manifest: dict, project=None) -> list:
     for part in (title, menu):
         if _has_action(part, "tower"):
             add(14, "a menu item's action \"tower\"")
+    # --- API 15 -------------------------------------------------------------
+    if "card_types" in manifest:
+        add(15, "custom card types (\"card_types\")")
     return out
 
 

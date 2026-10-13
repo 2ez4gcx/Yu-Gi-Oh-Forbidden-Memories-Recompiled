@@ -222,7 +222,8 @@ static int reaches(const MonsterEffect *effect, int source, int target, int card
         break;
     default: return 0;
     }
-    if (effect->type >= 0 && Cards_Type(card) != effect->type) return 0;
+    /* A type past 127 is stored as a negative byte; only -1 (0xFF) is "any". */
+    if (effect->type != -1 && Cards_Type(card) != (unsigned char)effect->type) return 0;
     if (effect->attribute >= 0 && Cards_Attribute(card) != effect->attribute) return 0;
     return 1;
 }
@@ -238,7 +239,7 @@ static int times(const MonsterEffect *effect, int source)
         if (!monster_zone(record) || !S.card[record] || !S.face_up[record]) continue;
         if (effect->each == MONSTER_EACH_OWN && owner(record) != owner(source)) continue;
         if (effect->each == MONSTER_EACH_OPPONENT && owner(record) == owner(source)) continue;
-        if (effect->each_type >= 0 && Cards_Type(S.card[record]) != effect->each_type) continue;
+        if (effect->each_type != -1 && Cards_Type(S.card[record]) != (unsigned char)effect->each_type) continue;
         if (effect->each_attribute >= 0 && Cards_Attribute(S.card[record]) != effect->each_attribute) continue;
         n++;
     }

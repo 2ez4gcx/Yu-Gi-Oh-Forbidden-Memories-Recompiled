@@ -17,6 +17,7 @@ from tkinter import ttk
 from . import art, pngio, text_menu, theme
 from .gamedata import FUSION_GROUPS, RITUAL_TRIBUTE_MAX, TYPE_NAMES
 from .icon_choice import IconChoice
+from .model import same_letters
 from .tabs import Tab
 from .widgets import CardField, WrapLabel, card_matches, card_named, legend, pick_card, px, scrolled_tree, ui_font
 
@@ -518,10 +519,20 @@ class RitualsTab(Tab):
         return photo
 
     def type_icon(self, name, zoom=2):
-        if not name or name not in TYPE_NAMES:
+        if not name:
+            return None
+        names = getattr(self.project, "type_names", TYPE_NAMES)
+        type_ = next((i for i, candidate in enumerate(names)
+                      if candidate and same_letters(name, candidate)), -1)
+        # Retail names remain valid aliases if a type was renamed.  Custom
+        # icon files are mod assets and are not presently decoded by this
+        # Tk preview; returning None retains the existing question-mark cue.
+        if type_ < 0:
+            type_ = next((i for i, candidate in enumerate(TYPE_NAMES) if same_letters(name, candidate)), -1)
+        if type_ < 0 or type_ >= len(TYPE_NAMES):
             return None
         shown = text_menu.pictures(self.app, self, zoom)
-        return shown.icons.get(TYPE_NAMES.index(name)) if shown else None
+        return shown.icons.get(type_) if shown else None
 
     def show(self):
         """The shown ritual card's recipe: the head, the place, the row of
@@ -836,7 +847,12 @@ class RitualsTab(Tab):
                 return
             card = self.project.cards.get(req["card"])
             # A card's own type to start from, for a rule like it.
-            new = {"type": TYPE_NAMES[card.type]} if card is not None and card.is_monster() else {"min_attack": 0}
+            names = getattr(self.project, "type_names", TYPE_NAMES)
+            if card is not None and card.is_monster():
+                value = names[card.type] if 0 <= card.type < len(names) and names[card.type] else card.type
+                new = {"type": value}
+            else:
+                new = {"min_attack": 0}
         changed = [dict(t) for t in tributes]
         changed[index] = new
         self.store(changed, result, origin)

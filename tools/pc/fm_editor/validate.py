@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .gamedata import (CARD_COUNT, DECK_COPY_LIMIT, DECK_POOL_MIN_CARDS, DECK_SIZE, DUELIST_NAMES, POOLS,
-                       POOL_LABELS, POOL_TOTAL, RITUAL_ORIGINS, RITUAL_TRIBUTE_MAX, TAG_LENGTH_MAX, TAGS_MAX, TYPE_MAGIC, TYPE_EQUIP, TYPE_NAMES,
+                       POOL_LABELS, POOL_TOTAL, RITUAL_ORIGINS, RITUAL_TRIBUTE_MAX, TAG_LENGTH_MAX, TAGS_MAX, TYPE_MAGIC, TYPE_EQUIP, TYPE_LIMIT, TYPE_NAMES,
                        TYPE_RITUAL, exodia_piece)
 from . import art, board_art, campaign_map, card_text, fixed_decks, guardian_stars, packs as packmath, values
 from . import monster_effects, roster, starter_pools, tower, ui_rules
@@ -27,7 +27,7 @@ MANIFEST_KEYS = ("id", "name", "version", "author", "description", "library", "e
                  "font",
                  "chest_overflow", "terrain_bonus", "trap_thresholds", "equip_bonus_default", "passwords",
                  "starter", "starter_pools", "limits", "guardian_stars", "packs", "pack_shop", "card_text_colors", "card_layout",
-                 "palette_ramps", "title", "menu", "ui", "tower")
+                 "palette_ramps", "title", "menu", "ui", "tower", "card_types")
 
 
 @dataclass
@@ -126,8 +126,8 @@ def _check_card(project: Project, cid: int, out: list):
             add("error", f"{label} is stored in tens: {value} would become {value // 10 * 10}")
     if not 0 <= card.level <= 12:
         add("error", "level is 0 to 12")
-    if not 0 <= card.type <= 23:
-        add("error", "type is one of the 24 types")
+    if not 0 <= card.type < TYPE_LIMIT:
+        add("error", "type is one of the 256 type-bank entries")
     if not 0 <= card.attribute <= 15:
         add("error", "attribute is 0 to 15")
     count = guardian_stars.count(project.other.get("guardian_stars"))
@@ -173,6 +173,8 @@ def _check_card(project: Project, cid: int, out: list):
             add("warning", "a monster made a non-monster does nothing when played unless \"effect\" names a card")
         if not retail.is_monster() and card.is_monster() and "model" not in extra:
             add("warning", "a card made a monster fights without a 3D model unless \"model\" names one")
+
+
     extra = project.added[cid].extra if cid in project.added else project.card_extra.get(cid, {})
     threshold = extra.get("trap_threshold")
     if threshold is not None:
@@ -181,7 +183,8 @@ def _check_card(project: Project, cid: int, out: list):
         elif card.type != 21 or project.trap_threshold_default(project.effect_of(cid)) is None:
             add("warning", "the saved attack threshold only applies to an attack-destruction trap effect")
     if "monster_effects" in extra:
-        for problem in monster_effects.problems(extra["monster_effects"], project.resolve):
+        for problem in monster_effects.problems(extra["monster_effects"], project.resolve,
+                                                project.type_names):
             add("error", problem)
         if extra["monster_effects"] and not card.is_monster():
             add("warning", "monster effects only work for a monster on the field; this card is not one")
@@ -198,8 +201,46 @@ def _check_card(project: Project, cid: int, out: list):
                                    "leaves it out")
     effect = project.retail.cards.get(project.effect_of(cid)) if "effect" in extra else None
     if effect and not card.is_monster() and effect.type != card.type:
-        add("warning", f"its effect is {effect.name}'s, a {TYPE_NAMES[effect.type]} card's: the CPU does not play it, "
-                       f"and as a {TYPE_NAMES[card.type]} card it may do nothing")
+        name = lambda t: project.type_names[t] if 0 <= t < len(project.type_names) and project.type_names[t] else str(t)
+        add("warning", f"its effect is {effect.name}'s, a {name(effect.type)} card's: the CPU does not play it, "
+                       f"and as a {name(card.type)} card it may do nothing")
+
+
+def _check_card_types(project: Project, out: list):
+    """Check the runtime registry: IDs, normalized names and display text."""
+    key, section = "card_types", project.other.get("card_types")
+    if section is None:
+        return
+    if not isinstance(section, dict) or not isinstance(section.get("types"), list):
+        out.append(Issue("error", "Mod info", key, "must be an object with a \"types\" list"))
+        return
+    seen = set()
+    names = {"".join(c.lower() for c in name if c.isascii() and c.isalnum()): i
+             for i, name in enumerate(TYPE_NAMES)}
+    for index, entry in enumerate(section["types"]):
+        where = f"{key}.types[{index}]"
+        if not isinstance(entry, dict) or isinstance(entry.get("id"), bool) or not isinstance(entry.get("id"), int) \
+                or not isinstance(entry.get("name"), str):
+            out.append(Issue("error", "Mod info", where, "must have numeric \"id\" and string \"name\""))
+            continue
+        type_, name = entry["id"], entry["name"]
+        if not 0 <= type_ < TYPE_LIMIT:
+            out.append(Issue("error", "Mod info", where,
+                             "id is an existing type (0-23) or a new monster type (24-255)"))
+        elif type_ in seen:
+            out.append(Issue("warning", "Mod info", where, f"redefines type {type_}; the later name wins"))
+        seen.add(type_)
+        if not name.strip():
+            out.append(Issue("error", "Mod info", where, "\"name\" must not be empty"))
+            continue
+        normalized = "".join(c.lower() for c in name if c.isascii() and c.isalnum())
+        if not normalized:
+            out.append(Issue("error", "Mod info", where, "\"name\" has no glyph the game can display"))
+        elif normalized in names and names[normalized] != type_:
+            out.append(Issue("error", "Mod info", where,
+                             f"\"name\" is already type {names[normalized]}'s name or retail alias"))
+        else:
+            names[normalized] = type_
 
 
 def _check_tags(project: Project, out: list):
@@ -446,6 +487,7 @@ def _check_packs(project: Project, out: list):
 def validate(project: Project) -> list:
     out = []
     _check_info(project, out)
+    _check_card_types(project, out)
     for cid in sorted(project.cards):
         if project.card_changed(cid):
             _check_card(project, cid, out)

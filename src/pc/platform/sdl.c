@@ -2372,7 +2372,18 @@ void HERE(Platform_ShowError)(const char *title, const char *message)
     Monitor_Shared()->error_shown = 1;
     if (!headless || !*headless || !strcmp(headless, "0")) {
         Monitor_Modal(1);
+#ifdef __ANDROID__
+        {
+            /* SDL_ShowSimpleMessageBox's one button, in the system's alert */
+            static const SDL_MessageBoxButtonData ok[] = {
+                {SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT | SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT, 0, "OK"}};
+            const SDL_MessageBoxData box = {SDL_MESSAGEBOX_ERROR, NULL, title, message, 1, ok, NULL};
+            int button;
+            Android_ShowMessageBox(&box, &button);
+        }
+#else
         SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, title, message, NULL);
+#endif
         Monitor_Modal(0);
     }
 }

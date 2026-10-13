@@ -242,6 +242,10 @@ int Tables_RankAdjustment(int tag);
  * *bonus; 0 when no mod lists the pair (nor replaced the table), and the
  * disc's table decides. */
 int Tables_TerrainBonus(int terrain, int type, int *bonus);
+/* A terrain as a mod writes one: 1-6 or its name (Forest, Wasteland,
+ * Mountain, Sogen or Meadow, Umi or Sea, Yami or Dark, any case); -1 for
+ * none of them. "terrain_bonus" and a tower's floors (tower.h) read it. */
+int Tables_TerrainNamed(const char *text);
 
 /* The attack, in points, at or under which attack trap `trap` springs (0
  * House of Adhesive Tape to 5 Widespread Ruin): a mod's "trap_thresholds",

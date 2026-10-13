@@ -18,6 +18,7 @@
 #include "pc/saves/save_menu.h"
 #include "pc/saves/deck_menu.h"
 #include "pc/guest/state.h"
+#include "pc/tower/tower.h"
 #include "types.h"
 #include "game/display_object.h"
 #include "game/display_object_layout.h"
@@ -237,10 +238,20 @@ void TitleScreen_BackgroundTint(unsigned char *r, unsigned char *g, unsigned cha
     *b = (unsigned char)scale(background()->tint, 0, 128);
 }
 
+/* The tower's screen (pc/tower/tower.h) draws the title's background with
+ * the game's own MainMenu_DrawFrontendBackground: the wall, with none of
+ * the mods' pictures, which are put in VRAM only while the title is up. */
+static int in_tower(void)
+{
+    extern u8 D_8009B26C;
+    return (D_8009B26C & 0x1F) == TOWER_MODE;
+}
+
 /* The mod's picture for the background shown: the menus' own, or the
  * title's (which the menus' is when a mod gave them none). */
 static int background_image(void)
 {
+    if (in_tower()) return -1;
     /* In widescreen, filling it, the picture made for it if there is one. */
     if (TitleScreen_BackgroundMargin() && background()->wide_image.file[0]) {
         if (shown_background() && TitleImages_Ready(TITLE_IMAGE_WIDE_MENU_BACKGROUND, NULL, NULL))
@@ -286,6 +297,7 @@ void TitleScreen_DrawImages(void *ot)
     const TitleConfig *config = TitleConfig_Get();
     unsigned char r, g, b;
     int i, w, h, picture = background_image();
+    if (in_tower()) return;
     if (background()->picture && picture >= 0) {
         int left = picture == TITLE_IMAGE_WIDE_BACKGROUND || picture == TITLE_IMAGE_WIDE_MENU_BACKGROUND
                        ? -TITLE_WIDE_MARGIN : 0;
@@ -324,7 +336,9 @@ void TitleScreen_DrawMenu(void)
 {
     if (open) TitleMenu_Draw();
 }
-int TitleScreen_ShowShade(void) { return background()->shade; }
+/* The tower's screen keeps the wall down to its foot, where its boxes are:
+ * no dark-to-light shade over it there. */
+int TitleScreen_ShowShade(void) { return !in_tower() && background()->shade; }
 long TitleScreen_BackgroundColour(void) { return background()->color; }
 int TitleScreen_Dim(int level) { return level * TitleConfig_Get()->dim / 0x80; }
 

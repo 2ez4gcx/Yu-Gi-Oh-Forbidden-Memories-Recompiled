@@ -31,6 +31,9 @@ static int card_drops = 1;
 static unsigned seed = 1, draws;
 
 int Settings_Get(SettingId id) { return id == SET_CARD_DROPS ? card_drops : 0; }
+/* A tower duel's "drops" (tower.h): -1 not in one. */
+static int tower_drops = -1;
+int Tower_CardDrops(int wanted) { return tower_drops >= 0 ? tower_drops : wanted; }
 int Memories_Rand(void)
 {
     draws++;
@@ -259,9 +262,27 @@ static void mod_lock(void)
     Tables_Clear();
 }
 
+/* In a tower's duel its "drops" wins over Game > Card drops: 99 asked, one card. */
+static void tower(void)
+{
+    reset();
+    card_drops = 99;
+    tower_drops = 1;
+    seed = 0x1234;
+    draws = 0;
+    CHECK(in_pool(CardDrops_Roll(0)));
+    CHECK(gCardDrops.count == 0 && draws == 1);
+    tower_drops = 5;
+    CardDrops_Roll(0);
+    CHECK(gCardDrops.count == 4);
+    tower_drops = -1;
+    card_drops = 1;
+}
+
 int main(void)
 {
     rolls();
+    tower();
     same_as_the_game();
     mod_lock();
     puts("card drops: rolls and a mod's lock passed");

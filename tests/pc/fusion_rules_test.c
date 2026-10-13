@@ -32,7 +32,23 @@ int Cards_Fusion(int a, int b, int *result)
 }
 int Tables_FilterFusion(int result) { return result == removed ? 0 : result; }
 int Tables_Equip(int e, int m) { (void)e; (void)m; return equip_rule; }
-void Mods_Dispatch(MemoriesModEvent *event) { (void)event; event_count++; }
+/* A code mod that answers the fusion and equip events itself (mod_answers
+ * >= 0), and a tower floor's rules (pc/tower/tower.h, TOWER_RULE_*). */
+static int mod_answers = -1, tower_rules;
+void Mods_Dispatch(MemoriesModEvent *event)
+{
+    event_count++;
+    if (mod_answers >= 0 && event->phase == MEMORIES_BEFORE &&
+        (event->type == MEMORIES_EVENT_FUSION || event->type == MEMORIES_EVENT_EQUIP)) {
+        event->handled = 1;
+        event->result = mod_answers;
+    }
+}
+int Tower_Refuses(int rule, int a, int b, int result)
+{
+    (void)a; (void)b; (void)result;
+    return (tower_rules & rule) != 0;
+}
 
 int main(void)
 {
@@ -78,6 +94,30 @@ int main(void)
     effect_card = 760; changed = 0; assert(CardRules_Equip(760, 1) == 1);
     effect_as = 2; assert(!CardRules_Equip(760, 1));     /* a monster's effect is no equip's */
     effect_card = 0;
+    /* A tower floor's "no_fusions" and "no_equips": nothing fuses, nothing
+     * equips -- through CardRules (the fusion helper) and through
+     * Duel_CheckFusion / Duel_CheckEquip, which the player's placement and
+     * the CPU's planning (ai_fusion.c, ai_turn_action.c) both ask -- even
+     * where a code mod answered the event itself. The other kind stays. */
+    tower_rules = 1;   /* TOWER_RULE_NO_FUSIONS */
+    assert(!CardRules_Fusion(1, 2) && !Duel_CheckFusion(1, 2) && !Duel_CheckFusion(799, 2));
+    assert(CardRules_Equip(301, 1) == 1 && Duel_CheckEquip(301, 1) == 1);
+    mod_answers = 3;
+    assert(!Duel_CheckFusion(1, 2) && Duel_CheckEquip(301, 1) == 1);
+    mod_answers = -1;
+    tower_rules = 2;   /* TOWER_RULE_NO_EQUIPS */
+    assert(CardRules_Fusion(1, 2) == 3 && Duel_CheckFusion(1, 2) == 3);
+    assert(!CardRules_Equip(301, 1) && !Duel_CheckEquip(301, 1));
+    mod_answers = 1;
+    assert(!Duel_CheckEquip(301, 1));
+    mod_answers = -1;
+    tower_rules = 3;
+    for (a = 1; a <= 800; a++) for (b = a; b <= 800; b++)
+        assert(!Duel_CheckFusion(a, b) && !CardRules_Fusion(a, b));
+    tower_rules = 0;
+    assert(CardRules_Fusion(1, 2) == 3 && Duel_CheckEquip(301, 1) == 1);
+    event_count = 0;
+    assert(!CardRules_Fusion(0, 1) && !event_count);   /* the preview still dispatches nothing */
     assert(!event_count);
     puts("fusion rules: gameplay parity, mod rules and side-effect-free preview passed");
     return 0;

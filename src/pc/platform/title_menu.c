@@ -33,6 +33,7 @@
 #include "platform.h"
 #include "pc/guest/state.h"
 #include "pc/mods/mods.h"
+#include "pc/tower/tower.h"
 #include "types.h"
 #include "game/display_object.h"
 #include "game/display_object_helpers.h"
@@ -50,7 +51,7 @@
 #include <string.h>
 
 enum { MIDDLE = 0xA0, LEFT_OFF = -0xA0, RIGHT_OFF = 0x1E0, TICKS = 0x10, GHOSTS = 8,
-       UNSELECTED_LEVEL = 0x60, FULL = 0x80 };
+       UNSELECTED_LEVEL = 0x60, FULL = 0x80, LOCKED_LEVEL = 0x38 };
 /* The game's sounds (frontend_update.c): the cursor, a choice, back, and
  * the buzz of a choice that is not there. */
 enum { SE_MOVE = 6, SE_CHOOSE = 7, SE_BACK = 8, SE_BUZZ = 9 };
@@ -251,6 +252,11 @@ static int choose(int menu, int item)
         event.phase = MEMORIES_AFTER;
         Mods_Dispatch(&event);
         return 0;
+    } else if (action == TITLE_ACTION_TOWER) {
+        /* The tower (pc/tower/tower.h), while its "unlock" holds for the
+           save loaded; else a buzz, the item dimmed (TitleMenu_Draw). */
+        if (Tower_Config() && Tower_Unlocked()) leave(menu, TOWER_MENU_SELECTION);
+        else SD_SEPlay(SE_BUZZ, 0xFF, 0);
     } else if (action >= 0 && action < TITLE_ENTRIES) {
         leave(menu, action);
     } else if (action == TITLE_ACTION_BACK) {
@@ -476,6 +482,9 @@ void TitleMenu_Draw(void)
         /* Without a picture for the cursor, the one picture, darker off it. */
         if (!selected || !TitleImages_Ready(which, NULL, NULL)) which = TITLE_IMAGE_ITEM(item, 0);
         level = selected || TitleImages_Ready(TITLE_IMAGE_ITEM(item, 1), NULL, NULL) ? FULL : UNSELECTED_LEVEL;
+        /* A tower still locked for this save: dimmed, the cursor's look
+           kept (choose buzzes). */
+        if (it->action == TITLE_ACTION_TOWER && !(Tower_Config() && Tower_Unlocked())) level = LOCKED_LEVEL;
         TitleImages_Ready(which, &w, &h);
         TitleImages_Draw(which, D_800E9D90[1], depth, run.x[item] - w / 2, item_y(it) - h / 2,
                          level * (int)(it->tint >> 16 & 0xFF) / 0xFF, level * (int)(it->tint >> 8 & 0xFF) / 0xFF,

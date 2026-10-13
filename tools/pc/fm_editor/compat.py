@@ -19,7 +19,7 @@ from pathlib import Path
 from .gamedata import FRAME_COLOR_NAMES, TYPE_MAGIC
 from .model import type_named
 
-HOST_API = 13
+HOST_API = 14
 
 # The release each mod API first shipped in, for the hints. An API past the
 # last listed is newer than every release.
@@ -102,6 +102,15 @@ def _has_key(value, key: str) -> bool:
         return key in value or any(_has_key(item, key) for item in value.values())
     if isinstance(value, list):
         return any(_has_key(item, key) for item in value)
+    return False
+
+
+def _has_action(value, action: str) -> bool:
+    """Whether any object in value, at any depth, has "action": action."""
+    if isinstance(value, dict):
+        return value.get("action") == action or any(_has_action(item, action) for item in value.values())
+    if isinstance(value, list):
+        return any(_has_action(item, action) for item in value)
     return False
 
 
@@ -194,6 +203,17 @@ def features(manifest: dict, project=None) -> list:
     # --- API 13 -------------------------------------------------------------
     if isinstance(limits, dict) and "card_drops" in limits:
         add(13, "the cards a win deals locked (\"limits\" \"card_drops\")")
+    # --- API 14 -------------------------------------------------------------
+    if "tower" in manifest:
+        add(14, "a tower (\"tower\")")
+    for entry in _entries(manifest.get("duelists")):
+        if "tower_only" in entry:
+            add(14, "a duelist of the tower's alone (\"tower_only\")")
+        if isinstance(entry.get("unlock"), dict) and "tower" in entry["unlock"]:
+            add(14, "a duelist's \"unlock\" \"tower\"")
+    for part in (title, menu):
+        if _has_action(part, "tower"):
+            add(14, "a menu item's action \"tower\"")
     return out
 
 

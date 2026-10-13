@@ -312,9 +312,22 @@ Every condition given must hold. Without `unlock` it is shown from the start.
 | `story` | a campaign story flag. `0x6E0 + n` is "duelist *n* is unlocked in Free Duel", so `1762` is Teana's |
 | `card` | a card the trunk or deck must hold — by id or name |
 | `copies` | how many of `card` (**1** by default) |
+| `tower` | this run's [tower](tower-mode.md) (the last mod's that has one; with none on, it does not hold): `true` for it won to its top, or a floor, `1` up, won on this save |
+
+**Only in the tower.** `"tower_only": true` on an added duelist keeps it off
+the Free Duel grid until the [tower](tower-mode.md) lets it out: a won floor
+fights it, or names it in its reward's `unlock_duelist`. Whatever else its
+`unlock` says must hold too. The tower itself fights it all the same; a
+stock duelist keeps its campaign (`tower_only` on a `replace` is noted and
+left out).
+
+```json
+{ "id": "ghost", "copy": "Simon Muran", "name": "Ghost Simon", "tower_only": true }
+```
 
 **Nothing is stored.** Each condition is read from the save's own records,
-trunk and flags every time the Free Duel screen is built. So an unlock follows
+trunk and flags (and its climb of the tower) every time the Free Duel screen
+is built. So an unlock follows
 whichever save is loaded, needs no file of its own, and a win in the duel you
 just left opens up whatever it was the condition for — the screen is built
 again on the way back.

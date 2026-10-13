@@ -66,6 +66,7 @@ the hard-mode AI adapter, GTE, ordering tables, PGXP and the scratch-sweep fixtu
 | Values | Player/opponent LP, stat cap, Crush Card threshold, spell penalties, Swords turns, rank score, all prize letters, deck copy limit and initial starchips, with retail comparison | Full `fixed/editor_values` run passes; 20 Exodia and 20 deck-out runs pass in `values-repeat-fixed` |
 | Guardian Stars | Edited Mars/Jupiter matchup produces 700 battle damage between equal-stat monsters | Passed in `fixed/editor_tables`; names/icons/custom stars/choice modes/bulk rules covered by editor/native tests |
 | Packs | Editor-created pack spends exactly 37 starchips and awards exactly three Blue-Eyes; disabled mod spends/awards nothing; guarantees, ownership limits, chest capacity, progress and state replay | Passed in `fixed/editor_tables`, `packs_game`, editor/native suites |
+| Tower (added 2026-10-11, below) | A three-floor tower with story, a tower-only duelist, rules, rewards and checkpoints, played in the game: menu button, floors won and lost, LOAD at the checkpoint, the CPU kept from fusing, the duelist let out into Free Duel, the tower cleared | Passed in `tests/pc/tower/tower_e2e.py` (25 checks); see [Tower mode](tower-mode.md#tests) |
 | Mod info | Metadata/settings export and game accepts the generated mod; save/reopen preserves the manifest | Passed in `editor_round_trip`, packaged/editor tests; does not assert every code-mod setting consumer |
 | Conflicts | Invalid manifests, loader compatibility, overlap detection/load ordering and navigation to conflicting edits | Passed in editor suite and native overlap test; this tab itself has no gameplay action |
 
@@ -158,3 +159,50 @@ the optional comparisons against an older baseline executable. Some editor
 features, such as map terrain import/export, advanced star choice/icon
 variants and importer workflows, have editor/native test evidence but no
 new live scenario for every variant in this run.
+
+## Addendum 2026-10-11: the Tower tab
+
+The editor has a fifteenth tab, **Tower** (`tower_tab.py`, `tower.py`): a
+mod's `"tower"` (notes/tower-mode.md) and its duelists' `"tower_only"`. The
+packaged `self-test` now selects all 15 tabs, builds a tower of one floor on
+the Tower tab and checks that the export carries it with `"min_api": 14`.
+`tests/test_tower.py` covers the tab (showing a tower, committing it untouched
+as written, editing a floor, adding, moving and removing floors, the
+tower-only list, the unlock conditions, turning the tower off, floors and
+fields nobody touched keeping the mod's own spelling), the story text form's
+round trip (line breaks, speakers with portraits, plain words that look like a
+speaker's), the deck text form, the checks against `tower_config.c`'s keys, and the manifest
+round trip. The in-game end-to-end run is `tests/pc/tower/tower_e2e.py`, with
+the tests' tower mod (`tests/pc/tower/tower-test`), written by hand in the
+form the tab writes.
+
+Since 2026-10-12 the tab also edits a story's **stage** (notes/tower-mode.md,
+Story): the tower's default `scene` and `dim`, and a Stage box that writes a
+story's bracketed lines (`[scene: torch corridor]`, `[left: 1 expression 2]`,
+`[right: opponent]`, `[right: tower/hero.png flip]`, `[pan: 64 0 30 wait]`)
+into the story last clicked, before the cursor's line, with pictures of the
+chosen scene and character made from the player's disc in memory
+(`tower_art.py`; nothing of the disc's is written). A PNG picked from outside
+the mod's folder is copied into its `tower/` when it is saved.
+`tests/test_tower.py` adds the stage's text form and its round trip (a scene
+by name, number or `"none"` read as the same; a mod's own spelling of its
+stage kept through the tab), its checks, the scene names and the stage's
+keys against `tower_config.c`, and the pictures from an archive's bytes. The
+packaged `self-test` sets the tower's scene and puts a campaign character and
+a PNG on a story's stage, and checks the export carries both, the PNG in the
+mod's folder.
+
+Round 3 (2026-10-12): the tab explains itself. **How to build a tower...**
+opens a step-by-step guide (`tower.GUIDE`), **Start from an example** fills
+in a working tower of three floors (`tower.example_tower()`, which the
+checks read without a note), the options carry tooltips, and Help has a
+**Tower mode** entry. A floor has **Unlock this opponent in Free Duel when
+beaten** (`"unlock_opponent"`, ticked by itself for a tower-only opponent and
+written only when it differs) and **Also unlocks** picks duelists from a
+list instead of free text. The tower has **Leaving** (`on_leave`), **Cards a
+win** (`drops`), **Allow save states in the tower** and **Allow cheats in the
+tower**. `tests/test_tower.py` adds the guide and the example, the rules of
+the run written only when they differ from the defaults, and the unlock
+checkbox and picker. Window pictures of the tab (the guide, the options, a
+floor's unlock) are taken by PrintWindow, the editor's window alone.
+

@@ -1526,7 +1526,7 @@ const unsigned short *Tables_Pool(int pool, const unsigned short *retail)
 static const char *const terrain_names[TERRAINS][2] = {
     {"Forest", NULL}, {"Wasteland", NULL}, {"Mountain", NULL}, {"Sogen", "Meadow"}, {"Umi", "Sea"}, {"Yami", "Dark"}};
 
-static int terrain_named(const char *text)
+int Tables_TerrainNamed(const char *text)
 {
     int terrain;
     if (strspn(text, "0123456789") == strlen(text) && *text) {
@@ -1563,7 +1563,7 @@ static void read_terrain_bonus(const char *mod, const JsonValue *table)
         int terrain;
         if (!strcmp(name, "replace")) continue;
         snprintf(where, sizeof(where), "terrain_bonus \"%s\"", name);
-        terrain = terrain_named(name);
+        terrain = Tables_TerrainNamed(name);
         if (terrain < 0) {
             Mods_Note(mod, "%s: the terrains are Forest, Wasteland, Mountain, Sogen, Umi and Yami", where);
             continue;

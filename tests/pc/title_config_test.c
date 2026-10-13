@@ -33,6 +33,11 @@ int Paths_Contained(const char *relative)
     return relative && *relative && *relative != '/' && !strstr(relative, "..") && !strchr(relative, '\\');
 }
 
+/* The tower (pc/tower/tower.h): the mod whose tower the run has, if any. */
+static const char *tower_mod, *tower_label = "TOWER";
+const char *Tower_Mod(void) { return tower_mod; }
+const char *Tower_Label(void) { return tower_label; }
+
 /* TitleConfig_Load's mod list: the tests read manifests themselves. */
 int Mods_LoadedCount(void) { return 0; }
 int Mods_Loaded(int index) { (void)index; return 0; }
@@ -279,6 +284,46 @@ static void buttons_across_mods(void)
     CHECK(config->items[TITLE_ENTRIES].y == TITLE_PARKED_Y);
 }
 
+/* A mod's tower (notes/tower-mode.md) is a button of its mod's in the
+ * second menu, "<mod>:tower", made before the mod's "menu" is read so the
+ * mod can change it and name it in its "order"; only the tower's own mod
+ * gets it. "tower" is an action of the second menu's. */
+static void tower(void)
+{
+    const TitleConfig *config;
+    const TitleItem *button = NULL;
+    int i;
+    tower_mod = "test";
+    tower_label = "SHADOW TOWER";
+    config = one("{\"menu\": {\"buttons\": [{\"id\": \"tower\", \"tint\": \"#FF8000\"}],"
+                 "            \"order\": {\"second\": [\"tower\", \"campaign\"]}}}");
+    for (i = TITLE_ENTRIES; i < TITLE_ITEMS; i++) {
+        if (config->items[i].used && !strcmp(config->items[i].name, "test:tower")) button = &config->items[i];
+    }
+    CHECK(notes == 0 && button != NULL);
+    CHECK(button->menu == 1 && button->action == TITLE_ACTION_TOWER && !strcmp(button->label, "SHADOW TOWER"));
+    CHECK(button->tint == 0xFF8000);
+    CHECK(config->shown[1] == 7 && config->order[1][0] == button - config->items && config->order[1][1] == 5);
+    CHECK(!strcmp(TitleConfig_ActionName(TITLE_ACTION_TOWER), "tower"));
+    /* Another mod's manifest gets none; without a tower, nobody does. */
+    TitleConfig_Reset();
+    notes = 0;
+    add_as("other", "{\"menu\": {}}");
+    TitleConfig_Finish();
+    CHECK(TitleConfig_Get()->shown[1] == 6 && TitleConfig_Get()->shown[0] == 5);
+    tower_mod = NULL;
+    config = one("{\"menu\": {}}");
+    CHECK(config->shown[1] == 6 && !config->items[TITLE_ENTRIES].used);
+    /* A button of a mod's own may take the tower's action, in the second
+     * menu only. */
+    config = one("{\"menu\": {\"buttons\": [{\"id\": \"climb\", \"label\": \"CLIMB\", \"menu\": \"second\","
+                 "\"action\": \"tower\"}, {\"id\": \"up\", \"label\": \"UP\", \"action\": \"tower\"}]}}");
+    CHECK(config->items[TITLE_ENTRIES].action == TITLE_ACTION_TOWER);
+    CHECK(notes == 1 && strstr(note, "cannot tower from the first menu"));
+    CHECK(config->items[TITLE_ENTRIES + 1].action == TITLE_ACTION_NONE);
+    tower_label = "TOWER";
+}
+
 static void menu_background(void)
 {
     const TitleConfig *config = one(
@@ -428,6 +473,7 @@ int main(void)
     buttons();
     button_mistakes();
     buttons_across_mods();
+    tower();
     menu_background();
     widescreen();
     added_pictures();

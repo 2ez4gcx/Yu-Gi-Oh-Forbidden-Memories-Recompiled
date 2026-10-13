@@ -24,6 +24,7 @@
 #include "pc/audio/spu.h"
 #include "pc/debug/cheats.h"
 #include "pc/cards/cards.h"
+#include "pc/tower/tower.h"
 #include "pc/free_duel/duelists.h"
 #include "pc/cards/fusion_helper.h"
 #include "update_check.h"
@@ -2833,6 +2834,7 @@ void HERE(Platform_Frame)(unsigned frame)
     Cheats_Frame();
     Cards_Frame();
     Duelists_Frame();
+    Tower_Frame();
     Update_Frame();
     if (Menu_TakeChanged()) menu_dirty = 1;
     if (window) {

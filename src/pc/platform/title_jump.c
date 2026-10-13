@@ -41,6 +41,7 @@
 #include "pc/guest/state.h"
 #include "pc/free_duel/duelists.h"
 #include "pc/debug/cheats.h"
+#include "pc/tower/tower.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -58,9 +59,16 @@ void TitleJump_SetActive(int enabled)
     Menu_SetItemEnabled(MENU_ITEM_RESTART, active);
 }
 
+/* A tower whose mod turns cheats off: no leaving its duel this way
+ * (tower.h, Tower_Guard); `tell` says so in a notice. */
+static void request(int tell)
+{
+    if (active && !Tower_Guard(TOWER_GUARD_JUMP, tell, NULL, 0)) requested = 1;
+}
+
 void TitleJump_Request(void)
 {
-    if (active) requested = 1;
+    request(1);
 }
 
 /* Yes is taken only if the item is still on: the game may have reached the
@@ -75,6 +83,7 @@ void TitleJump_Confirm(void)
 {
     static const char *const buttons[] = {"Yes", "No"};
     if (!active) return;
+    if (Tower_Guard(TOWER_GUARD_JUMP, 1, NULL, 0)) return;   /* asked before the question */
     /* No is focused and last, so Enter and Escape both keep playing. */
     Menu_ShowNotice("Restart game", "Restart the game? Unsaved progress is lost.", buttons, 2, 1, restart_chosen);
 }
@@ -90,7 +99,7 @@ void TitleJump_Frame(unsigned presented)
             at = "";
         } else if (presented >= frame) {
             at = *end == ',' ? end + 1 : end;
-            TitleJump_Request();
+            request(0);
         } else {
             break;
         }
@@ -125,9 +134,11 @@ int TitleJump_RequestTo(int target, int opponent, const char *deck, char *why, u
         snprintf(why, why_size, "no such screen");
         return -1;
     }
+    /* The caller (Debug > Jump to, the control channel) tells the player. */
+    if (Tower_Guard(TOWER_GUARD_JUMP, 0, why, why_size)) return -1;
     if (target == JUMP_TITLE) {
         if (!active) jump_count++; /* already at the title (or not past it yet): nothing to do */
-        TitleJump_Request();
+        request(0);
         return 0;
     }
     if (target == JUMP_DUEL && (opponent < 1 || !Duelists_Valid(opponent))) {

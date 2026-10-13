@@ -16,6 +16,7 @@
 #include "tables.h"
 #include "starter.h"
 #include "stars.h"
+#include "pc/tower/tower.h"
 #include "packs.h"
 #include "pc/platform/ui_config.h"
 #include "pc/free_duel/duelists.h"
@@ -1681,6 +1682,8 @@ void Cards_Build(void)
      * mod signature covers. */
     Packs_Build();
     Mods_SetPackSignature(Packs_Signature());
+    /* The tower (tower.h), whose floors name duelists and cards. */
+    Tower_Build();
     /* The duel's pictures (ui_config.h), read now so that a mistake in a
      * mod's "ui" is noted in the Mods window before any duel. */
     UiConfig_Load();

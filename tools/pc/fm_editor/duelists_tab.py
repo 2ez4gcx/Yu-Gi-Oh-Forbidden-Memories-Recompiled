@@ -101,7 +101,7 @@ class DuelistsTab(Tab):
         right = ttk.Frame(self)
         right.pack(side="left", fill="both", expand=True, padx=(10, 0))
         self.build_header(right)
-        ttk.Separator(right).pack(fill="x", pady=(8, 6))
+        ttk.Separator(right).pack(fill="x", pady=(6, 2))
         # Its pools, and its bust (bust_view.py): a page each, under the header.
         self.sections = ttk.Notebook(right)
         self.sections.pack(fill="both", expand=True)
@@ -231,7 +231,7 @@ class DuelistsTab(Tab):
         frame, self.tree = scrolled_tree(right, [("id", "#"), ("name", "Card"), ("type", "Type"),
                                                  ("atk", "ATK"), ("def", "DEF"), ("w", "Weight"),
                                                  ("pct", "Chance"), ("retail", "Disc"), ("state", "Status")],
-                                         [50, 214, 100, 50, 50, 60, 60, 60, 70], 14, selectmode="extended",
+                                         [50, 214, 100, 50, 50, 60, 60, 60, 70], 13, selectmode="extended",
                                          sort_numeric=("id", "atk", "def", "w", "pct", "retail"))
         frame.pack(fill="both", expand=True, pady=4)
         self.tree.bind("<<TreeviewSelect>>", lambda e: self.pick_row())

@@ -796,6 +796,46 @@ static void frame_box_is_bounded(void)
     CHECK(p.w == 140 && p.h == 196);
 }
 
+/* Every independently placed big-card part accepts hide/hidden/show:false.
+ * Style-local entries continue to win over the layout-wide fallback. */
+static void movable_parts_can_hide(void)
+{
+    CardLayoutPlacement p;
+
+    reset();
+    add_mod("x", "/mods/x",
+            "{\"id\": \"x\", \"card_layout\": {"
+            "\"title\": {\"hide\": true}, \"art\": {\"hidden\": true},"
+            "\"attribute\": {\"show\": false}, \"stars\": {\"hide\": true},"
+            "\"atk\": {\"hide\": true}, \"def\": {\"show\": false},"
+            "\"atk_label\": {\"hide\": true}, \"dfd_label\": {\"show\": false},"
+            "\"spell\": {\"icon\": {\"hide\": true}}}}",
+            1, "full_bleed", 1);
+    CardLayout_SetCard(0);
+    CHECK(!CardLayout_Get(CARD_LAYOUT_TITLE).visible);
+    CHECK(!CardLayout_Get(CARD_LAYOUT_ART).visible);
+    CHECK(!CardLayout_Get(CARD_LAYOUT_ATTRIBUTE).visible);
+    CHECK(!CardLayout_Get(CARD_LAYOUT_LEVEL_STARS).visible);
+    CHECK(!CardLayout_Get(CARD_LAYOUT_ATK).visible);
+    CHECK(!CardLayout_Get(CARD_LAYOUT_DEF).visible);
+    CHECK(!CardLayout_Get(CARD_LAYOUT_ATK_LABEL).visible);
+    CHECK(!CardLayout_Get(CARD_LAYOUT_DEF_LABEL).visible);
+    CHECK(CardLayout_Get(CARD_LAYOUT_DESCRIPTION).visible);
+    fake_card_type[0] = CARD_TYPE_MAGIC;
+    CardLayout_SetCard(0);
+    CHECK(!CardLayout_Get(CARD_LAYOUT_ATTRIBUTE).visible);
+
+    reset();
+    add_mod("x", "/mods/x",
+            "{\"id\": \"x\", \"card_layout\": {\"atk\": {\"hide\": true},"
+            "\"frame_styles\": {\"custom\": {\"image\": \"f.png\", \"hand_color\": \"purple\","
+            "\"atk\": {\"x\": 80}}}, \"default_style\": \"custom\"}}",
+            1, "full_bleed", 1);
+    CardLayout_SetCard(0);
+    p = CardLayout_Get(CARD_LAYOUT_ATK);
+    CHECK(p.visible && p.x == 80);                  /* style owns its whole part */
+}
+
 int main(void)
 {
     retail_defaults();
@@ -827,6 +867,7 @@ int main(void)
     color_tint();
     per_style_layout();
     frame_box_is_bounded();
+    movable_parts_can_hide();
     reset();
     printf("card layout: ok\n");
     return 0;

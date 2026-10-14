@@ -9,7 +9,7 @@
 #include <string.h>
 
 static const char *const element_names[CARD_LAYOUT_ELEMENT_COUNT] = {
-    "frame", "title", "description", "level_stars", "attribute", "atk", "def", "art"
+    "frame", "title", "description", "level_stars", "attribute", "atk", "def", "atk_label", "dfd_label", "art"
 };
 
 /* The viewer reserves exactly this retail card-plate footprint.  A custom
@@ -161,6 +161,16 @@ static void tint(const JsonValue *part, int *r, int *g, int *b)
     *r = (int)Json_Number(Json_Member(color, "r"), 0x80);
     *g = (int)Json_Number(Json_Member(color, "g"), 0x80);
     *b = (int)Json_Number(Json_Member(color, "b"), 0x80);
+}
+
+/* Any movable card-view part can opt out without changing its coordinates:
+ * `hide` is the documented spelling, while `hidden` and `show: false` make
+ * manifests written with the other UI configuration conventions work too. */
+static int part_visible(const JsonValue *part, int fallback)
+{
+    if (Json_Bool(Json_Member(part, "hide"), 0) || Json_Bool(Json_Member(part, "hidden"), 0)) return 0;
+    if (Json_Member(part, "show") && !Json_Bool(Json_Member(part, "show"), 1)) return 0;
+    return fallback;
 }
 
 /* A style's own "<key>" sub-object, when the currently active style has
@@ -551,7 +561,7 @@ CardLayoutPlacement CardLayout_Get(CardLayoutElement element)
     int spell = CardLayout_IsSpell();
     const JsonValue *styles = Json_Member(source.layout, "frame_styles");
     const JsonValue *style_node = styles && *current.name ? Json_Member(styles, current.name) : NULL;
-    const JsonValue *part;
+    const JsonValue *part = NULL;
 
     switch (element) {
     case CARD_LAYOUT_FRAME: {
@@ -573,10 +583,7 @@ CardLayoutPlacement CardLayout_Get(CardLayoutElement element)
         tint(part, &p.r, &p.g, &p.b);
         break;
     case CARD_LAYOUT_DESCRIPTION:
-        /* Always visible, independent of full_bleed: the description
-         * TextBox's own backdrop (func_800283F4.c's D_8009B240) is on
-         * screen either way, so hiding only the text would leave it
-         * looking empty for no reason. */
+        /* The description panel is not a movable card part. */
         p.visible = 1;
         break;
     case CARD_LAYOUT_LEVEL_STARS:
@@ -617,6 +624,12 @@ CardLayoutPlacement CardLayout_Get(CardLayoutElement element)
         point(part, &p.x, &p.y, 0x61, 0xAB);
         tint(part, &p.r, &p.g, &p.b);
         break;
+    case CARD_LAYOUT_ATK_LABEL:
+        part = layout_part(style_node, source.layout, "atk_label");
+        break;
+    case CARD_LAYOUT_DEF_LABEL:
+        part = layout_part(style_node, source.layout, "dfd_label");
+        break;
     case CARD_LAYOUT_ART:
         /* w/h at 0 (retail) unless full-bleed and the mod (or the style
          * itself) gives a rect: func_80028B08.c reads w != 0 as "stretch
@@ -624,15 +637,17 @@ CardLayoutPlacement CardLayout_Get(CardLayoutElement element)
          * correctly draws nothing special. Spell reads "spell"."art"
          * instead of "art" -- magic/trap/ritual's own art box, not
          * monster's. */
+        if (spell) part = Json_Member(layout_part(style_node, source.layout, "spell"), "art");
+        else part = layout_part(style_node, source.layout, "art");
         if (full_bleed) {
-            if (spell) part = Json_Member(layout_part(style_node, source.layout, "spell"), "art");
-            else part = layout_part(style_node, source.layout, "art");
             rect(part, &p.x, &p.y, &p.w, &p.h, 0, 0, 0, 0);
         }
         break;
     default:
         break;
     }
+
+    p.visible = part_visible(part, p.visible);
 
     if (element >= 0 && element < CARD_LAYOUT_ELEMENT_COUNT &&
         (!last_set[element] || last[element].visible != p.visible ||

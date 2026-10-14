@@ -318,6 +318,8 @@ void func_80028B08(DisplayObject *obj, s32 arg1) {
     CardLayoutPlacement title_layout = CardLayout_Get(CARD_LAYOUT_TITLE);
     CardLayoutPlacement atk_layout = CardLayout_Get(CARD_LAYOUT_ATK);
     CardLayoutPlacement def_layout = CardLayout_Get(CARD_LAYOUT_DEF);
+    CardLayoutPlacement atk_label_layout = CardLayout_Get(CARD_LAYOUT_ATK_LABEL);
+    CardLayoutPlacement def_label_layout = CardLayout_Get(CARD_LAYOUT_DEF_LABEL);
     CardLayoutPlacement star_layout = CardLayout_Get(CARD_LAYOUT_LEVEL_STARS);
     CardLayoutPlacement attr_layout = CardLayout_Get(CARD_LAYOUT_ATTRIBUTE);
     CardLayoutPlacement art_layout = CardLayout_Get(CARD_LAYOUT_ART);
@@ -395,11 +397,11 @@ void func_80028B08(DisplayObject *obj, s32 arg1) {
      * in place of retail's own small quad -- PRM is still fully set up with
      * the original attribute/tpage/cxcy/uv/extent at this point, which is
      * exactly what that helper reads its texel footprint from. */
-    if (art_layout.w != 0) {
+    if (art_layout.visible && art_layout.w != 0) {
         CardLayout_DrawArt(PRM, win->field_30.h.field_30 + art_layout.x,
                            win->field_30.h.field_32 + art_layout.y,
                            art_layout.w, art_layout.h, arg1, arg, EXT);
-    } else
+    } else if (art_layout.visible)
 #endif
     DisplayObject_SubmitPacket(PRM, CTX, arg1, arg, EXT);
 
@@ -421,12 +423,16 @@ void func_80028B08(DisplayObject *obj, s32 arg1) {
     PRM->xy.h.x = win->field_30.h.field_30 + title_layout.x;
     PRM->xy.h.y = win->field_30.h.field_32 + title_layout.y;
     PRM->rgb = CardLayout_Tint(win->field_0C, title_layout.r, title_layout.g, title_layout.b);
-    if (!HdText_Enabled() && CardLayout_FullBleed() && title_layout.visible &&
-        CardLayout_DrawTitleMask(PRM, PRM->xy.h.x, PRM->xy.h.y, arg1, arg, PRM->rgb, EXT)) {
-        /* The low-resolution white mask was submitted. */
-    } else
+    if (title_layout.visible) {
+        if (!HdText_Enabled() && CardLayout_FullBleed() &&
+            CardLayout_DrawTitleMask(PRM, PRM->xy.h.x, PRM->xy.h.y, arg1, arg, PRM->rgb, EXT)) {
+            /* The low-resolution white mask was submitted. */
+        } else
 #endif
-    DisplayObject_SubmitPacket(PRM, CTX, arg1, arg, EXT);
+        DisplayObject_SubmitPacket(PRM, CTX, arg1, arg, EXT);
+#ifdef MEMORIES_PC
+    }
+#endif
 #ifdef MEMORIES_PC
     PRM->rgb = win->field_0C;
 #endif
@@ -452,7 +458,7 @@ void func_80028B08(DisplayObject *obj, s32 arg1) {
          * entirely while one is active -- the boxes read by position
          * alone, no label text, as the reference layout this feature
          * followed did. */
-        if (!CardLayout_FullBleed())
+        if (!CardLayout_FullBleed() && atk_label_layout.visible)
 #endif
         DisplayObject_SubmitPacket(PRM, CTX, arg1, arg, EXT);
         PRM->cxcy.h.cy = white;
@@ -462,7 +468,7 @@ void func_80028B08(DisplayObject *obj, s32 arg1) {
             PRM->cxcy.h.cy = 0xF9;
         }
 #ifdef MEMORIES_PC
-        if (!CardLayout_FullBleed())
+        if (!CardLayout_FullBleed() && def_label_layout.visible)
 #endif
         DisplayObject_SubmitPacket(PRM, CTX, arg1, arg, EXT);
         PRM->cxcy.h.cy = white;
@@ -515,24 +521,29 @@ void func_80028B08(DisplayObject *obj, s32 arg1) {
              * attack screen dims (rec->field_3C's 0x80 ATK, 0x40 DEF: the
              * retail digits' grey palette row) is drawn from the strip's
              * greyed digits. */
-            if (CardLayout_FullBleed()) {
+            if (CardLayout_FullBleed() && atk_label_layout.visible) {
                 CardLayout_DrawStatLabel(win->field_30.h.field_30, win->field_30.h.field_32,
                                          0, arg1, arg, win->field_0C, EXT);
+            }
+            if (CardLayout_FullBleed() && def_label_layout.visible) {
                 CardLayout_DrawStatLabel(win->field_30.h.field_30, win->field_30.h.field_32,
                                          1, arg1, arg, win->field_0C, EXT);
             }
-            if (CardLayout_FullBleed() &&
+            if (CardLayout_FullBleed() && atk_layout.visible &&
                 CardLayout_DrawDigits(win->field_30.h.field_30, win->field_30.h.field_32,
                                       atk_layout.x, atk_layout.y, buf1, digits, (rec->field_3C & 0x80) != 0,
                                       arg1, arg, win->field_0C, EXT)) {
-                CardLayout_DrawDigits(win->field_30.h.field_30, win->field_30.h.field_32,
-                                      def_layout.x, def_layout.y, buf2, digits, (rec->field_3C & 0x40) != 0,
-                                      arg1, arg, win->field_0C, EXT);
+                if (def_layout.visible) {
+                    CardLayout_DrawDigits(win->field_30.h.field_30, win->field_30.h.field_32,
+                                          def_layout.x, def_layout.y, buf2, digits, (rec->field_3C & 0x40) != 0,
+                                          arg1, arg, win->field_0C, EXT);
+                }
             } else {
 
             /* A fallback style's own "color" (card_layout.h's CardLayoutPlacement):
              * a filter on the card's own fade tint, not a replacement for it,
              * so the box still dims/fades with the rest of the card. */
+            if (atk_layout.visible) {
             PRM->rgb = CardLayout_Tint(win->field_0C, atk_layout.r, atk_layout.g, atk_layout.b);
             PRM->uv.b.hi = (PRM->uv.b.hi & 0x80) + 0x10;
             PRM->xy.h.x = win->field_30.h.field_30 + atk_left;
@@ -546,7 +557,9 @@ void func_80028B08(DisplayObject *obj, s32 arg1) {
                 DisplayObject_SubmitPacket(PRM, CTX, arg1, arg, EXT);
                 PRM->xy.h.x = PRM->xy.h.x + step;
             }
+            }
 
+            if (def_layout.visible) {
             PRM->rgb = CardLayout_Tint(win->field_0C, def_layout.r, def_layout.g, def_layout.b);
             PRM->xy.h.x = win->field_30.h.field_30 + def_left;
             PRM->xy.h.y = win->field_30.h.field_32 + def_top;
@@ -558,6 +571,7 @@ void func_80028B08(DisplayObject *obj, s32 arg1) {
                 PRM->uv.b.lo = buf2[i] * 6 + 0x10;
                 DisplayObject_SubmitPacket(PRM, CTX, arg1, arg, EXT);
                 PRM->xy.h.x = PRM->xy.h.x + step;
+            }
             }
             PRM->rgb = win->field_0C;
             }
@@ -626,7 +640,7 @@ void func_80028B08(DisplayObject *obj, s32 arg1) {
         PRM->uv.b.lo = 0;
         PRM->cxcy.h.cx = 0x1C0;
         PRM->cxcy.h.cy = 0xF8;
-        if (rec->field_3A != 0) {
+        if (star_layout.visible && rec->field_3A != 0) {
             i = 0;
             do {
                 DisplayObject_SubmitPacket(PRM, CTX, arg1, arg, EXT);
@@ -660,11 +674,11 @@ void func_80028B08(DisplayObject *obj, s32 arg1) {
      * card's own picture is enlarged above. Magic/trap/ritual answer with
      * "spell"."icon" there instead of "attribute" (card_layout.c): same
      * mechanism, just the mod's other position for it. */
-    if (attr_layout.w != 0) {
+    if (attr_layout.visible && attr_layout.w != 0) {
         CardLayout_DrawArt(PRM, win->field_30.h.field_30 + attr_layout.x,
                            win->field_30.h.field_32 + attr_layout.y,
                            attr_layout.w, attr_layout.h, arg1, arg, EXT);
-    } else
+    } else if (attr_layout.visible)
 #endif
     DisplayObject_SubmitPacket(PRM, CTX, arg1, arg, EXT);
 #ifdef MEMORIES_PC

@@ -981,6 +981,15 @@ A full-bleed style may retain the card's ordinary, localized name with
 coordinates are from the frame's top-left; without this object, full-bleed
 frames leave the retail name sprite out.
 
+Any movable card part can be left out with `"hide": true`: `title`, `art`,
+`attribute` (or a spell style's `spell.icon`), `stars`, `atk` and `def`
+(their numeric values), or `atk_label` and `dfd_label` (their captions).
+For example, `"atk": {"hide": true}` leaves the ATK caption but hides its
+value, while `"atk_label": {"hide": true}` does the reverse. `"hidden":
+true` and `"show": false` are accepted aliases. Put the flag in a frame
+style to affect only that style, or at the top level to affect every style
+that does not supply its own part.
+
 `atk`/`def`/`stars`/`attribute` (and `spell`'s `icon`) also move a card drawn
 in a *fallback* style (`full_bleed` off, retail's own frame and title plate
 still on screen) -- a mod can nudge where the stock stat boxes sit without

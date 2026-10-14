@@ -76,6 +76,11 @@ int CardLayoutArt_DigitCell(int digit, int dim, int *tpage, int *u, int *v, int 
  * label, read from card_layout.h's CardLayout_StatLabel. */
 int CardLayoutArt_StatLabelCell(int dfd, int *tpage, int *u, int *v, int *clut, int *w, int *h);
 
+/* `kind`'s (card_constants.h's CARD_TYPE_MAGIC..CARD_TYPE_EQUIP) optional
+ * replacement "[Trap Card]"-style caption, read from card_layout.h's
+ * CardLayout_TypeLabel. */
+int CardLayoutArt_TypeLabelCell(int kind, int *tpage, int *u, int *v, int *clut, int *w, int *h);
+
 /* Copies the current retail title glyphs into a white, transparent mask in a
  * layout bank. The caller can then use vertex colour for a real title tint. */
 int CardLayoutArt_TitleCell(int source_tpage, int source_u, int source_v, int source_w, int source_h,

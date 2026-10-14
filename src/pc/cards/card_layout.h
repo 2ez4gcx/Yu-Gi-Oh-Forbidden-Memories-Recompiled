@@ -95,6 +95,20 @@ int CardLayout_Digits(char *path, size_t size, int *w, int *h, int *step);
  * card units; 0 means that style does not supply that label. */
 int CardLayout_StatLabel(int dfd, char *path, size_t size, int *x, int *y, int *w, int *h);
 
+/* `kind`'s own "type_label" entry: card_constants.h's CARD_TYPE_MAGIC,
+ * CARD_TYPE_TRAP, CARD_TYPE_RITUAL or CARD_TYPE_EQUIP -- the "[Normal Magic
+ * Card]"/"[Trap Card]"/"[Ritual Magic Card]"/"[Equip Magic Card]" caption
+ * retail draws under the title for every non-monster card, from its own
+ * built-in art at a position the layout never used to touch. `*visible`
+ * answers whether anything should be drawn there at all ("hide"/"hidden"/
+ * "show": false, the same convention every other movable part takes) --
+ * filled in regardless of the return value, and true with no "card_layout"
+ * mod applied, matching retail always drawing it. 1 on return (`*visible`
+ * also true) is a style's own replacement image, its path, x/y and w/h in
+ * card units; 0 leaves retail's own built-in artwork in place, still subject
+ * to `*visible`. */
+int CardLayout_TypeLabel(int kind, char *path, size_t size, int *x, int *y, int *w, int *h, int *visible);
+
 /* A card's frame style: what the layout draws for it, picked once for the
  * card view's big frame and the hand's small one alike, so they cannot
  * disagree. `color` is the style's "hand_color" (cards.h CARD_FRAME_*, the

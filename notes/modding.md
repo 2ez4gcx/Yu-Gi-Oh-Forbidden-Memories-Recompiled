@@ -1019,6 +1019,15 @@ PNGs drawn over that style's frame, before the dynamic number glyphs. Their
 `x`/`y` are offsets from the frame's top-left; `width`/`height` (16x8 if left
 out) are their on-card size. They are style-only, so no label can leak onto
 another frame style.
+A non-monster card (magic, trap, ritual or equip) also carries retail's own
+"[Normal Magic Card]"/"[Trap Card]"/"[Ritual Magic Card]"/"[Equip Magic
+Card]" caption; `type_label` replaces or hides it, one entry a kind:
+`"type_label": {"trap": {"image": "trap.png", "x": 12, "y": 35, "width": 56,
+"height": 16}, "equip": {"hide": true}}`. `magic`/`ritual` follow the same
+shape. Unlike `atk_label`/`dfd_label` this one still has an effect with no
+`image` of its own: `"type_label": {"ritual": {"hide": true}}` on its own
+silences retail's own built-in caption, useful even for a position-only
+layout with no replacement frame image at all.
 The image is a strip of 5 x 4 cells of 40 x 48 texels: digit d in column
 `d % 5` and row `d / 5`, and the same ten greyed two rows further down
 (200 x 192; `tools/pc/card_digits.py` draws one from a font). The greyed ones

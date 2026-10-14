@@ -13,6 +13,7 @@
 #include "pc/render/soft_gpu.h"
 #include "pc/render/texture_pack.h"
 #include "pc/debug/log.h"
+#include "game/card_constants.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -699,6 +700,10 @@ int CardLayoutArt_DigitCell(int digit, int dim, int *tpage, int *u, int *v, int 
  *   field back pixels 640..665, y300..360; CLUT 640..895, y361
  *   ATK label  pixels 384..447, y370..433; CLUT 384..639, y434
  *   DFD label  pixels 640..703, y370..433; CLUT 640..895, y434
+ *   magic type label  pixels 384..415, y436..467; CLUT 384..639, y468
+ *   trap type label   pixels 640..671, y436..467; CLUT 640..895, y468
+ *   ritual type label pixels 384..415, y469..500; CLUT 384..639, y501
+ *   equip type label  pixels 640..671, y469..500; CLUT 640..895, y501
  *   card back  pixels 896..1023, y256..510; CLUT 768..1023, y511
  *
  * Full 256-entry CLUT widths are called out because treating them as one
@@ -766,6 +771,95 @@ int CardLayoutArt_StatLabelCell(int dfd, int *tpage, int *u, int *v, int *clut, 
      * a centred label image and makes the text disappear. */
     *w = STAT_LABEL_W;
     *h = STAT_LABEL_H;
+    return 1;
+}
+
+/* The "[Trap Card]"-style caption retail draws for every non-monster card:
+ * one slot a kind (CARD_TYPE_MAGIC..CARD_TYPE_EQUIP, card_constants.h's four
+ * consecutive values), each its own small canvas and CLUT rather than one
+ * shared sheet -- a style replaces any one kind's art without the others
+ * sharing its palette. 64x32 is generous for a caption this size (retail's
+ * own is 56x16 texels) without the 128x64 budget every STAT_LABEL_* cell
+ * uses; four of those would not fit the bank's remaining room. */
+#define TYPE_LABEL_W 64
+#define TYPE_LABEL_H 32
+#define TYPE_LABEL_MAGIC_X 384
+#define TYPE_LABEL_MAGIC_Y 436
+#define TYPE_LABEL_TRAP_X 640
+#define TYPE_LABEL_TRAP_Y 436
+#define TYPE_LABEL_RITUAL_X 384
+#define TYPE_LABEL_RITUAL_Y 469
+#define TYPE_LABEL_EQUIP_X 640
+#define TYPE_LABEL_EQUIP_Y 469
+static const int type_label_page_x[CARD_NON_MONSTER_TYPE_COUNT] = {
+    TYPE_LABEL_MAGIC_X, TYPE_LABEL_TRAP_X, TYPE_LABEL_RITUAL_X, TYPE_LABEL_EQUIP_X};
+static const int type_label_page_y[CARD_NON_MONSTER_TYPE_COUNT] = {
+    TYPE_LABEL_MAGIC_Y, TYPE_LABEL_TRAP_Y, TYPE_LABEL_RITUAL_Y, TYPE_LABEL_EQUIP_Y};
+typedef struct {
+    char path[1024], bank_path[1024];
+    unsigned char *indices;
+    unsigned short clut[256];
+    int png_w, png_h;
+} TypeLabelImage;
+static TypeLabelImage type_label_images[CARD_NON_MONSTER_TYPE_COUNT];
+
+int CardLayoutArt_TypeLabelCell(int kind, int *tpage, int *u, int *v, int *clut, int *w, int *h)
+{
+    char path[1024], why[128];
+    uint16_t *bank, *page;
+    TypeLabelImage *image;
+    int idx = kind - CARD_TYPE_MAGIC;
+    int page_x, page_y, tpage_x, tpage_y, tex_u, tex_v, clut_y, x, y;
+    int label_x, label_y, label_w, label_h, label_visible;
+
+    if (idx < 0 || idx >= CARD_NON_MONSTER_TYPE_COUNT ||
+        !CardLayout_TypeLabel(kind, path, sizeof(path), &label_x, &label_y, &label_w, &label_h, &label_visible) ||
+        !(bank = SoftGpu_Bank(FRAME_BANK)))
+        return 0;
+    page_x = type_label_page_x[idx];
+    page_y = type_label_page_y[idx];
+    tpage_x = page_x & ~63;
+    tpage_y = page_y & ~255;
+    tex_u = page_x & 63;
+    tex_v = page_y & 255;
+    clut_y = page_y + TYPE_LABEL_H;
+
+    image = &type_label_images[idx];
+    if (strcmp(image->path, path)) {
+        free(image->indices);
+        memset(image, 0, sizeof(*image));
+        snprintf(image->path, sizeof(image->path), "%s", path);
+        CardArt_ImageSize(path, &image->png_w, &image->png_h);
+        image->indices = malloc(TYPE_LABEL_W * TYPE_LABEL_H);
+        if (image->indices &&
+            !CardArt_IndexedImage(path, TYPE_LABEL_W, TYPE_LABEL_H, image->indices, image->clut, why, sizeof(why))) {
+            LOG(LOG_CARD_LAYOUT, "type label: %s: %s", path, why);
+            free(image->indices);
+            image->indices = NULL;
+        }
+        if (image->indices && image->png_w > 0) TexturePack_BankImagePreload(path);
+    }
+    if (!image->indices) return 0;
+    if (strcmp(image->bank_path, path)) {
+        page = bank + page_y * SOFT_GPU_WIDTH + page_x;
+        for (y = 0; y < TYPE_LABEL_H; y++)
+            for (x = 0; x < TYPE_LABEL_W; x += 2)
+                page[y * SOFT_GPU_WIDTH + x / 2] = (uint16_t)(image->indices[y * TYPE_LABEL_W + x] |
+                                                               (image->indices[y * TYPE_LABEL_W + x + 1] << 8));
+        memcpy(&bank[clut_y * SOFT_GPU_WIDTH + page_x], image->clut, sizeof(image->clut));
+        snprintf(image->bank_path, sizeof(image->bank_path), "%s", path);
+        if (image->png_w > 0 && image->png_h > 0) {
+            TexturePack_BankSpritesUseOwner(TEXTURE_BANK_OWNER_LAYOUT_FRAME);
+            TexturePack_AddBankSprite(FRAME_BANK, tpage_x, tpage_y, 1, page_x, clut_y, tex_u, tex_v,
+                                      TYPE_LABEL_W, TYPE_LABEL_H, path);
+        }
+    }
+    *tpage = LAYOUT_TPAGE(page_x, page_y);
+    *u = tex_u;
+    *v = tex_v;
+    *clut = (clut_y << 6) | (page_x / 16);
+    *w = TYPE_LABEL_W;
+    *h = TYPE_LABEL_H;
     return 1;
 }
 
@@ -897,6 +991,8 @@ int CardLayoutArt_TitleCell(int source_tpage, int source_u, int source_v, int so
  * software texture. */
 static void layout_bank_registrations_lost(void)
 {
+    int i;
+
     hand_bank_path[0] = 0;
     field_bank_path[0] = 0;
     field_back_bank_path[0] = 0;
@@ -906,6 +1002,7 @@ static void layout_bank_registrations_lost(void)
     digits_bank_path[0] = 0;
     stat_labels[0].bank_path[0] = 0;
     stat_labels[1].bank_path[0] = 0;
+    for (i = 0; i < CARD_NON_MONSTER_TYPE_COUNT; i++) type_label_images[i].bank_path[0] = 0;
     title_mask_cache.valid = 0;
 }
 

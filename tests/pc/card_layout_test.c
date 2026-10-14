@@ -836,6 +836,45 @@ static void movable_parts_can_hide(void)
     CHECK(p.visible && p.x == 80);                  /* style owns its whole part */
 }
 
+/* CardLayout_TypeLabel: a style's own replacement for retail's "[Normal
+ * Magic Card]"/"[Trap Card]"/"[Ritual Magic Card]"/"[Equip Magic Card]"
+ * caption, one entry a card type, independently hideable even with no
+ * replacement image (a position-only layout can still silence retail's
+ * own built-in one). */
+static void type_label_replaces_and_hides(void)
+{
+    char path[1024];
+    int x, y, w, h, visible;
+
+    reset();
+    add_mod("x", "/mods/x",
+            "{\"id\": \"x\", \"card_layout\": {\"frame_styles\": {\"custom\": {\"image\": \"f.png\","
+            "\"hand_color\": \"purple\", \"type_label\": {"
+            "\"trap\": {\"image\": \"t.png\", \"x\": 5, \"y\": 6, \"width\": 20, \"height\": 10},"
+            "\"equip\": {\"hide\": true}}}},"
+            "\"default_style\": \"custom\"}}",
+            1, "full_bleed", 1);
+    CardLayout_SetCard(0);
+    CHECK(CardLayout_TypeLabel(CARD_TYPE_TRAP, path, sizeof(path), &x, &y, &w, &h, &visible));
+    CHECK(visible && !strcmp(path, "/mods/x/t.png") && x == 5 && y == 6 && w == 20 && h == 10);
+    /* No "magic" entry at all: retail's own built-in artwork stays, still visible. */
+    CHECK(!CardLayout_TypeLabel(CARD_TYPE_MAGIC, path, sizeof(path), &x, &y, &w, &h, &visible));
+    CHECK(visible && !*path);
+    /* "hide" with no image: draw nothing there at all, not even retail's own. */
+    CHECK(!CardLayout_TypeLabel(CARD_TYPE_EQUIP, path, sizeof(path), &x, &y, &w, &h, &visible));
+    CHECK(!visible && !*path);
+
+    /* A position-only layout (full_bleed off, nothing to replace the frame
+     * with) can still hide retail's own built-in caption. */
+    reset();
+    add_mod("x", "/mods/x",
+            "{\"id\": \"x\", \"card_layout\": {\"type_label\": {\"ritual\": {\"hide\": true}}}}",
+            1, "full_bleed", 0);
+    CardLayout_SetCard(0);
+    CHECK(!CardLayout_TypeLabel(CARD_TYPE_RITUAL, path, sizeof(path), &x, &y, &w, &h, &visible));
+    CHECK(!visible);
+}
+
 int main(void)
 {
     retail_defaults();
@@ -868,6 +907,7 @@ int main(void)
     per_style_layout();
     frame_box_is_bounded();
     movable_parts_can_hide();
+    type_label_replaces_and_hides();
     reset();
     printf("card layout: ok\n");
     return 0;

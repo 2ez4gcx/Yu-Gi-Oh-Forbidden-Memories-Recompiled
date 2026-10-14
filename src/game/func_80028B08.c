@@ -265,6 +265,24 @@ static void CardLayout_DrawStatLabel(s32 base_x, s32 base_y, s32 dfd, s32 ot, s3
     CardLayout_DrawCell(base_x + x, base_y + y, w, h, tpage, u, v, clut, cell_w, cell_h, ot, mode, rgb, EXT);
 }
 
+/* The "[Trap Card]"-style caption's own replacement image (card_layout.h's
+ * CardLayout_TypeLabel), in place of retail's own built-in one for `kind`
+ * (CARD_TYPE_MAGIC..CARD_TYPE_EQUIP). 1 when a replacement was drawn.
+ * `*visible` is filled in either way: 0 with it still true tells the caller
+ * to draw retail's own built-in artwork instead (no replacement image, but
+ * not hidden); 0 with it false means draw nothing there at all. */
+static int CardLayout_DrawTypeLabel(s32 kind, s32 base_x, s32 base_y, s32 ot, s32 mode, u32 rgb,
+                                    Func80028B08Extra *EXT, s32 *visible)
+{
+    char path[1024];
+    s32 x, y, w, h, tpage, u, v, clut, cell_w, cell_h;
+
+    if (!CardLayout_TypeLabel(kind, path, sizeof(path), &x, &y, &w, &h, visible)) return 0;
+    if (!CardLayoutArt_TypeLabelCell(kind, &tpage, &u, &v, &clut, &cell_w, &cell_h)) return 0;
+    CardLayout_DrawCell(base_x + x, base_y + y, w, h, tpage, u, v, clut, cell_w, cell_h, ot, mode, rgb, EXT);
+    return 1;
+}
+
 /* With HD Text disabled the retail title plate's ink is black, so a title
  * style uses this white indexed mask. HD mode keeps the original primitive
  * instead: gl_picture.c turns that atlas's ink white at high resolution. */
@@ -681,6 +699,23 @@ void func_80028B08(DisplayObject *obj, s32 arg1) {
             } while (i < (s32)rec->field_3A);
         }
     } else {
+#ifdef MEMORIES_PC
+        /* Retail's own "[Normal Magic Card]"/"[Trap Card]"/"[Ritual Magic
+         * Card]"/"[Equip Magic Card]" caption, PRM already set up for it
+         * (tpage/xy/extent/uv above) from obj->field_30/field_3C/field_5E,
+         * baked in once at setup (duel_effect_resource_setup.c) -- this is
+         * the one retail sprite in this function that never got the
+         * card_layout treatment every other element here has: no visibility
+         * check, no reposition, drawn unconditionally regardless of
+         * full_bleed, painting over a full-bleed style's own frame art no
+         * matter what it draws there. A style's own "type_label" entry
+         * replaces it; "hide" leaves nothing there at all, matching every
+         * other movable part's convention. */
+        s32 type_label_visible = 1;
+        if (!CardLayout_DrawTypeLabel(obj->field_68, win->field_30.h.field_30, win->field_30.h.field_32,
+                                      arg1, arg, win->field_0C, EXT, &type_label_visible) &&
+            type_label_visible)
+#endif
         DisplayObject_SubmitPacket(PRM, CTX, arg1, arg, EXT);
     }
 

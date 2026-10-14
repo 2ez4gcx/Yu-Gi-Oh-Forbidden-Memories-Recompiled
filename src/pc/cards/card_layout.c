@@ -243,6 +243,40 @@ int CardLayout_StatLabel(int dfd, char *path, size_t size, int *x, int *y, int *
     return *w > 0 && *h > 0;
 }
 
+/* card_constants.h's CARD_TYPE_MAGIC..CARD_TYPE_EQUIP are consecutive: the
+ * "[Normal Magic Card]"/"[Trap Card]"/"[Ritual Magic Card]"/"[Equip Magic
+ * Card]" caption's own key, in that order. */
+static const char *const type_label_names[CARD_NON_MONSTER_TYPE_COUNT] = {"magic", "trap", "ritual", "equip"};
+
+int CardLayout_TypeLabel(int kind, char *path, size_t size, int *x, int *y, int *w, int *h, int *visible)
+{
+    LayoutSource source = find_source();
+    const JsonValue *styles, *style, *type_labels, *label;
+    int idx = kind - CARD_TYPE_MAGIC;
+
+    path[0] = 0;
+    *visible = 1;
+    if (idx < 0 || idx >= CARD_NON_MONSTER_TYPE_COUNT) return 0;
+    styles = Json_Member(source.layout, "frame_styles");
+    style = styles && *current.name ? Json_Member(styles, current.name) : NULL;
+    /* One shared "type_label" object, a kind's own name its sub-key --
+     * style-owned first, the layout's shared one its fallback, same rule as
+     * every other per-style part (layout_part). Visibility reads this way
+     * even with full-bleed off: a position-only layout (no replacement
+     * image anywhere) can still hide retail's own built-in caption. */
+    type_labels = layout_part(style, source.layout, "type_label");
+    label = Json_Member(type_labels, type_label_names[idx]);
+    *visible = part_visible(label, 1);
+    if (source.mod < 0 || !full_bleed_of(&source)) return 0;
+    mod_file(source.mod, Json_String(Json_Member(label, "image"), NULL), "\"type_label\"", path, size);
+    if (!path[0]) return 0;
+    *x = (int)Json_Number(Json_Member(label, "x"), 0);
+    *y = (int)Json_Number(Json_Member(label, "y"), 0);
+    *w = (int)Json_Number(Json_Member(label, "width"), 56);
+    *h = (int)Json_Number(Json_Member(label, "height"), 16);
+    return *w > 0 && *h > 0;
+}
+
 /* Why a layout's frame choice could not be made, said once a layout. */
 static const JsonValue *noted_layout;
 static char noted_what[96];

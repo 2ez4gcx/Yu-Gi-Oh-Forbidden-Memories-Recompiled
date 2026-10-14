@@ -694,6 +694,23 @@ static void bank_sprites(void)
     i = TexturePack_BankEntryFor(13, 256, 0, 1, 0, 254, 0, 0);
     assert(TexturePack_BankEntryLevelFor(i, 1) == 2 && TexturePack_BankEntryLevelFor(i, 2) == 1);
     assert(TexturePack_BankEntryLevelFor(i, 4) == 0);
+    /* A level's size is max(1, floor(level 0's size >> level)), the one
+     * bind_pack_entry's glTexImage2D calls build a real GL mip chain from --
+     * rounding a level's own half up instead (6 -> "4" at level 2) agrees
+     * with that for a power-of-two image (where up and down never differ)
+     * but not for this one: level 2 of 6x6 must be 1x1, not 2x2, or the
+     * uploaded texture is mipmap-incomplete and GL_NEAREST_MIPMAP_NEAREST
+     * samples it as nothing. */
+    {
+        unsigned char six[6 * 6 * 4];
+        char d[1024];
+        for (i = 0; i < 6 * 6; i++) { unsigned char *p = &six[i * 4]; p[0] = p[1] = p[2] = p[3] = 255; }
+        write_png("bank/d.png", six, 6, 6);
+        snprintf(d, sizeof(d), "%s/bank/d.png", root);
+        assert(TexturePack_AddBankSpriteCrop(13, 384, 0, 1, 0, 254, 0, 0, 6, 6, d, 0, 0, 6, 6));
+        i = TexturePack_BankEntryFor(13, 384, 0, 1, 0, 254, 0, 0);
+        assert(TexturePack_BankEntryLevel(i, 2, &pixels, &w, &h) && w == 1 && h == 1);
+    }
     TexturePack_BankSpritesClear(TEXTURE_BANK_OWNER_LAYOUT_FRAME);
     TexturePack_Unload();
     assert(TexturePack_BankSample(14, 0, 0, 0, 0, 257, 1 << 16, 1 << 16, 2, &rgb) == 1 && rgb == 0xff0000);

@@ -28,6 +28,7 @@
 #include "gl_picture.h"
 #include "soft_gpu.h"
 #include "texture_pack.h"
+#include "pc/cards/card_layout.h"
 #include "pc/text/hd_text.h"
 #include "pc/platform/settings.h"
 #include "pc/compat/signal.h"
@@ -427,7 +428,9 @@ static const char *vertex_source =
  * page: page x, page y, palette x, palette y. mode: depth, blend mode, bank.
  * window: mask x, mask y, offset x, offset y in texels, as soft_gpu.c has
  * them. pass: 0 every fragment, 1 the opaque ones, 2 the semi-transparent.
- * op 1: VRAM into the picture. op 2: the scratch copy into the picture. */
+ * op 1: VRAM into the picture. op 2: the scratch copy into the picture.
+ * Flag 128: a full-bleed card title, whose HD atlas ink is white instead of
+ * the retail title CLUT's black. */
 static const char *fragment_source =
 #ifdef __APPLE__
     "#version 150\n"
@@ -570,7 +573,12 @@ static const char *fragment_source =
     /* HD text (hd_text.h): the index from the glyph's picture, through the
      * glyph's palette as ever. */
     "            ivec2 at = clamp(ivec2(floor(vec2(ub, vb) * float(scale))), ivec2(0), textureSize(glyphs, 0) - 1);\n"
-    "            word = word_at(page.z + int(texelFetch(glyphs, at, 0).r), page.w);\n"
+    "            uint ink = texelFetch(glyphs, at, 0).r;\n"
+    "            word = word_at(page.z + int(ink), page.w);\n"
+    "            if ((flags & 128) != 0) {\n"
+    "                uint level = ink == 0u ? 0u : (8u - min(ink, 7u)) * 31u / 7u;\n"
+    "                word = level | (level << 5u) | (level << 10u);\n"
+    "            }\n"
     /* A capture (SoftGpu_Capture): a 16-bit texel there keeps its word,
      * which says whether it is transparent and semi-transparent, and takes
      * its color from the picture the game read it from. */
@@ -1343,8 +1351,10 @@ static size_t polygon(const uint32_t *words, size_t count)
         }
     } else if (!(flags & 16) && textured && hd_text && state.depth == 0 && !state.bank) {
         /* A card's title plate, whole or a piece of the turning card. */
-        int atlas_u, atlas_v, title_u, title_v;
-        if (HdText_Title(state.page_x, state.page_y, v[0].u, v[0].v, scale, &atlas_u, &atlas_v, &title_u, &title_v)) {
+        int atlas_u, atlas_v, title_u, title_v, title_card;
+        if (HdText_TitleCard(state.page_x, state.page_y, v[0].u, v[0].v, scale, &atlas_u, &atlas_v, &title_u, &title_v,
+                         &title_card)) {
+            if (CardLayout_TitleStyled(title_card)) flags |= 128;
             for (i = 0; i < vertices_n; i++) {
                 v[i].u = atlas_u + v[i].u - title_u;
                 v[i].v = atlas_v + v[i].v - title_v;
@@ -1462,8 +1472,10 @@ static size_t rectangle(const uint32_t *words, size_t count)
         }
     }
     if (w && h && textured && hd_text && state.depth == 0 && !state.bank) {
-        int atlas_u, atlas_v, title_u, title_v;
-        if (HdText_Title(state.page_x, state.page_y, base.u, base.v, scale, &atlas_u, &atlas_v, &title_u, &title_v)) {
+        int atlas_u, atlas_v, title_u, title_v, title_card;
+        if (HdText_TitleCard(state.page_x, state.page_y, base.u, base.v, scale, &atlas_u, &atlas_v, &title_u, &title_v,
+                         &title_card)) {
+            if (CardLayout_TitleStyled(title_card)) flags |= 128;
             state.pack = 0;
             block(base.x * scale, base.y * scale, w * scale, h * scale, atlas_u + base.u - title_u,
                   atlas_v + base.v - title_v, atlas_u + base.u - title_u + w, atlas_v + base.v - title_v + h, &base,

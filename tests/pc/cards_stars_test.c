@@ -115,7 +115,7 @@ static const char *const mod_cards[][2] = {
     /* The report: a retail monster replaced with no star keeps none; [none,
        X] is the one star X; 0, null and "none" are all none. A copy has its
        own stars, and a copy of a no-star card without "stars" none either. */
-    {"a", "[{\"replace\": 1, \"stars\": [\"(none)\", \"(none)\"]},"
+    {"a", "[{\"replace\": 1, \"stars\": [\"(none)\", \"(none)\"], \"frame_style\": \"legend\"},"
           " {\"replace\": 2, \"stars\": [0, \"Sun\"]},"
           " {\"replace\": 3, \"stars\": [null, \"none\"]},"
           " {\"copy\": 4, \"id\": \"none\", \"stars\": [0, 0]},"
@@ -676,6 +676,10 @@ int main(void)
     expect(CARD_COUNT + 2, 0, 0);
     expect(4, SUN, MOON);                      /* a copy's base is left alone */
     assert(Cards_EffectId(CARD_COUNT + 3) == 4);
+    /* Named styles are card data: a copy inherits one, and a later replace
+       without frame_style retains it. The active layout resolves "legend". */
+    assert(!strcmp(Cards_FrameStyle(1), "legend"));
+    assert(!strcmp(Cards_FrameStyle(CARD_COUNT + 2), "legend"));
     assert(notes[0] == 0);
 
     expect(300, SUN, MOON);

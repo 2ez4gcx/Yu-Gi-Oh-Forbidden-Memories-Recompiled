@@ -951,7 +951,7 @@ some of them out, with a `"card_layout"` object, no code needed:
 ```json
 "card_layout": {
     "frame_styles": {
-        "gold":   {"image": "anime_frame_monster.png", "hand_color": "gold"},
+        "gold":   {"image": "anime_frame_monster.png", "hand_image": "anime_hand_monster.png", "library_icon": "anime_library_monster.png", "hand_color": "gold"},
         "green":  {"image": "anime_frame_magic.png",   "hand_color": "green"},
         "pink":   {"image": "anime_frame_trap.png",    "hand_color": "pink"},
         "orange": {"image": "anime_frame_orange.png",  "hand_color": "orange"}
@@ -983,8 +983,58 @@ out entirely, though, and it inherits retail's title-plate spot -- now
 covered by full-bleed's bigger art -- so it ends up hidden; giving it a
 position in the stat band keeps it clear of `art`'s own rect.
 
+A full-bleed style may retain the card's ordinary, localized name with
+`"title": {"x": 12, "y": 14}` inside that `frame_styles` entry. Its
+coordinates are from the frame's top-left; without this object, full-bleed
+frames leave the retail name sprite out.
+
+Any movable card part can be left out with `"hide": true`: `title`, `art`,
+`attribute` (or a spell style's `spell.icon`), `stars`, `atk` and `def`
+(their numeric values), or `atk_label` and `dfd_label` (their captions).
+For example, `"atk": {"hide": true}` leaves the ATK caption but hides its
+value, while `"atk_label": {"hide": true}` does the reverse. `"hidden":
+true` and `"show": false` are accepted aliases. Put the flag in a frame
+style to affect only that style, or at the top level to affect every style
+that does not supply its own part.
+The large card frame itself is not hideable: `full_bleed` replaces the retail
+plate with the style's frame image, while a fallback style keeps the retail
+plate.
+
+`atk`/`def`/`stars`/`attribute` (and `spell`'s `icon`) also move a card drawn
+in a *fallback* style (`full_bleed` off, retail's own frame and title plate
+still on screen) -- a mod can nudge where the stock stat boxes sit without
+opting into a whole custom frame image. Only `width`/`height` on `art` and
+`attribute` (the stretch into a full-bleed frame's own cutout) stay
+full-bleed-only: a fallback style has no custom art there to stretch into.
+
+Each of those four keys also takes a `"color"`, `{"r", "g", "b"}` (0-255,
+128 is retail's own color, unchanged -- the GPU's own neutral vertex-color
+multiply): a filter over whatever the element already draws, not an
+independent paint over it, so it still dims and fades with the rest of the
+card. `"atk": {"x": 38, "y": 179, "color": {"r": 255, "g": 96, "b": 96}}`
+reddens just the ATK number, retail position and all.
+
 `digits` (optional) replaces the ATK/DFD numbers with the mod's own while the
 layout is on: `{"image": "digits.png", "width": 10, "height": 12, "step": 10}`.
+Put it inside a `frame_styles` entry to use that image only for cards wearing
+that style; a top-level `card_layout.digits` remains the shared fallback for
+styles without one.
+Each frame style may also supply static stat captions independently:
+`"atk_label": {"image": "atk.png", "x": 12, "y": 171, "width": 18,
+"height": 8}` and `"dfd_label": {...}`. These are ordinary transparent
+PNGs drawn over that style's frame, before the dynamic number glyphs. Their
+`x`/`y` are offsets from the frame's top-left; `width`/`height` (16x8 if left
+out) are their on-card size. They are style-only, so no label can leak onto
+another frame style.
+A non-monster card (magic, trap, ritual or equip) also carries retail's own
+"[Normal Magic Card]"/"[Trap Card]"/"[Ritual Magic Card]"/"[Equip Magic
+Card]" caption; `type_label` replaces or hides it, one entry a kind:
+`"type_label": {"trap": {"image": "trap.png", "x": 12, "y": 35, "width": 56,
+"height": 16}, "equip": {"hide": true}}`. `magic`/`ritual` follow the same
+shape. Unlike `atk_label`/`dfd_label` this one still has an effect with no
+`image` of its own: `"type_label": {"ritual": {"hide": true}}` on its own
+silences retail's own built-in caption, useful even for a position-only
+layout with no replacement frame image at all.
 The image is a strip of 5 x 4 cells of 40 x 48 texels: digit d in column
 `d % 5` and row `d / 5`, and the same ten greyed two rows further down
 (200 x 192 texels; the PNG can be any size, read in proportion, and
@@ -993,7 +1043,10 @@ and up; `tools/pc/card_digits.py` draws one from a font). The greyed ones
 are the stat the attack screen dims, which keeps the card's own box and the
 mod's font. `width`/`height` are one digit's size on the card, `step` the
 distance between two digits' left edges (default `width`). Each number is
-centred on its `atk`/`def` point. Left out, the retail digits are drawn.
+centred on its own `digits.atk`/`digits.def` point: `"digits": { ...,
+"atk": {"x": 108, "y": 169}, "def": {"x": 108, "y": 184} }`.
+Older style/layout-level `atk`/`def` entries remain a fallback. Left out,
+the retail digits are drawn.
 `hd_assets_pack.py` copies `tools/pc/hd_recipes/anime_digits.png` in for the HD
 mod (`--digit-font <ttf>` draws a new one).
 
@@ -1003,18 +1056,23 @@ up to 12 stars at a fixed 9px each, and `func_80028B08.c` centres however
 many a card has around this point so a wide row never runs past the frame.
 
 Retail draws a small frame with a title plate, the card's picture at its
-own fixed size, and ATK/DEF stacked under a separate plaque -- none of
-which `"card_layout"` can change on its own. What it does is answer a mod's
-own `full_bleed` setting (a `bool` the mod declares, as every setting is):
-while that setting is on, the frame and title plate are left out, and the
-rest move to the place given, in the same pixel neighbourhood retail draws
-them in (`x`/`y`, with `width`/`height` on `art` and `attribute` stretching
-the picture there instead of drawing it at its own size). Any key left out
--- the whole object included -- keeps retail's own place; a mod that only
-sets `full_bleed` and gives no positions gets retail's own layout with
-nothing hidden, which is a no-op, not a half-finished look. The description
-box is always shown -- its own backdrop panel is on screen either way, so
-there is nothing to gain by leaving its text out.
+own fixed size, and ATK/DEF stacked under a separate plaque. A mod's own
+`full_bleed` setting (a `bool` the mod declares, as every setting is)
+answers whether the frame and title plate stay on screen: while it is on,
+both are left out and `art`/`attribute`'s `width`/`height` stretch the
+picture into the custom frame's own cutout instead of drawing it at its own
+size, and `atk`/`def`'s point becomes each box's own *centre* rather than
+retail's stacked top-left anchor. `full_bleed` off keeps retail's frame,
+title plate and corner-anchored stat boxes, but every element still moves
+and tints to the place and color given -- the two are independent: a mod
+can recolor or nudge the stock boxes without a custom frame image, or go
+full custom without moving a single box from where retail already put it.
+Any key left out -- the whole object included -- keeps retail's own place
+and color; a mod that only sets `full_bleed` and gives no positions gets
+retail's own layout with nothing hidden, which is a no-op, not a
+half-finished look. The description box is always shown -- its own
+backdrop panel is on screen either way, so there is nothing to gain by
+leaving its text out.
 
 ### Frame styles and the rules that pick them
 
@@ -1022,10 +1080,13 @@ A card is drawn in a frame **style**: a picture and the color its small card
 wears in the hand, together, so the card view and the hand can never
 disagree. Three keys say it:
 
-- `frame_styles`: name -> `{"image", "hand_color", "width", "height"}`.
+- `frame_styles`: name -> `{"image", "hand_image", "field_image", "field_back_image", "back_image",
+  "library_icon", "hand_color", "width", "height", "full_bleed"}`.
   `image` is relative to the mod's directory, as a `title` mod's pictures
   are, drawn as one textured quad behind everything else, at `width`/`height`
-  (140x196 with neither given). `hand_color` (the older spelling
+  (140x196 with neither given). A frame may be smaller, but its dimensions
+  are capped at 140x196 so it cannot cover the Library name bar or Deck
+  Builder information panel. `hand_color` (the older spelling
   `hand_colour` is still read; `hand_color` wins when a style has both)
   is one of the disc's six frame
   colors, `gold`, `green`, `pink`, `blue`, `purple` or `orange` (the colors
@@ -1034,13 +1095,50 @@ disagree. Three keys say it:
   as you like; a style named for a color (`gold`, ...) is also what a card
   whose own `frame` (a cards mod's, [Frame color](more-cards.md#frame-color))
   is that color wears.
+  `hand_image`, when present, is a PNG reduced to the 52x60 sprite for that
+  style's flat duel-hand and flat field-card frame. Its artwork is drawn under the game's own card
+  art, stats and markers. It is also the 3D field card's frame unless the
+  style gives `field_image` (the same 52x60 size); with neither, the 3D field
+  card uses `hand_color`.
+  `field_back_image` (52x60) is the face-down card's back in the hand and on
+  the field; `back_image` is the back the card viewer shows while a card
+  turns, stretched to the style's `width`/`height` (254 at most each). Without
+  them the retail card back is drawn.
+  `library_icon` is a PNG reduced to the Library grid's 12x14
+  cell; without it, the grid uses the style's `hand_color` palette row.
+  `full_bleed` defaults on for a style with an `image`; set it to `false`
+  for a palette-only fallback style, so cards that do not select a custom
+  image keep the retail full-card frame.
+- A card entry's `"frame_style"` may name any style directly. It wins over
+  its six-color `"frame"`, then the rules below; this lets a cards mod opt
+  into a new frame without using a tag as an implementation detail. `null`
+  clears an inherited named style.
 - `frame_for`: a list of rules, the first that applies to a card wins. A rule
   says `"style"` and, to limit it, any of `"class"` (what the card is, below),
   `"tag"` (one of the card's [`tags`](more-cards.md#tags)) and `"setting"` (a
   `bool` the mod declares: the rule counts only while it is on, which is how a
   player gets a sub-option in the Mods window). A rule that names none applies
   to every card.
+- `default_styles`: defaults for cards that have no explicit `frame_style`,
+  no matching color-named style and no `frame_for` rule. Its optional
+  `kinds` object assigns a style to `monster`, `effect_monster`, `magic`
+  (also accepted as `spell`), `equip`, `ritual` (also `ritual_spell`) or
+  `trap`. `monster` includes ordinary and effect monsters unless the latter
+  has its more-specific `effect_monster` entry. Its optional `types` object
+  assigns a style by the card's printed type: `Dragon`, `Zombie`,
+  `Spellcaster`, `Magic`, `Trap`, `Ritual`, `Equip`, and every other type the
+  card editor accepts. A type default wins over a kind default because it is
+  more specific.
+
+  ```json
+  "default_styles": {
+    "kinds": {"monster": "normal", "magic": "spell", "trap": "trap"},
+    "types": {"Dragon": "xyz", "Zombie": "undead", "Equip": "equip"}
+  }
+  ```
+
 - `default_style`: the style of a card no rule picks (`gold` if left out).
+  It is the final fallback after `default_styles`.
 
 The class of a card is worked out by the engine from its type and its
 `monster_effects`, never written by a mod: `monster`, `effect_monster`,

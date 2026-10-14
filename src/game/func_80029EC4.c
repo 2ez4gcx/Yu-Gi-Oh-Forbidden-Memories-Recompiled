@@ -10,10 +10,51 @@
 #include "func_80029EC4.h"
 #include "card_grid.h"
 #ifdef MEMORIES_PC
+#include "../psyq/libgpu.h"
 #include "pc/cards/cards.h"
+#include "pc/cards/card_layout_art.h"
 #endif
 
 #define GS_SPRITE_COLOR_WORD(sprite) (*(u32 *)&(sprite)->r)
+
+#ifdef MEMORIES_PC
+/* GsSortFastSprite's own packet (libgs.c's sort_plain_sprite) keeps only
+ * the low 5 bits of a sprite's tpage -- page location alone, no bank, no
+ * depth field of its own; the real PS1 fast-sprite command relies on those
+ * instead coming from whatever DrawMode the GPU already has set, which is
+ * exactly right for retail's own icon (always real VRAM, always the
+ * state the duel already set up) but silently drops a style's own
+ * CardLayoutArt_LibraryIconCell bank and 8bpp depth bits -- the custom icon
+ * then samples whatever retail's current page happens to be, not its own
+ * texels. A textured quad's own tpage field has room for all of it, the
+ * same device CardLayout_DrawFrame's own tiles use (func_80028B08.c), so a
+ * cell the layout drew is submitted as one instead of as a GsSPRITE. */
+static void Library_DrawCustomIcon(const GsSPRITE *p, int tpage, GsOT *ot)
+{
+    POLY_FT4 quad;
+    setPolyFT4(&quad);
+    /* pad1/pad2 are the upper half of a bank-sampling polygon's own fade
+     * (soft_gpu.h's SoftGpu_FadeOf) -- a stack local leaves them whatever
+     * the stack held, which CardLayout_DrawCell (func_80028B08.c) already
+     * has to zero for the same reason. Left alone, a stray 0x8000 bit
+     * fades the icon into whatever is behind it at a random amount. */
+    quad.pad1 = quad.pad2 = 0;
+    quad.r0 = p->r;
+    quad.g0 = p->g;
+    quad.b0 = p->b;
+    quad.tpage = (u16)tpage;
+    quad.clut = getClut(p->cx, p->cy);
+    quad.x0 = quad.x2 = p->x;
+    quad.x1 = quad.x3 = (short)(p->x + p->w);
+    quad.y0 = quad.y1 = p->y;
+    quad.y2 = quad.y3 = (short)(p->y + p->h);
+    quad.u0 = quad.u2 = p->u;
+    quad.u1 = quad.u3 = (u8)(p->u + p->w);
+    quad.v0 = quad.v1 = p->v;
+    quad.v2 = quad.v3 = (u8)(p->v + p->h);
+    GsSortPoly(&quad, ot, 2);
+}
+#endif
 
 /* Draws the scrolling card-list grid straight into the scratchpad primitive at
    0x1F800320. The first visible row comes from the viewport scroll divided by
@@ -70,6 +111,9 @@ void Library_DrawCardGrid(void)
     s32 f;
     s32 first;
     s32 attribute;
+#ifdef MEMORIES_PC
+    s32 icon_tpage, icon_u, icon_v, icon_clut, icon_w, icon_h, icon_custom;
+#endif
 
 #ifdef MEMORIES_PC
     /* The panels behind section rows the disc's cards do not reach. */
@@ -129,6 +173,26 @@ void Library_DrawCardGrid(void)
                         }
                         p->x = c + 8;
                         p->cx = *(u16 *)(pj + 0x54);
+#ifdef MEMORIES_PC
+                        icon_custom = CardLayoutArt_LibraryIconCell(j, &icon_tpage, &icon_u, &icon_v,
+                                                                    &icon_clut, &icon_w, &icon_h);
+                        if (icon_custom) {
+                            p->tpage = icon_tpage;
+                            p->u = icon_u;
+                            p->v = icon_v;
+                            p->cx = (icon_clut & 0x3F) * 16;
+                            p->cy = icon_clut >> 6;
+                            p->w = icon_w;
+                            p->h = icon_h;
+                        } else {
+                            p->cy = 0xF7;
+                            *(u16 *)&p->u = 0xF060;
+                            *(u32 *)&p->w = e;
+                            p->tpage = 0x1B;
+                        }
+                        if (icon_custom) Library_DrawCustomIcon(p, icon_tpage, ot);
+                        else
+#endif
                         GsSortFastSprite(p, ot, 2);
                     }
                     if (k < CARD_ID_END_LIVE) {
@@ -140,6 +204,26 @@ void Library_DrawCardGrid(void)
                             }
                             p->x = c + 0xA8;
                             p->cx = *(u16 *)(pk + 0x54);
+#ifdef MEMORIES_PC
+                            icon_custom = CardLayoutArt_LibraryIconCell(k, &icon_tpage, &icon_u, &icon_v,
+                                                                        &icon_clut, &icon_w, &icon_h);
+                            if (icon_custom) {
+                                p->tpage = icon_tpage;
+                                p->u = icon_u;
+                                p->v = icon_v;
+                                p->cx = (icon_clut & 0x3F) * 16;
+                                p->cy = icon_clut >> 6;
+                                p->w = icon_w;
+                                p->h = icon_h;
+                            } else {
+                                p->cy = 0xF7;
+                                *(u16 *)&p->u = 0xF060;
+                                *(u32 *)&p->w = e;
+                                p->tpage = 0x1B;
+                            }
+                            if (icon_custom) Library_DrawCustomIcon(p, icon_tpage, ot);
+                            else
+#endif
                             GsSortFastSprite(p, ot, 2);
                         }
                     }

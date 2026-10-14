@@ -13,7 +13,9 @@
 #include "func_80016784.h"
 #include "duel_draw_card_output_position.h"
 #ifdef MEMORIES_PC
+#include "../psyq/libgs.h"
 #include "pc/cards/cards.h"
+#include "pc/cards/card_layout_art.h"
 #endif
 
 #define POLY_FT4_BYTES(packet) ((u8 *)(packet))
@@ -57,6 +59,8 @@ void func_80016784(DisplayObject *object, s32 arg1, s32 arg2, s32 arg3) {
     POLY_FT4 *y;
 #ifdef MEMORIES_PC
     s32 wide;
+    s32 hand_tpage, hand_u, hand_v, hand_clut, hand_w, hand_h;
+    s32 back_tpage, back_u, back_v, back_clut, back_w, back_h;
 #endif
 
     if ((u32)(arg2 + 0x33) < 0x173) {
@@ -238,6 +242,86 @@ void func_80016784(DisplayObject *object, s32 arg1, s32 arg2, s32 arg3) {
                     k->uv.word = 0x8038;
                     k->cxcy.word = 0xF10100;
                 }
+#ifdef MEMORIES_PC
+                /* A frame style's hand_image replaces only this flat 52x60
+                 * duel sprite, and only while the card is face up: object->
+                 * field_69 just above picked retail's own generic card-back
+                 * uv/clut for a face-down card (including mid-flip, which
+                 * draws through this same function), and a style's art has
+                 * no "back" of its own to show there. Its card art, stats
+                 * and type marker above remain the game's own overlays. */
+                if (object->field_69 == 0 && object->field_67 == 0 &&   /* not the 0xC000 variant */
+                    CardLayoutArt_HandFrameCell(card->card_id, &hand_tpage, &hand_u, &hand_v,
+                                                 &hand_clut, &hand_w, &hand_h)) {
+                    /* `fl` here is field_14|0x10000 for an ordinary (not
+                     * clip-tested) card -- DisplayObject_SubmitPacket's case
+                     * 1, GsSortFastSprite, whose own packet keeps only 5 bits
+                     * of tpage (page location alone; depth and bank come
+                     * from whatever DrawMode the GPU already has set, not
+                     * from the sprite). Fine for retail's own flat sprite,
+                     * always real VRAM; not for a style's own hand_image, in
+                     * its own bank at 8bpp, whose bank and depth bits that
+                     * mask silently drops -- the same limit func_80029EC4.c's
+                     * Library icon hits. Submitted as its own textured quad
+                     * instead (not through `k`, whose scratchpad address always
+                     * has DisplayObject_SubmitPacket's own 0x04000000
+                     * "projected" bit set, which would misroute a case-5-style
+                     * dispatch into a perspective transform this flat sprite
+                     * never wants), whose tpage field is a full word. */
+                    POLY_FT4 quad;
+                    setPolyFT4(&quad);
+                    /* pad1/pad2 are the upper half of a bank-sampling
+                     * polygon's own fade (soft_gpu.h's SoftGpu_FadeOf) -- a
+                     * stack local leaves them whatever the stack held, which
+                     * CardLayout_DrawCell (func_80028B08.c) already has to
+                     * zero for the same reason. Left alone, a stray 0x8000
+                     * bit fades the hand frame into whatever is behind it at
+                     * a random amount -- the "semi transparent" look. */
+                    quad.pad1 = quad.pad2 = 0;
+                    quad.r0 = (u8)g2;
+                    quad.g0 = (u8)(g2 >> 8);
+                    quad.b0 = (u8)(g2 >> 16);
+                    quad.tpage = (u16)hand_tpage;
+                    quad.clut = (u16)hand_clut;
+                    quad.x0 = quad.x2 = o->pos.h.x;
+                    quad.x1 = quad.x3 = (short)(o->pos.h.x + hand_w);
+                    quad.y0 = quad.y1 = o->pos.h.y;
+                    quad.y2 = quad.y3 = (short)(o->pos.h.y + hand_h);
+                    quad.u0 = quad.u2 = (u8)hand_u;
+                    quad.u1 = quad.u3 = (u8)(hand_u + hand_w);
+                    quad.v0 = quad.v1 = (u8)hand_v;
+                    quad.v2 = quad.v3 = (u8)(hand_v + hand_h);
+                    GsSortPoly(&quad, (GsOT *G32)arg1, (u16)fl);
+                    return;
+                }
+                /* The mirror case: the card is face down (or mid-flip,
+                 * which also draws through this function), and the style
+                 * has its own "field_back_image" for what retail would
+                 * otherwise draw from k->uv/cxcy just above. Same bank/tpage
+                 * reasoning as the face-up quad above. */
+                if (object->field_69 != 0 &&
+                    CardLayoutArt_FieldBackCell(card->card_id, &back_tpage, &back_u, &back_v,
+                                                 &back_clut, &back_w, &back_h)) {
+                    POLY_FT4 quad;
+                    setPolyFT4(&quad);
+                    quad.pad1 = quad.pad2 = 0;
+                    quad.r0 = (u8)g2;
+                    quad.g0 = (u8)(g2 >> 8);
+                    quad.b0 = (u8)(g2 >> 16);
+                    quad.tpage = (u16)back_tpage;
+                    quad.clut = (u16)back_clut;
+                    quad.x0 = quad.x2 = o->pos.h.x;
+                    quad.x1 = quad.x3 = (short)(o->pos.h.x + back_w);
+                    quad.y0 = quad.y1 = o->pos.h.y;
+                    quad.y2 = quad.y3 = (short)(o->pos.h.y + back_h);
+                    quad.u0 = quad.u2 = (u8)back_u;
+                    quad.u1 = quad.u3 = (u8)(back_u + back_w);
+                    quad.v0 = quad.v1 = (u8)back_v;
+                    quad.v2 = quad.v3 = (u8)(back_v + back_h);
+                    GsSortPoly(&quad, (GsOT *G32)arg1, (u16)fl);
+                    return;
+                }
+#endif
                 DisplayObject_SubmitPacket(
                     k, POLY_FT4_BYTES(y), arg1, fl,
                     CARD_FRAME_SCRATCH_BYTES(o));

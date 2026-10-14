@@ -116,7 +116,7 @@ void DuelEffect_UpdateCardViewerState(void)
          * gDuel_pCardViewerTextBox (D_8009B250, just cleared above) is
          * documented optional (notes/duel-effect-state-runtime.md) --
          * leaving it null is a real, already-handled case, not a new one. */
-        if (CardLayout_Get(CARD_LAYOUT_DESCRIPTION).visible)
+        if (CardLayout_Part(CARD_LAYOUT_DESCRIPTION).visible)
 #endif
         for (; i < 3; i++, chan++) {
             if ((chan->flags_34 & DUEL_EFFECT_CHANNEL_FLAG_ACTIVE) == 0) {

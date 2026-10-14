@@ -200,6 +200,37 @@ colors a card by its type:
 The Forbidden Memories HD mod's frames cover purple and orange too
 (`tools/pc/hd_assets_pack.py` recolors the monster frame into them).
 
+### Named frame styles
+
+`"frame_style"` picks a named style from an applied `card_layout` mod's
+`frame_styles`.  This is how a card mod can use a newly added frame without
+pretending it is one of the game’s six palette colors or adding a tag only to
+select art:
+
+```json
+{ "replace": "Blue-Eyes White Dragon", "frame_style": "godly" }
+```
+
+Define the matching style with both images when the duel hand should use a
+custom frame too:
+
+```json
+"godly": {
+  "image": "frames/godly.png",
+  "hand_image": "frames/godly_hand.png",
+  "library_icon": "frames/godly_library.png",
+  "hand_color": "purple"
+}
+```
+
+The selected style controls the big-card image and its small-card palette
+color (`hand_color`), plus its optional flat duel-hand image (`hand_image`). It wins over `frame`, then the layout's `frame_for`
+rules, its `default_styles` kind/type defaults, and finally `default_style`.
+A copy inherits its base's named style; a later
+replacement keeps it when left out, and `null` clears it back to the layout
+rules. The named style must exist in the active layout; otherwise the game
+uses its retail frame and notes the missing style in the Mods window.
+
 ## Tags
 
 `"tags": ["god"]` on a card entry labels it, so that a mod that draws card

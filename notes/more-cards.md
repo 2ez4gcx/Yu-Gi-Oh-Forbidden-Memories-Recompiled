@@ -218,7 +218,6 @@ custom frame too:
 "godly": {
   "image": "frames/godly.png",
   "hand_image": "frames/godly_hand.png",
-  "menu_icon": "frames/godly_icon.png",
   "library_icon": "frames/godly_library.png",
   "hand_color": "purple"
 }

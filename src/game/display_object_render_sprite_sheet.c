@@ -23,45 +23,6 @@
 #include "duel_card_viewer.h"
 #include "duel_effect_resource_record.h"
 #include "pc/debug/log.h"
-#define CARD_LAYOUT_MENU_ICON_MARKER 0xFE
-
-/* case 1 below (DisplayObject_SubmitPacket's own dispatch,
- * display_object_helpers.c) is GsSortFastSprite, whose own packet
- * (libgs.c's sort_plain_sprite) keeps only the low 5 bits of a sprite's
- * tpage: page location alone, with depth and bank coming from GPU state a
- * prior DrawMode left set, not from the sprite itself. Exactly right for
- * retail's own type icon (always real VRAM, always the state the menu
- * already set up); wrong for a style's own menu_icon, in its own bank at
- * 8bpp, whose bank and depth bits that mask silently drops, sampling
- * whatever page the GPU already had rather than the icon's own texels. A
- * textured quad's tpage field has room for all of it -- the same device
- * card_layout's frame tiles use (func_80028B08.c's CardLayout_DrawCell) --
- * so a style's own icon is submitted as one instead of as a GsSPRITE. */
-static void submit_menu_icon(const SpritePrim *sprite, s32 tpage, s32 ot, s32 depth)
-{
-    POLY_FT4 quad;
-    setPolyFT4(&quad);
-    /* pad1/pad2 are the upper half of a bank-sampling polygon's own fade
-     * (soft_gpu.h's SoftGpu_FadeOf) -- a stack local leaves them whatever
-     * the stack held, which CardLayout_DrawCell (func_80028B08.c) already
-     * has to zero for the same reason. Left alone, a stray 0x8000 bit
-     * fades the icon into whatever is behind it at a random amount. */
-    quad.pad1 = quad.pad2 = 0;
-    quad.r0 = GS_SPRITE_VIEW(sprite)->r;
-    quad.g0 = GS_SPRITE_VIEW(sprite)->g;
-    quad.b0 = GS_SPRITE_VIEW(sprite)->b;
-    quad.tpage = (u16)tpage;
-    quad.clut = getClut(sprite->cxcy.h.cx, sprite->cxcy.h.cy);
-    quad.x0 = quad.x2 = sprite->xy.h.x;
-    quad.x1 = quad.x3 = (short)(sprite->xy.h.x + sprite->extent.wh.w.word);
-    quad.y0 = quad.y1 = sprite->xy.h.y;
-    quad.y2 = quad.y3 = (short)(sprite->xy.h.y + sprite->extent.wh.h);
-    quad.u0 = quad.u2 = sprite->uv.b.lo;
-    quad.u1 = quad.u3 = (u8)(sprite->uv.b.lo + sprite->extent.wh.w.word);
-    quad.v0 = quad.v1 = sprite->uv.b.hi;
-    quad.v2 = quad.v3 = (u8)(sprite->uv.b.hi + sprite->extent.wh.h);
-    GsSortPoly(&quad, (GsOT *G32)ot, (u16)depth);
-}
 
 /* The card viewer's rotating "card turning" sprite is screen-space
  * (DISPLAY_OBJECT_FLAG_SCREEN_SPACE, confirmed live), and every sample taken
@@ -185,29 +146,6 @@ retry:
     part = (SpriteSheetPart *)(sheet + sizeof(SpriteSheetHeader));
     sprite->cxcy.h.cx = work->cx;
     sprite->cxcy.h.cy = work->cy;
-#ifdef MEMORIES_PC
-    /* Build Deck/Trade's 16x16 type icon (duel_card_type_icon.c) carries
-     * its card id in selector bytes.  It otherwise follows the retail
-     * object's tint, position and scale exactly; only its texture changes. */
-    if (object->field_6A == CARD_LAYOUT_MENU_ICON_MARKER) {
-        int tpage, u, v, clut, w, h;
-        int card_id = object->field_67 | (object->field_6B << 8);
-        if (CardLayoutArt_MenuIconCell(card_id, &tpage, &u, &v, &clut, &w, &h)) {
-            sprite->attribute = work->attribute & ~0x08000000;
-            sprite->tpage = tpage;
-            sprite->cxcy.h.cx = (clut & 0x3F) * 16;
-            sprite->cxcy.h.cy = clut >> 6;
-            sprite->uv.b.lo = u;
-            sprite->uv.b.hi = v;
-            sprite->extent.wh.w.word = w;
-            sprite->extent.wh.h = h;
-            sprite->xy.h.x = x;
-            sprite->xy.h.y = y;
-            submit_menu_icon(sprite, tpage, ot, depth);
-            return;
-        }
-    }
-#endif
     state->flip = 0;
     state->mirror = 0;
     state->screen = work->attribute & 0x08000000;
@@ -246,8 +184,8 @@ retry:
      * (func_800283F4.c's DuelEffect_UpdateCardViewerState; Library, Build
      * Deck and the duel effect card viewer all share it) -- checked by
      * pointer identity against gDuel_pCardViewerCard rather than a
-     * repurposed field, since this object (unlike the menu icon's own
-     * dedicated one above) already uses field_6A for retail's own variant,
+     * repurposed field, since this object already uses field_6A for retail's
+     * own variant,
      * and (unlike entry->object_04, the other half of the same pair)
      * field_67 is never set on it -- its card id is read from D_800EA0E8[3]
      * instead, the one resource slot func_800283F4.c and card_browse.c's

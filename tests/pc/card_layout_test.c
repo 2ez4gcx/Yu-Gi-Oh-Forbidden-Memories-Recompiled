@@ -562,16 +562,6 @@ static void styles_hand_frame(void)
     CHECK(!*CardLayout_HandFramePath(1) && notes == 1);
 }
 
-static void styles_menu_icon(void)
-{
-    reset();
-    add_mod("x", "/mods/x",
-            "{\"id\": \"x\", \"card_layout\": {\"frame_styles\": {\"gold\": {\"image\": \"g.png\","
-            "\"hand_color\": \"gold\", \"menu_icon\": \"icon.png\"}}}}",
-            1, "full_bleed", 1);
-    CHECK(!strcmp(CardLayout_MenuIconPath(1), "/mods/x/icon.png"));
-}
-
 static void styles_library_icon(void)
 {
     reset();
@@ -829,7 +819,6 @@ int main(void)
     styles_by_default_kind_and_type();
     styles_can_preserve_retail_frame();
     styles_hand_frame();
-    styles_menu_icon();
     styles_library_icon();
     styles_unusable_is_retail();
     styles_hand_colour_alias();

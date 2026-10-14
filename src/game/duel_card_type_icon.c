@@ -9,17 +9,12 @@
 #include "../psyq/libgs.h"
 #ifdef MEMORIES_PC
 #include "pc/cards/cards.h"
-#include "pc/cards/card_layout.h"
-#include "pc/cards/card_layout_art.h"
 #endif
 
 #include "duel_card_stat_display.h"
 
 #define DISPLAY_OBJECT_VIEW(object) ((DisplayObject *)(object))
 #define DISPLAY_OBJECT_UNSIGNED_HALFWORD(field) (*(u16 *)&(field))
-#ifdef MEMORIES_PC
-#define CARD_LAYOUT_MENU_ICON_MARKER 0xFE
-#endif
 
 /*
  * The object is the return value, not just a discarded temporary: retail
@@ -72,16 +67,6 @@ DisplayObject *func_80031574(s32 index, s32 arg1, s32 arg2, s32 arg3, s32 arg4)
     if (Cards_FrameColor(index) >= 0 && Cards_FrameColor(index) != CARD_FRAME_PURPLE) {
         DISPLAY_OBJECT_UNSIGNED_HALFWORD(object->field_40) =
             0x260 + (Cards_FrameColor(index) - (Cards_FrameColor(index) == CARD_FRAME_ORANGE)) * 0x10;
-    }
-    /* DisplayObject_RenderSpriteSheet recognizes this private marker and
-     * substitutes menu_icon from the selected frame style. Its animation
-     * callback owns field_6C, so retain the card id in two otherwise-unused
-     * selector bytes instead. */
-    if (*CardLayout_MenuIconPath(index)) {
-        DisplayObject *menu_icon_object = DISPLAY_OBJECT_VIEW(object);
-        menu_icon_object->field_6A = CARD_LAYOUT_MENU_ICON_MARKER;
-        menu_icon_object->field_67 = (u8)index;
-        menu_icon_object->field_6B = (u8)(index >> 8);
     }
 #endif
     DisplayObject_SelectOrderingTable1(DISPLAY_OBJECT_VIEW(object));

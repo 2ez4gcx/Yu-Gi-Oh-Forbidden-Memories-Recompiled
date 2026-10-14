@@ -399,8 +399,6 @@ static int resolve_style(const LayoutSource *source, int card, CardLayoutStyle *
                  "\"frame_styles\" field_back_image", out->field_back_image, sizeof(out->field_back_image));
         mod_file(source->mod, Json_String(Json_Member(style, "back_image"), NULL), "\"frame_styles\" back_image",
                  out->back_image, sizeof(out->back_image));
-        mod_file(source->mod, Json_String(Json_Member(style, "menu_icon"), NULL), "\"frame_styles\" menu_icon",
-                 out->menu_icon, sizeof(out->menu_icon));
         mod_file(source->mod, Json_String(Json_Member(style, "library_icon"), NULL), "\"frame_styles\" library_icon",
                  out->library_icon, sizeof(out->library_icon));
     }
@@ -459,18 +457,6 @@ const char *CardLayout_BackImagePath(int card_id)
     path[0] = 0;
     if (full_bleed_of(&source) && resolve_style(&source, card_id, &style, 1))
         snprintf(path, sizeof(path), "%s", style.back_image);
-    return path;
-}
-
-const char *CardLayout_MenuIconPath(int card_id)
-{
-    static char path[1024];
-    LayoutSource source = find_source();
-    CardLayoutStyle style;
-
-    path[0] = 0;
-    if (full_bleed_of(&source) && resolve_style(&source, card_id, &style, 1))
-        snprintf(path, sizeof(path), "%s", style.menu_icon);
     return path;
 }
 

@@ -944,7 +944,7 @@ some of them out, with a `"card_layout"` object, no code needed:
 ```json
 "card_layout": {
     "frame_styles": {
-        "gold":   {"image": "anime_frame_monster.png", "hand_image": "anime_hand_monster.png", "menu_icon": "anime_icon_monster.png", "library_icon": "anime_library_monster.png", "hand_color": "gold"},
+        "gold":   {"image": "anime_frame_monster.png", "hand_image": "anime_hand_monster.png", "library_icon": "anime_library_monster.png", "hand_color": "gold"},
         "green":  {"image": "anime_frame_magic.png",   "hand_color": "green"},
         "pink":   {"image": "anime_frame_trap.png",    "hand_color": "pink"},
         "orange": {"image": "anime_frame_orange.png",  "hand_color": "orange"}
@@ -1066,10 +1066,9 @@ disagree. Three keys say it:
   is that color wears.
   `hand_image`, when present, is a PNG reduced to the 52x60 sprite for that
   style's flat duel-hand and flat field-card frame. Its artwork is drawn under the game's own card
-  art, stats and markers; it does not replace the 3D field-card or menu icon,
-  which still use `hand_color`.
-  `menu_icon` is a PNG reduced to 16x16 for the Build Deck and Trade card
-  type icon. `library_icon` is a PNG reduced to the Library grid's 12x14
+  art, stats and markers; it does not replace the 3D field-card, which still
+  uses `hand_color`.
+  `library_icon` is a PNG reduced to the Library grid's 12x14
   cell; without it, the grid uses the style's `hand_color` palette row.
   `full_bleed` defaults on for a style with an `image`; set it to `false`
   for a palette-only fallback style, so cards that do not select a custom

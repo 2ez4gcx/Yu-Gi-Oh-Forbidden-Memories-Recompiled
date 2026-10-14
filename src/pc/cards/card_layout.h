@@ -111,7 +111,6 @@ typedef struct {
     char field_image[1024];
     char field_back_image[1024];
     char back_image[1024];
-    char menu_icon[1024];
     char library_icon[1024];
 } CardLayoutStyle;
 
@@ -149,8 +148,6 @@ const char *CardLayout_FieldBackPath(int card_id);
  * display_object_render_sprite_sheet.c's DisplayObject_RenderSpriteSheet).
  * No fallback; "" leaves retail's own swirl in place. */
 const char *CardLayout_BackImagePath(int card_id);
-/* The style's optional 16x16 Build Deck/Trade icon. */
-const char *CardLayout_MenuIconPath(int card_id);
 /* The style's optional 12x14 Library-grid cell image. */
 const char *CardLayout_LibraryIconPath(int card_id);
 

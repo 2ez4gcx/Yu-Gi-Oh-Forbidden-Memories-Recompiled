@@ -262,8 +262,7 @@ void func_80016784(DisplayObject *object, s32 arg1, s32 arg2, s32 arg3) {
                      * always real VRAM; not for a style's own hand_image, in
                      * its own bank at 8bpp, whose bank and depth bits that
                      * mask silently drops -- the same limit func_80029EC4.c's
-                     * Library icon and display_object_render_sprite_sheet.c's
-                     * menu icon hit. Submitted as its own textured quad
+                     * Library icon hits. Submitted as its own textured quad
                      * instead (not through `k`, whose scratchpad address always
                      * has DisplayObject_SubmitPacket's own 0x04000000
                      * "projected" bit set, which would misroute a case-5-style

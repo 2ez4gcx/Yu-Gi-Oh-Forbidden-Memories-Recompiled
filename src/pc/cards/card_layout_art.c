@@ -398,68 +398,6 @@ int CardLayoutArt_BackCell(int card_id, int *tpage, int *u, int *v, int *clut, i
     return 1;
 }
 
-#define MENU_SIDE 16
-#define MENU_PAGE_X 384
-#define MENU_PAGE_Y 256
-#define MENU_CLUT_Y (MENU_PAGE_Y + MENU_SIDE + 1)  /* +1: row MENU_PAGE_Y + MENU_SIDE is the padded bottom edge */
-static char menu_path[1024];
-static char menu_bank_path[1024];
-static unsigned char *menu_indices;
-static unsigned short menu_clut[256];
-static int menu_png_w, menu_png_h;
-
-static void menu_build(const char *path)
-{
-    char why[128];
-
-    if (!strcmp(menu_path, path)) return;
-    free(menu_indices);
-    menu_indices = NULL;
-    menu_png_w = menu_png_h = 0;
-    menu_bank_path[0] = 0;
-    snprintf(menu_path, sizeof(menu_path), "%s", path);
-    CardArt_ImageSize(path, &menu_png_w, &menu_png_h);
-    menu_indices = malloc(MENU_SIDE * MENU_SIDE);
-    if (menu_indices && !CardArt_IndexedImage(path, MENU_SIDE, MENU_SIDE, menu_indices, menu_clut, why, sizeof(why))) {
-        LOG(LOG_CARD_LAYOUT, "menu icon: %s: %s", path, why);
-        free(menu_indices);
-        menu_indices = NULL;
-    }
-    if (menu_indices && menu_png_w > 0) TexturePack_BankImagePreload(path);
-}
-
-int CardLayoutArt_MenuIconCell(int card_id, int *tpage, int *u, int *v, int *clut, int *w, int *h)
-{
-    const char *path = CardLayout_MenuIconPath(card_id);
-    uint16_t *bank;
-    int x, y;
-
-    if (!path || !*path || !(bank = SoftGpu_Bank(FRAME_BANK))) return 0;
-    menu_build(path);
-    if (!menu_indices) return 0;
-    if (strcmp(menu_bank_path, path)) {
-        for (y = 0; y < MENU_SIDE; y++) {
-            for (x = 0; x < MENU_SIDE; x += 2) {
-                bank[(MENU_PAGE_Y + y) * SOFT_GPU_WIDTH + MENU_PAGE_X + x / 2] =
-                    (uint16_t)(menu_indices[y * MENU_SIDE + x] | (menu_indices[y * MENU_SIDE + x + 1] << 8));
-            }
-        }
-        bank_pad_edge(bank, MENU_PAGE_X, MENU_PAGE_Y, MENU_SIDE, MENU_SIDE);
-        memcpy(&bank[MENU_CLUT_Y * SOFT_GPU_WIDTH + MENU_PAGE_X], menu_clut, sizeof(menu_clut));
-        snprintf(menu_bank_path, sizeof(menu_bank_path), "%s", path);
-        if (menu_png_w > 0 && menu_png_h > 0) {
-            TexturePack_BankSpritesUseOwner(TEXTURE_BANK_OWNER_LAYOUT_FRAME);
-            TexturePack_AddBankSprite(FRAME_BANK, MENU_PAGE_X, MENU_PAGE_Y, 1, MENU_PAGE_X, MENU_CLUT_Y,
-                                      0, 0, MENU_SIDE, MENU_SIDE, path);
-        }
-    }
-    *tpage = LAYOUT_TPAGE(MENU_PAGE_X, MENU_PAGE_Y);
-    *u = *v = 0;
-    *clut = (MENU_CLUT_Y << 6) | (MENU_PAGE_X / 16);
-    *w = *h = MENU_SIDE;
-    return 1;
-}
-
 #define LIBRARY_W 12
 #define LIBRARY_H 14
 #define LIBRARY_PAGE_X 640
@@ -755,7 +693,6 @@ int CardLayoutArt_DigitCell(int digit, int dim, int *tpage, int *u, int *v, int 
 
 /* Bank 13 lower-half allocation (all coordinates are halfwords):
  *
- *   menu       pixels 384..391, y256..272; CLUT 384..639, y273
  *   title      pixels 640..687, y256..269; CLUT 640..895, y270
  *   library    pixels 640..645, y280..294; CLUT 640..895, y295
  *   field      pixels 384..409, y300..360; CLUT 384..639, y361
@@ -964,7 +901,6 @@ static void layout_bank_registrations_lost(void)
     field_bank_path[0] = 0;
     field_back_bank_path[0] = 0;
     back_bank_path[0] = 0;
-    menu_bank_path[0] = 0;
     library_bank_path[0] = 0;
     bank_path[0] = 0;
     digits_bank_path[0] = 0;

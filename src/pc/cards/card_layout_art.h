@@ -55,9 +55,6 @@ int CardLayoutArt_FieldBackCell(int card_id, int *tpage, int *u, int *v, int *cl
  * stays). 0 leaves retail's own swirl sprite alone. */
 int CardLayoutArt_BackCell(int card_id, int *tpage, int *u, int *v, int *clut, int *w, int *h);
 
-/* The current style's optional 16x16 Build Deck/Trade type icon. */
-int CardLayoutArt_MenuIconCell(int card_id, int *tpage, int *u, int *v, int *clut, int *w, int *h);
-
 /* The current style's optional 12x14 Library-grid cell. */
 int CardLayoutArt_LibraryIconCell(int card_id, int *tpage, int *u, int *v, int *clut, int *w, int *h);
 

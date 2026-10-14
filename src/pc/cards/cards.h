@@ -122,11 +122,24 @@ int Cards_Fusion(int a, int b, int *result);
 struct JsonValue;
 int Cards_Reference(const struct JsonValue *value);
 int Cards_Named(const char *text);
-/* A monster type by name ("Winged Beast"), or -1; and the type of a card. */
+/* A type by name ("Winged Beast"), or -1; and the type of a card.  Mods may
+ * rename any retail type and declare new monster types in unused encodings
+ * 24-255 through their "card_types" section. */
 int Cards_TypeNamed(const char *text);
+const char *Cards_TypeName(int type);
+/* The full PNG path a mod declares for a custom type's marker, or NULL.
+ * Retail types deliberately return NULL: their icons remain the disc/HD-pack
+ * assets rather than becoming global replacements. */
+const char *Cards_TypeIcon(int type);
+/* A mod's own name for the type, glyph-encoded (0xFF-terminated) for the
+ * card view's text stream (func_80037DA4): a custom type's, or a retail
+ * type's a mod renamed. NULL where the disc's own spelling stands.
+ * Cards_TypeName's UTF-8 is not the game's own glyph codes. */
+const unsigned char *Cards_TypeNameText(int type);
+int Cards_IsMonsterType(int type);
 int Cards_Type(int id);
-/* An attribute by name ("Light", "Dark", "Earth", "Water", "Fire",
- * "Wind"), 0-5, or -1; and the attribute of a card. */
+/* An attribute by name (the six retail ones or one a mod's "attributes"
+ * declares), its id (0-5 or 8-255), or -1; and the attribute of a card. */
 int Cards_AttributeNamed(const char *text);
 int Cards_Attribute(int id);
 /* A monster's printed level (the number of stars), or -1 for no card. */

@@ -64,6 +64,19 @@ unsigned short gDuel_awPlayerDeck[0x600];
 /* Which page of forty the grid is showing, for Duelists_AtCell. */
 int gFreeDuel_nPage;
 
+/* The tower (pc/tower/tower.h): which floors the save has won, and which
+ * duelists those floors let out. */
+static int tower_floors_won;    /* floors 1..n won; the whole tower when -1 */
+static int tower_frees;         /* the duelist a won floor names, 0 none */
+int Tower_ConditionMet(int floor)
+{
+    if (floor <= 0) return tower_floors_won < 0;
+    return tower_floors_won < 0 || floor <= tower_floors_won;
+}
+int Tower_FreesDuelist(int duelist) { return duelist == tower_frees; }
+static int tower_opens;         /* the duelist a won floor unlocks outright, 0 none */
+int Tower_OpensDuelist(int duelist) { return duelist == tower_opens; }
+
 static int story_flag;          /* the one flag the cases test */
 static int cards_named;         /* what Cards_Named answers */
 int Campaign_TestStoryFlag(int flag) { return flag == story_flag; }
@@ -329,6 +342,51 @@ int main(void)
     wins(8, 1);
     assert(Duelists_Unlocked(save, 38));
     assert(!Duelists_HasUnlock(37) && Duelists_Unlocked(save, 37));
+
+    /* The tower's condition: a floor won, or the whole tower with true. */
+    build("{\"duelists\":[{\"id\":\"x\",\"copy\":\"Heishin\",\"unlock\":{\"tower\":2}},"
+          "{\"id\":\"y\",\"copy\":\"Teana\",\"unlock\":{\"tower\":true}}]}", NULL);
+    memset(save, 0, sizeof save);
+    tower_floors_won = 0;
+    assert(Duelists_HasUnlock(40) && !Duelists_Unlocked(save, 40) && !Duelists_Unlocked(save, 41));
+    tower_floors_won = 2;
+    assert(Duelists_Unlocked(save, 40) && !Duelists_Unlocked(save, 41));
+    tower_floors_won = -1;
+    assert(Duelists_Unlocked(save, 41));
+    assert(notes == 0);
+    /* A duelist of the tower's alone: off the grid until a won floor names
+     * it, whatever else its unlock says, which must hold too. */
+    build("{\"duelists\":[{\"id\":\"x\",\"copy\":\"Heishin\",\"tower_only\":true},"
+          "{\"id\":\"y\",\"copy\":\"Teana\",\"tower_only\":true,\"unlock\":{\"beat\":\"Simon Muran\"}}]}",
+          NULL);
+    memset(save, 0, sizeof save);
+    tower_frees = 0;
+    tower_floors_won = 0;
+    assert(Duelists_HasUnlock(40) && !Duelists_Unlocked(save, 40) && !Duelists_Unlocked(save, 41));
+    tower_frees = 40;
+    assert(Duelists_Unlocked(save, 40) && !Duelists_Unlocked(save, 41));
+    tower_frees = 41;
+    assert(!Duelists_Unlocked(save, 41));      /* freed, but Simon not beaten */
+    wins(1, 1);
+    assert(Duelists_Unlocked(save, 41));
+    tower_frees = 0;
+    /* An added duelist with conditions of its own, not the tower's alone: a
+     * floor that unlocks it outright opens it whatever they say. */
+    build("{\"duelists\":[{\"id\":\"x\",\"copy\":\"Heishin\",\"unlock\":{\"beat\":\"Seto\",\"wins\":3}}]}", NULL);
+    memset(save, 0, sizeof save);
+    assert(!Duelists_Unlocked(save, 40));
+    tower_opens = 40;
+    assert(Duelists_Unlocked(save, 40));
+    tower_opens = 0;
+    /* Written wrong: "tower" a word, tower_only in quotes, and on a stock
+     * duelist, which keeps its campaign; each noted and left out. */
+    build("{\"duelists\":[{\"id\":\"x\",\"copy\":\"Heishin\",\"unlock\":{\"tower\":\"top\"}},"
+          "{\"id\":\"y\",\"copy\":\"Teana\",\"tower_only\":\"true\"},"
+          "{\"replace\":\"Nitemare\",\"tower_only\":true}]}", NULL);
+    assert(notes == 4);   /* the tower word, then the unlock with no condition left, the quotes, the stock one */
+    assert(!Duelists_HasUnlock(40) && !Duelists_HasUnlock(41) && !Duelists_HasUnlock(38));
+    memset(save, 0, sizeof save);
+    assert(Duelists_Unlocked(save, 40) && Duelists_Unlocked(save, 41));
 
     /* What a mod got wrong is left out, not guessed at. */
     build("{\"duelists\":[{\"id\":\"a\",\"copy\":\"Nobody\"},{\"id\":\"b\",\"copy\":\"Heishin\",\"slot\":3},"

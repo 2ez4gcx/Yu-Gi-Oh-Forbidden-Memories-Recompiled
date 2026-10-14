@@ -8,6 +8,7 @@
 #include "pc/mods/json.h"
 #include "pc/mods/mods.h"
 #include "paths.h"
+#include "pc/tower/tower.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -204,12 +205,12 @@ static void read_image(const char *mod, const char *directory, const char *where
     if (image->height < 0 || image->height > 240) image->height = 0;
 }
 
-static const char *const action_names[] = {"back", "notice", "quit", "debug_menu", "event", "none"};
+static const char *const action_names[] = {"back", "notice", "quit", "debug_menu", "event", "none", "tower"};
 
 const char *TitleConfig_ActionName(int action)
 {
     if (action >= 0 && action < TITLE_ENTRIES) return TitleConfig_EntryNames[action];
-    if (action >= TITLE_ACTION_BACK && action <= TITLE_ACTION_NONE) return action_names[action - TITLE_ACTION_BACK];
+    if (action >= TITLE_ACTION_BACK && action <= TITLE_ACTION_TOWER) return action_names[action - TITLE_ACTION_BACK];
     return "its own";
 }
 
@@ -257,7 +258,8 @@ static void read_item(const char *mod, const char *directory, const JsonValue *p
         const char *name = Json_String(value, "");
         int action = action_index(name);
         if (action == -2)
-            Mods_Note(mod, "%s: %s: no action \"%s\" (an entry's name, back, notice, quit, debug_menu, event or none)",
+            Mods_Note(mod, "%s: %s: no action \"%s\" (an entry's name, back, notice, quit, debug_menu, event, none "
+                           "or tower)",
                       reading, item->name, name);
         else item->action = action;
     }
@@ -573,9 +575,32 @@ static void read_menu(const char *mod, const char *directory, const JsonValue *m
     only(mod, "", menu, known, sizeof(known) / sizeof(known[0]));
 }
 
+/* The tower's button (pc/tower/tower.h), made for the mod whose tower the
+ * run has before its "menu" is read, so the mod can move it, give it a
+ * picture or put it in its "order" by "tower". */
+static void tower_button(const char *mod)
+{
+    TitleItem *item;
+    int i;
+    if (!Tower_Mod() || strcmp(mod, Tower_Mod()) || item_index(mod, "tower") >= 0) return;
+    for (i = TITLE_ENTRIES; i < TITLE_ITEMS && config.items[i].used; i++) {}
+    if (i == TITLE_ITEMS) {
+        Mods_Note(mod, "menu: more than %d buttons; the tower's is left out", TITLE_MAX_BUTTONS);
+        return;
+    }
+    item = &config.items[i];
+    item->used = 1;
+    item->menu = 1;
+    item->action = TITLE_ACTION_TOWER;
+    snprintf(item->name, sizeof(item->name), "%s:tower", mod);
+    snprintf(item->mod, sizeof(item->mod), "%s", mod);
+    snprintf(item->label, sizeof(item->label), "%s", Tower_Label());
+}
+
 void TitleConfig_Read(const char *mod, const char *directory, const JsonValue *manifest)
 {
     const JsonValue *title = Json_Member(manifest, "title"), *menu = Json_Member(manifest, "menu");
+    tower_button(mod);
     if (title && Json_TypeOf(title) != JSON_OBJECT)
         Mods_Note(mod, "\"title\" is an object (notes/modding.md, \"The title screen\")");
     else if (title)
@@ -598,6 +623,7 @@ int TitleConfig_Drawn(const TitleItem *item)
  * (campaign to password) are the second's. */
 static int allowed(int action, int menu)
 {
+    if (action == TITLE_ACTION_TOWER) return menu == 1;   /* a save's climb: a game loaded */
     if (action == TITLE_ACTION_OWN || action >= TITLE_ACTION_BACK) return 1;
     if (action == 0 || action == 4) return 1;
     return menu == 0 ? action < TITLE_FIRST_MENU : action >= TITLE_FIRST_MENU;

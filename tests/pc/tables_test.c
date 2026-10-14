@@ -12,7 +12,8 @@ static const char *noted;   /* the mod of the latest note */
 
 /* Cards 1-722 are the disc's, 723-800 copies of card (id - 722). Card 10
  * is "Kuriboh", 11 "Thunder Dragon", 12 "Blue-Eyes White Dragon", 20 an
- * equip "Legendary Sword", 21 a ritual "Black Luster Ritual"; dragons are
+ * equip "Legendary Sword", 21 a ritual "Black Luster Ritual", 30 a monster
+ * of a mod's custom type 255 (cards.c's extended_types bank); dragons are
  * 12 and 13, everything else a warrior. */
 static const char *const named[][2] = {{"Kuriboh", "10"}, {"Thunder Dragon", "11"}, {"Blue-eyes White Dragon", "12"},
                                        {"Legendary Sword", "20"}, {"Black Luster Ritual", "21"}};
@@ -22,10 +23,14 @@ int Cards_EffectId(int id) { return Cards_BaseId(id); }
 int Cards_Type(int id)
 {
     id = Cards_BaseId(id);
-    return id == 20 ? CARD_TYPE_EQUIP : id == 21 ? CARD_TYPE_RITUAL : id == 12 || id == 13 ? 0 : 3;
+    return id == 20 ? CARD_TYPE_EQUIP : id == 21 ? CARD_TYPE_RITUAL : id == 30 ? 255 : id == 12 || id == 13 ? 0 : 3;
 }
 int Cards_RetailType(int id) { return id >= 1 && id <= CARD_COUNT ? Cards_Type(id) : -1; }
-int Cards_TypeNamed(const char *text) { return same_letters(text, "Dragon") ? 0 : same_letters(text, "Warrior") ? 3 : -1; }
+int Cards_TypeNamed(const char *text)
+{
+    return same_letters(text, "Dragon") ? 0 : same_letters(text, "Warrior") ? 3 : same_letters(text, "Cyberse") ? 255 : -1;
+}
+int Cards_IsMonsterType(int type) { return type >= 0 && (type < CARD_TYPE_MAGIC || type > CARD_TYPE_EQUIP); }
 int Cards_FusionGroupNamed(const char *text)
 {
     return same_letters(text, "Female") ? CARD_FUSION_GROUP_FEMALE
@@ -451,6 +456,13 @@ int main(void)
         assert(Tables_TerrainBonus(6, 19, &bonus) && bonus == 0);
         add("q", "{\"terrain_bonus\": {\"4\": {\"Warrior\": 100}, \"Meadow\": {\"Dragon\": -50}}}");
         assert(Tables_TerrainBonus(4, 3, &bonus) && bonus == 100 && Tables_TerrainBonus(4, 0, &bonus) && bonus == -50);
+        /* A mod's custom monster type (cards.c's extended_types bank: 255,
+         * the top of its range) is as good a terrain_bonus key as a
+         * retail type's: TABLE_TYPE_LIMIT covers it, not just the disc's
+         * 20 rows. */
+        add("q2", "{\"terrain_bonus\": {\"Forest\": {\"Cyberse\": 400}}}");
+        assert(Tables_TerrainBonus(1, 255, &bonus) && bonus == 400);
+        assert(!Tables_TerrainBonus(1, 256, &bonus)); /* past CARD_TYPE_LIMIT: refused, not read out of bounds */
     }
 
     /* Equip bonuses: none is the disc's; "bonus" for any monster; the first
@@ -471,6 +483,12 @@ int main(void)
     add("s", "{\"equips\": [{\"card\": 20, \"bonus_if\": {\"Warrior\": -200}}]}");
     assert(Tables_EquipBonus(20, 5, 500) == -200);           /* the later entry fits */
     assert(Tables_EquipBonus(20, 12, 500) == 900);           /* it says nothing of a dragon */
+    /* 30 is a monster of a mod's custom type 255 (cards.c's extended_types
+     * bank): "bonus_if" finds it by that type's own name, the same as any
+     * retail monster's. */
+    add("s2", "{\"equips\": [{\"card\": 20, \"bonus_if\": {\"Cyberse\": 1300}}]}");
+    assert(Tables_EquipBonus(20, 30, 500) == 1300);          /* card 30: a Cyberse monster */
+    assert(Tables_EquipBonus(20, 5, 500) == -200);           /* a Warrior: unaffected */
     add("t", "{\"equips\": [{\"card\": 20, \"bonus\": 0, \"add\": [\"Dragon\"]}]}");
     assert(Tables_EquipBonus(20, 12, 500) == 0 && Tables_Equip(20, 12) == 1);
     /* A default for the equips no entry gives a bonus: Megamorph's +1000 too. */

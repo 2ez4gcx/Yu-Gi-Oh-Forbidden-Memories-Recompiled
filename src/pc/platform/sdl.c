@@ -24,6 +24,7 @@
 #include "pc/audio/spu.h"
 #include "pc/debug/cheats.h"
 #include "pc/cards/cards.h"
+#include "pc/tower/tower.h"
 #include "pc/free_duel/duelists.h"
 #include "pc/cards/fusion_helper.h"
 #include "update_check.h"
@@ -1476,6 +1477,10 @@ static void draw_overlay(int *x, int *y, int *w, int *h)
         *h = layout.win_h;
         return;
     }
+    /* The mods' overlays go under the pad, so a mod's full-screen list does
+     * not hide where to tap; the port's HUD and the menu stay over both.
+     * Without the pad they keep their place in Hud_Draw. */
+    if (TouchPad_Shown()) Hud_DrawMods(&canvas);
     TouchPadArt_Draw(&canvas, &tx, &ty, &tw, &th); /* under the menu and the HUD */
     /* The save and deck slot menus keep between the pad's columns (they are
      * played with the pad), and below the bar while it shows (pushing the
@@ -2829,6 +2834,7 @@ void HERE(Platform_Frame)(unsigned frame)
     Cheats_Frame();
     Cards_Frame();
     Duelists_Frame();
+    Tower_Frame();
     Update_Frame();
     if (Menu_TakeChanged()) menu_dirty = 1;
     if (window) {

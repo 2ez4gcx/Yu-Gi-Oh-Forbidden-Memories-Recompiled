@@ -108,8 +108,8 @@ static int ensure_stack(void)
     if (stack_top) {
         return 0;
     }
-    if (mmap(wanted, STACK_SIZE, PROT_READ | PROT_WRITE, MAP_FIXED_NOREPLACE | MAP_PRIVATE | MAP_ANONYMOUS, -1, 0) !=
-        wanted) {
+    if (Memories_MapFixed(wanted, STACK_SIZE, PROT_READ | PROT_WRITE, MAP_FIXED_NOREPLACE | MAP_PRIVATE | MAP_ANONYMOUS,
+                          -1, 0) != wanted) {
         static uint32_t fallback[STACK_SIZE / 4] __attribute__((aligned(16)));
         fprintf(stderr, "memories-pc: cannot map the overlay stack at 0x%08x; using host memory\n", STACK_BASE);
         stack_top = (uint32_t)(uintptr_t)(fallback + STACK_SIZE / 4) - 16;

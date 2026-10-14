@@ -386,6 +386,40 @@ layout, a slot's details go on lines under its name and the hints wrap
 the box is narrower than them (`centred_words`, `deck_menu.c`); the text
 gets smaller only when even that does not fit.
 
+The mods' overlays (`MemoriesMod.overlay`) are drawn under the pad while it
+shows: `draw_overlay` (`sdl.c`) calls `Hud_DrawMods` first, then
+`TouchPadArt_Draw`, then `Hud_Draw` (which leaves the mods out that frame
+and still counts their rectangle in `Hud_Bounds`) and `Menu_Draw`. A mod's
+full-screen panel (a drop list on Triangle, say) used to cover the pad, so
+the player could not see where to tap; the pad's touches always reached it
+(`TouchPad_Finger` runs in the event pump, and mods take no touch). So,
+with the pad, the order from the bottom is: picture, mods, pad, then the
+HUD (frame rate, fusion helper, rank meter, Free Duel progress, title
+text) with the save/deck slot menus over it, and the menu bar (over the
+HUD while a menu is open or the full statistics show, under it otherwise,
+as before). Without the pad (`TouchPad_Shown` 0: a desktop unless View >
+Touch controls is Show, or Automatic after a touch on a touch screen) the
+mods keep their place in `Hud_Draw`,
+over the HUD and under the slot menus: window shots of the 32-bit build
+with a full-screen test overlay at the title (`MEMORIES_WINDOW_SHOT`,
+deterministic, stepped by `yfm_control.py`) are byte-identical to
+origin/master's with the HUD off, and differ only in the frame-rate digits
+with `MEMORIES_SHOW_HUD=1` (the mod over the box, as before). The x11
+backend has no touch pad and is unchanged.
+
+**Touch pad's free span (proposed, not done).** `TouchPad_FreeSpan(&left,
+&right)` gives the columns between the pad's two sides, which the save and
+deck slot menus keep to (`Menu_SetOverlayArea`). A mod has no such call,
+so its panel either spans the pad (now under it, the buttons see-through
+over it) or guesses. A host entry at the end of `MemoriesModHost` (a new
+API number), `overlay_free_span(host, &left, &right)`, valid inside the
+overlay callback and giving the whole width when the pad is hidden, would
+let a mod lay out between the pad's columns. The pad showing, hiding or
+moving already recomposes the overlay (`menu_dirty`), which runs every
+overlay callback again, so the span read there is always current; only a
+mod that keeps a layout worked out outside the callback would need to
+watch it.
+
 Esc quits (it closes an open menu first): it is the default key of Game >
 Controls' **Exit game**. With **File > Confirm before quitting** on (the
 default) it asks "Quit the game?" first: Quit or Keep playing, Keep playing
@@ -1276,7 +1310,9 @@ second at fewer game frames.
 
 The HUD (F3) shows game frames a second and shown frames a second; with
 `MEMORIES_TRACE=frames` the same appears every 120 frames with the clock
-rate, VBlank rate and sequencer rate.
+rate, VBlank rate and sequencer rate, and the spread of the time between
+two `VSync(0)` returns (`frame interval`); every 600 VBlanks how late they
+came against when they were due (`VBlank lateness`).
 
 **Software OpenGL on Wayland.** The 32-bit build on an NVIDIA Wayland
 desktop gets Mesa's `llvmpipe` through EGL (there is no 32-bit NVIDIA EGL
@@ -1303,13 +1339,43 @@ profiler takes its samples from that timer, so `MEMORIES_PROFILE` without
 `MEMORIES_CLOCK` chooses it too, and the log says so. The console's interrupt
 work (the VBlank callback, the sequencer's root counter, disc delivery,
 MDEC, memory card) is run on the main thread where the game calls in to
-wait or to read the time: every `VSync`, `Platform_WaitVBlank` (which wakes
-every 0.5 ms and runs what is due) and `Platform_PollTime`. The game's
+wait or to read the time: every `VSync`, `Platform_WaitVBlank` (which sleeps
+between services and runs what is due; see "The wait's sleeps" below) and
+`Platform_PollTime`. The game's
 interrupt code therefore never runs in the middle of anything, which is what
 the SIGALRM holds and, on Windows, the suspend-and-redirect clock thread and
 its repairs exist for; in this mode that thread only watches for stalls.
 It is the model the deterministic runs (the smoke fixtures) have always used,
 with real time instead of synthetic steps.
+
+The watching thread (`Win32_StartWatch`) has no 1 ms timer: it waits on its
+stop event for 100 ms at a time, checks the heartbeat and goes back to
+sleep, at `THREAD_PRIORITY_HIGHEST`, which is above the main thread's and
+so still runs while the main thread spins. Until 2026-10-11 it kept the
+interrupt clock's 1 ms high-resolution timer at `TIME_CRITICAL` and only
+skipped the tick, waking about 700 times a second for nothing. Measured in a
+duel on Windows (60 s of real-time VBlanks through `tools/pc/yfm_control.py`,
+two to five runs of each; thread figures from `NtQuerySystemInformation`):
+
+| build | watch thread before | after | process context switches/s, before / after |
+|---|---|---|---|
+| 32-bit | 695-698 wakeups/s, 3.4-5.0 ms CPU/s, priority 15 | 10.0/s, under 0.3 ms CPU/s | 1254-1322 / 505-747 |
+| 64-bit | 694-698 wakeups/s, 2.5-6.4 ms CPU/s, priority 15 | 9.9-10.0/s, under 0.3 ms CPU/s | 1171-1292 / 539-810 |
+
+A stall is still reported about 5 s after the last VSync
+(`MEMORIES_CRASH_TEST=hang` and `spin`, both builds, `hang-<pid>.txt` and
+`.dmp`): 5.06-5.11 s against 4.99-5.01 s before, at most about two
+periods (0.2 s) later.
+Frame pacing does not depend on that timer: `Platform_WaitVBlank`'s 0.5 ms
+`nanosleep` returns at once with winpthreads (it sleeps whole milliseconds,
+rounded down), so the main thread polls the time; and an armed 1 ms
+high-resolution timer does not change what a `nanosleep` sleeps (checked in
+a test program: 2 ms sleeps took 15.7 ms with or without one). VBlanks
+stayed at 59.94 a second and the sequencer's mean lateness at 52-175 us
+either way (the worst single values are the busy machine's).
+`MEMORIES_CLOCK=interrupt` keeps the 1 ms timer at `TIME_CRITICAL` (its
+thread at about 2600 context switches a second, as before, suspending the
+main thread on each wakeup).
 
 Why it holds: every loop in which the game waits for something its interrupt
 code sets goes through one of those calls (`Main_AdvanceFrame`, the VBlank
@@ -1341,6 +1407,48 @@ the duel cases do not, with either clock, from one real-time run to the
 next: the deck is shuffled from time-dependent state, so the scripted
 presses meet a different hand (checked on the hand camera case: three
 clocks, three hands).
+
+**The wait's sleeps.** Between two services `Platform_WaitVBlank` sleeps.
+On Linux, macOS and Android that is `nanosleep` for 0.5 ms (a little more
+with the kernel's timer slack). On Windows `nanosleep` is winpthreads',
+which counts whole milliseconds: 0.5 ms came out as 0 ms and returned at
+once without even yielding, so until 2026-10-11 the main thread polled the
+clock flat out, a whole core (about 980 ms of CPU a second in a duel, 32-
+and 64-bit alike), and a 1-5 ms `nanosleep` sleeps to the 15.6 ms system
+tick, 10-15 ms late. The Windows wait now naps with a high-resolution
+waitable timer (`Win32_Sleep`; Windows 10 1803 and later, else
+`timeBeginPeriod(1)` and `Sleep`). It asks for at most 0.5 ms, as on Linux,
+since the disc's plain reads (2 sectors a service), its completions and
+the MDEC move a piece at each service; Windows' 0.5 ms timer tick makes
+that about 1 ms. A high-resolution timer wakes 0.3-0.6 ms after the time
+asked, about 1 ms at worst, so the wait does not sleep in the last
+`Win32_SleepMargin` (1 ms; 3 ms on the fallback, where `Sleep(1)` took
+1.0-2.7 ms) before the next VBlank or the sequencer's next tick (`Platform_SetTickDue`, from libetc's
+`run_tick`), and polls through it as before. The virtual clock's pacing in
+a window uses the same sleeps. The interrupt clock still polls.
+
+Measured in a real-time duel (`MEMORIES_TRACE=frames`, the control client
+stepping 3600 VBlanks; five interleaved 60 s runs of each, medians; the
+machine runs Process Lasso, which lowered the polling builds to below
+normal priority in every run):
+
+| build | main thread CPU | process CPU | VBlanks/s | sequencer lateness, mean / worst | VBlank lateness, mean / worst | frame interval deviation | menus to duel |
+|---|---|---|---|---|---|---|---|
+| 32-bit, polling | 978 ms/s | 102% of a core | 59.94 | 91 us / 8.4 ms | 4 us / 3.8 ms | 184 us | 17.3 s |
+| 32-bit, sleeping | 208 ms/s | 24% | 59.94 | 105 us / 4.3 ms | 25 us / 7.7 ms | 179 us | 17.2 s |
+| 64-bit, polling | 968 ms/s | 101% | 59.94 | 89 us / 23 ms | 47 us / 43 ms | 396 us | 17.2 s |
+| 64-bit, sleeping | 187 ms/s | 23% | 59.94 | 83 us / 3.7 ms | 11 us / 2.0 ms | 101 us | 17.2 s |
+
+The worst cases on both sides are the machine's stalls (a present or a
+game frame of 50-450 ms, in the log as `spike`); in the quietest runs a
+sleeping build's worst VBlank was under 1 ms. The sound is mixed on SDL's
+audio thread, apart from the wait; the HUD's underrun count came out the
+same in a 60 s duel run of each build (one about every 2 s, with polling
+and with sleeping, 32- and 64-bit), and so did the audio queue (2.8-3 ms).
+Loads did not slow: the control client's jumps to Library, Build Deck, the
+map, the title and a duel, and the duel's deal, took the same VBlanks with
+either wait (377, 184, 184, 2, 132 and 688, within a frame or ten), two
+real-time runs of each build.
 
 Not yet: Linux has only been compiled with it (its stall reports come from
 the crash monitor process, since no tick runs); the sampling profiler
@@ -3120,6 +3228,25 @@ in place of the 32-bit one, and the same mod SDK ("Mod SDK M1" below). Where its
 or later), `package.py` with no arguments skips it with a message and packs
 the other two; `package.py windows-x64` stops instead.
 
+Every archive's SDK carries the export list of each mod target
+(`sdk/exports.i386.txt`, `exports.x86_64-windows.txt`, `exports.aarch64.txt`,
+and `exports.txt`, the i386 one under its old name, in the 32-bit ones), so
+its `build_mod.py` checks every object it builds. A game build writes only
+its own target's list, with `<build>/source` (the commit, and a digest of
+uncommitted changes); `package.py` builds every system it packs before it
+packs any, and takes each other target's list from that target's build in
+`tmp/pc` (`win32` or `game32`, `win64`, `android-arm64-v8a`) or from a
+folder `--exports-from` names, only when its `source` is this build's. It
+stops, naming what to build, when one is missing (before building
+anything) or from another tree (after the builds). So before packing, build
+the Android game once per commit (`build_game32.py --target
+android-arm64-v8a --release`); where the 64-bit Windows game is skipped,
+its list must come from a build of the same tree too. The release workflow builds the arm64
+game in its `android` job and the 64-bit Windows game in `sdk-exports-x64`,
+and hands their lists to the `package` jobs. `test_package.py` refuses an
+archive whose SDK lacks one, or whose lists differ from another archive's
+packed with it.
+
 ### Crash reports
 
 The executable runs the game as its own child and stays as its monitor
@@ -3261,7 +3388,10 @@ What differs from Linux, and why:
   to the interrupted instruction. Code outside the executable (C runtime,
   SDL, drivers) is never interrupted; a tick missed there is taken by
   `Win32_ServiceInterrupt` from `Platform_WaitVBlank`. `pc/compat/signal.h`
-  maps `sigprocmask`/`pthread_sigmask` on SIGALRM to that hold flag.
+  maps `sigprocmask`/`pthread_sigmask` on SIGALRM to that hold flag. That
+  is the interrupt clock (`MEMORIES_CLOCK=interrupt`); with the default,
+  cooperative one the thread only watches for stalls, ten times a second
+  ("Cooperative clock").
 - **Faults.** A vectored exception handler in `image.c` does what the
   SIGSEGV/SIGTRAP handlers do (guest-call redirect, low-address fixup); the
   guest-call redirect is the second net behind the branch thunks, since it
@@ -4461,11 +4591,93 @@ are where it would show (a fault at a truncated address).
 
 **The guest's own ranges have the same limit:** guest RAM at 0x80000000
 (and its mirror at 0xA0000000), the scratchpad view at 0x9F800000 and the
-game stack at 0xB0000000 must be free, and with Android 10-13's concurrent
-copying collector a `dalvik.vm.heapsize` of about 870m or more reaches
-0x80000000. The game then stops with "cannot map guest memory at ...", the
-reason, and the mappings that hold the range ("occupied by", in logcat);
-it does not run elsewhere.
+game stack at 0xB0000000 must be free. The game then stops; it does not run
+elsewhere.
+
+**Where ART's concurrent copying collector runs, its large object space
+holds guest RAM (v0.3.0, a Redmi Note 8 Pro with Android 10, 2026-10-11).**
+The heap is laid out once, in the zygote, and every app process inherits
+it. On arm64 ART places its low-4-GB mappings itself (`MemMap`'s low 4 GB
+allocator, a first-fit scan from a random start below 1 GB that goes on
+up to 4 GB) and its large object space is one free-list reservation of
+`dalvik.vm.heapsize` bytes, made after the heap proper (AOSP
+`runtime/gc/heap.cc`, `heap.h`'s `kDefaultLargeObjectSpaceType`, the same
+from Android 7 to 14). With the concurrent copying collector (the default
+from Android 8; Android 7's CMS has the same two-capacity layout) the
+region space is reserved at twice the heap size from 0x12C00000, so with
+the usual `heapsize` of 512m (`phone-xhdpi-*-dalvik-heap.mk`) it ends
+near 0x52C00000, the 484 MiB or less left before the boot image
+(0x70000000 with up to 16 MiB of random shift either way) cannot take
+512 MiB, and the large object space goes right after the boot image and
+the non-moving space, over 0x80000000 and 0x90000000, on every start of
+such a phone (a heap size of about 450m or less fits below, and where it
+then goes depends on the scan's random start). AOSP's own arm64 sample of
+an app's maps (`system/libprocinfo/testdata/maps`) shows that resulting
+layout, though from a smaller region space (0x12C00000-0x2AC00000): the
+512 MiB large object space at 0x77B8B000-0x97B8B000, after the
+non-moving space, and the JIT caches after it to 0x9BB8B000. The Xiaomi 11T Pro above has
+ART code from android-16 on (an updated ART module), which starts the heap
+at 0x02000000 instead of 0x12C00000: its layout is exactly the concurrent
+copying collector's at that base (a region space of twice 512m to
+0x42000000 in the zygote, clamped to twice the 256m growth limit in the
+app, which leaves 0x22000000-0x42000000 a hole), so the large object space
+fits below the boot image (0x42000000) and the game runs. Whether that
+phone uses the userfaultfd collector is not shown; it would fit too. So the
+phones in question are the ones whose ART is older than android-16's and
+runs the concurrent copying or CMS collector, with a heap size of about
+450m or more (the JIT caches, 128 MiB in an app from Android 11, can take
+the range from about 450m; the large object space always does from about
+503m; 512m is the usual value): Android 7 to 11 (the ART module never
+updates there), and 12 to 15 without ART module updates (no Play system
+updates, e.g. HarmonyOS) or where the module runs concurrent copying
+because the kernel lacks the userfaultfd features. The x86_64 emulator does not show it
+(x86_64 ART maps with `MAP_32BIT` and a map-per-object large object
+space), so the layout is known from ART's source and that sample, and is
+to be confirmed by a player's report (below). Nothing in the app comes
+before the zygote's heap, and the game's addresses are linked in: the
+ways out are a game process that is not the zygote's child (a native
+process for the game, with the picture and input carried to the app) or
+a guest that is not at fixed addresses.
+
+**Kernels before 4.17 do not know `MAP_FIXED_NOREPLACE`** (Android 7-10
+phones: 3.18, 4.4, 4.9, 4.14) and take the address as a hint: a free range
+is given as asked, a taken one goes wherever the kernel puts it (in a
+64-bit app top-down from below the stack, far above 4 GB, so never onto
+another fixed range). Every fixed mapping that must not replace anything
+(the guest's ranges and views, the stacks, the low memory region, the
+text arena, mod arenas and images, the loader's reservation; not the code
+mod loader's map over its own held range, nor the kernel probe) goes
+through `Memories_MapFixed` (`compat/mman.h`), which undoes such a mapping and
+answers EEXIST as a newer kernel does; it never checks the range and then
+maps with `MAP_FIXED`, since ART's own threads map below 4 GB in between.
+On such a kernel the message read "the system placed them elsewhere";
+the occupant was the same. `Memories_KernelRefusesTakenRange` (`image.c`)
+probes which kernel this is, for the report.
+
+**What the player sees.** When guest memory cannot be mapped, the app
+shows "The game cannot start" in the system's message box: who holds the
+range (Android's Java runtime when the holder is a `dalvik-` mapping),
+the range, the phone's model, Android and kernel versions, the heap size
+and the first holder, short enough to fit with its buttons in landscape
+(the box does not scroll). Share and Save to Downloads hand out a
+start-up report (`Android_OfferStartupReport`, `android_report.c`; the
+same ReportProvider and MediaStore paths as the crash report, the box
+coming back after each so the process that serves the file stays):
+the app's version, the device, the failed step, the kernel and whether
+it knows `MAP_FIXED_NOREPLACE`, `dalvik.vm.heapsize`, `heapgrowthlimit`
+and `ro.dalvik.vm.enable_uffd_gc`, the holders, and every mapping of the
+process below 4 GB. The loader's own refusal (0xC0000000 taken) puts the
+device and the first two holders in its message the same way. In a test
+build, `MEMORIES_TEST_HOLD_GUEST=1` (or an address) holds 2 MiB at
+0x80000000 named as ART's large object space, and
+`MEMORIES_TEST_OLD_KERNEL=1` drops the flag from the game's own fixed
+mappings as a kernel before 4.17 does (both through `environment.txt` in
+the app; the loader runs before that file is read and is built without
+test hooks, so its reservation keeps the flag). A scripted or headless
+run gets no box with buttons: the message goes to the error box (and the
+log) with "send a screenshot" instead. On Linux -m32 the replays
+first-duel, mod-3d-monsters and mod-hand-camera match with
+`--env MEMORIES_TEST_OLD_KERNEL=1`.
 
 **The retail scratchpad is never used in the app.** 0x1F800000 lies inside
 ART's heap there (the port says "0x1f800000 is taken here; the scratchpad

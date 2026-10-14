@@ -27,6 +27,11 @@ typedef struct {
 } CardDropsState;
 extern CardDropsState gCardDrops;
 
+/* The cards a won duel deals: a mod's lock, "limits": {"card_drops": n}
+ * (tables.h Tables_CardDropsLock), over the player's Game > Card drops,
+ * which stays saved as it was for when the mod is gone; 1 to
+ * CARD_DROPS_MAX. */
+int CardDrops_Count(void);
 /* The results screen opens: nothing dealt yet. */
 void CardDrops_Begin(void);
 /* The duel's drop from table `pool`, as Duel_SelectCardDrop: the card

@@ -6,6 +6,17 @@ from pathlib import Path, PurePosixPath
 import tarfile
 import zipfile
 
+# build_mod.py's targets: each has its export list in every SDK.
+TARGETS = ("i386", "x86_64-windows", "aarch64")
+
+
+def read_member(path, name):
+    if path.suffix == ".zip":
+        with zipfile.ZipFile(path) as archive:
+            return archive.read(name).decode()
+    with tarfile.open(path) as archive:
+        return archive.extractfile(name).read().decode()
+
 
 def check_exe(image):
     """The shipped .exe: stripped (tools/pc/package.py strip) and with a
@@ -91,8 +102,18 @@ def check(path):
     objects = [name for name in contents if name.startswith("mods/") and name.endswith(".o")]
     ours = [name for name in objects if name.endswith(".x86_64-windows.o") == wide and not name.endswith(".aarch64.o")]
     assert objects and ours == objects, f"mods/ has another target's objects: {sorted(set(objects) - set(ours))}"
-    exports = "sdk/exports.x86_64-windows.txt" if wide else "sdk/exports.i386.txt"
-    assert exports in contents, f"missing {exports}"
+    # The SDK's export lists: one per target build_mod.py builds for, so it
+    # checks every object it makes (tools/pc/package.py), and for a 32-bit
+    # game also exports.txt, the i386 list under the name SDKs had before.
+    lists = {f"sdk/exports.{target}.txt" for target in TARGETS}
+    if not wide:
+        lists.add("sdk/exports.txt")
+    assert lists <= contents, f"the SDK lacks export lists: {sorted(lists - contents)}"
+    assert {name for name in contents if name.startswith("sdk/exports")} == lists, "the SDK has other export lists"
+    shipped = {name: read_member(path, f"{next(iter(roots))}/{name}") for name in sorted(lists)}
+    assert all(len(text.split()) > 1000 for text in shipped.values()), "an SDK export list is (nearly) empty"
+    if not wide:
+        assert shipped["sdk/exports.txt"] == shipped["sdk/exports.i386.txt"], "exports.txt is not the i386 list"
     languages = {f"languages/{name}.txt" for name in ("en-eu", "fr", "de", "it", "es")}
     assert {name for name in contents if name.startswith("languages/")} == languages, "languages/ needs the five packs"
     assert {name for name in contents if name.startswith("game/")} == {"game/README.txt"}
@@ -101,6 +122,7 @@ def check(path):
                    PurePosixPath(name).suffix.lower() in {".bin", ".cue", ".iso", ".chd", ".mcr"}
                    for name in contents), "archive contains personal or disc data"
     print(f"{path.name}: layout passed ({len(contents)} files)")
+    return shipped
 
 
 def main():
@@ -109,9 +131,20 @@ def main():
     args = parser.parse_args()
     archives = sorted(args.archives.glob("*.zip")) + sorted(args.archives.glob("*.tar.gz"))
     assert archives, "no release archives found"
-    for path in archives:
-        check(path)
-
+    sdks = {path: check(path) for path in archives}
+    # A target's list is one build's (tools/pc/package.py), the same in every
+    # archive of one version; the i386 one is each system's own, the same in
+    # both Windows archives.
+    def release(path):
+        return next(path.name[:len(path.name) - len(end)] for end in
+                    ("-windows-x64.zip", "-windows.zip", "-linux.tar.gz", "") if path.name.endswith(end))
+    for target in TARGETS:
+        name = f"sdk/exports.{target}.txt"
+        for version in {release(path) for path in sdks}:
+            group = [path for path in sdks if release(path) == version and (target != "i386" or path.suffix == ".zip")]
+            for path in group[1:]:
+                assert sdks[path][name] == sdks[group[0]][name], \
+                    f"{name} differs between {group[0].name} and {path.name}"
 
 if __name__ == "__main__":
     main()

@@ -58,11 +58,14 @@
 #include <linux/ashmem.h>
 #include <pthread.h>
 #include <signal.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
 #include <sys/syscall.h>
+#include <sys/system_properties.h>
+#include <sys/utsname.h>
 #include <unistd.h>
 #include <jni.h>
 #include "pc/guest/state.h"
@@ -472,6 +475,40 @@ static int four_gigabytes(void)
 }
 #endif
 
+/* printf onto a growing text (*text NULL at first; NULL again, and nothing
+ * more added, once memory ran out). */
+static void add_detail(char **text, size_t *used, size_t *room, const char *format, ...)
+{
+    va_list arguments;
+    int length;
+    for (;;) {
+        if (!*text && *used) return; /* out of memory earlier */
+        if (*text) {
+            va_start(arguments, format);
+            length = vsnprintf(*text + *used, *room - *used, format, arguments);
+            va_end(arguments);
+            if (length < 0) return;
+            if ((size_t)length < *room - *used) {
+                *used += (size_t)length;
+                return;
+            }
+        }
+        {
+            size_t wanted = *room ? *room * 2 : 16384;
+            char *grown = realloc(*text, wanted);
+            if (!grown) {
+                free(*text);
+                *text = NULL;
+                *used = 1;
+                return;
+            }
+            if (!*text) grown[0] = '\0';
+            *text = grown;
+            *room = wanted;
+        }
+    }
+}
+
 int Platform_GuestMemoryHelp(char *why, size_t size)
 {
     const char *failed = Memories_GuestMapError();
@@ -486,9 +523,82 @@ int Platform_GuestMemoryHelp(char *why, size_t size)
         return 1;
     }
 #endif
-    snprintf(why, size, "The game could not set up the memory it runs in on this device: %s.\n\n"
-             "Please report it with the app's log (adb logcat -s memories).",
-             *failed ? failed : "the reason is in the log");
+    {
+        /* What the player sees (a screenshot of it is enough to go on) and
+         * the report Share and Save hand out, with the process's mappings
+         * below 4 GB, where the guest's fixed ranges are: who holds them
+         * (an app's Java runtime, notes/pc-build.md "Android arm64") is the
+         * whole question. */
+        const char *occupants = Memories_GuestMapOccupants();
+        char maker[PROP_VALUE_MAX], model[PROP_VALUE_MAX], release[PROP_VALUE_MAX], heap[PROP_VALUE_MAX];
+        char limit[PROP_VALUE_MAX], uffd[PROP_VALUE_MAX], message[900], text[512], range[48], holder[200];
+        char lead[300], facts[480];
+        char version[sizeof(((struct utsname *)0)->release)];
+        struct utsname kernel;
+        int refuses = Memories_KernelRefusesTakenRange(), shown, start_skip = 0, name_at = 0, parsed;
+        unsigned low = 0, high = 0;
+        size_t used = 0, room = 0;
+        char *details = NULL;
+        FILE *maps;
+#define PROPERTY(name, out) (out[0] = '\0', __system_property_get(name, out), out[0] ? out : "?")
+        if (uname(&kernel)) {
+            snprintf(kernel.release, sizeof(kernel.release), "?");
+            snprintf(kernel.machine, sizeof(kernel.machine), "?");
+        }
+        /* Short: the system's box does not scroll in landscape, and its
+         * buttons sit under the text. The kernel's version without its
+         * build suffix; of the first holder ("80000000-80200000 rw-p
+         * [anon:dalvik-free list large object space]") its range and name. */
+        snprintf(version, sizeof(version), "%.*s", (int)strcspn(kernel.release, "-"), kernel.release);
+        parsed = sscanf(failed, "the addresses from 0x%x to 0x%x", &low, &high) == 2;
+        snprintf(range, sizeof(range), "0x%08X-0x%08X", low, high);
+        snprintf(holder, sizeof(holder), "%.*s", (int)strcspn(occupants, "\n"), occupants);
+        if (sscanf(holder, "%*x-%*x%n %*s %n", &start_skip, &name_at) >= 0 && start_skip > 0 && name_at > 0 &&
+            (size_t)name_at < strlen(holder)) {
+            const char *name = holder + name_at;
+            size_t length = strlen(name);
+            if (!strncmp(name, "[anon:", 6) && length > 7 && name[length - 1] == ']') name += 6, length -= 7;
+            snprintf(text, sizeof(text), "%.*s %.*s", start_skip, holder, (int)length, name);
+            snprintf(holder, sizeof(holder), "%s", text);
+        }
+        /* A range that something holds, or another failure (no shared
+         * memory for the game's RAM, a refused mapping), told as it is. */
+        if (parsed && strstr(failed, "already holds"))
+            snprintf(lead, sizeof(lead), "%s already uses memory this game needs (%s).",
+                     strstr(occupants, "dalvik") ? "Android's Java runtime" : "Something else in the app", range);
+        else
+            snprintf(lead, sizeof(lead), "The game could not set up its memory: %s.",
+                     *failed ? failed : "the reason is in the report");
+        snprintf(facts, sizeof(facts), "%s %s, Android %s, Linux %s, heap %s\nHeld by %s",
+                 PROPERTY("ro.product.manufacturer", maker), PROPERTY("ro.product.model", model),
+                 PROPERTY("ro.build.version.release", release), version, PROPERTY("dalvik.vm.heapsize", heap),
+                 holder[0] ? holder : "nothing found there now");
+        snprintf(message, sizeof(message), "%s\nPlease tap Share and send the report to us on Discord or GitHub.\n\n%s",
+                 lead, facts);
+        add_detail(&details, &used, &room, "failed step: %s\n", *failed ? failed : "(none recorded)");
+        add_detail(&details, &used, &room, "kernel: %s %s; MAP_FIXED_NOREPLACE %s\n", kernel.release,
+                   kernel.machine, refuses > 0 ? "known (4.17+)"
+                                   : refuses == 0 ? "not known (before 4.17: taken as a hint)" : "not probed");
+        add_detail(&details, &used, &room, "dalvik.vm.heapsize %s, heapgrowthlimit %s, enable_uffd_gc %s\n", heap,
+                   PROPERTY("dalvik.vm.heapgrowthlimit", limit), PROPERTY("ro.dalvik.vm.enable_uffd_gc", uffd));
+        add_detail(&details, &used, &room, "held by:\n%s", occupants[0] ? occupants : "(nothing found there now)\n");
+        add_detail(&details, &used, &room, "\nthe process's mappings below 4 GB (/proc/self/maps):\n");
+        if ((maps = fopen("/proc/self/maps", "r")) != NULL) {
+            unsigned long long start;
+            while (fgets(text, sizeof(text), maps))
+                if (sscanf(text, "%llx-", &start) == 1 && start < 0x100000000ull)
+                    add_detail(&details, &used, &room, "%s", text);
+            fclose(maps);
+        }
+#undef PROPERTY
+        shown = Android_OfferStartupReport("The game cannot start", message,
+                                           details ? details : "(no memory for the details)");
+        free(details);
+        if (shown) return 0;
+        /* No box with buttons (a scripted run, or none could be shown):
+         * the caller's error box, whose text is all there is. */
+        snprintf(why, size, "%s\nPlease send a screenshot of this to us on Discord or GitHub.\n\n%s", lead, facts);
+    }
     return 1;
 }
 

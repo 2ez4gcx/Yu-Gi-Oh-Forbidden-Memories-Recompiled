@@ -76,6 +76,31 @@ static void write_png(const char *relative, const unsigned char *rgba, int width
     assert(file && fwrite(encoded, 1, size, file) == size && !fclose(file));
 }
 
+static void write_solid_png(const char *relative, unsigned char red, unsigned char green, unsigned char blue)
+{
+    unsigned char pixels[4 * 4 * 4], encoded[512];
+    png_image png = {0};
+    png_alloc_size_t size = sizeof(encoded);
+    char path[1024];
+    FILE *file;
+    int i;
+    for (i = 0; i < 16; i++) {
+        pixels[i * 4] = red;
+        pixels[i * 4 + 1] = green;
+        pixels[i * 4 + 2] = blue;
+        pixels[i * 4 + 3] = 255;
+    }
+    png.version = PNG_IMAGE_VERSION;
+    png.width = png.height = 4;
+    png.format = PNG_FORMAT_RGBA;
+    assert(png_image_write_to_memory(&png, encoded, &size, 0, pixels, 0, NULL));
+    snprintf(path, sizeof(path), "%s/%s", root, relative);
+    file = fopen(path, "wb");
+    assert(file);
+    assert(fwrite(encoded, 1, size, file) == size);
+    assert(!fclose(file));
+}
+
 /* A mod whose settings are named after the catalog's own folders. */
 static int flat_part(const char *setting, void *context)
 {
@@ -480,6 +505,105 @@ static void shared_word(void)
     disc_ready = 0;
 }
 
+/* A wide replacement and one replacement per row describe the same 4x4
+ * upload. A later-loaded pack replaces every covered row, regardless of
+ * whether its entry is wide or one-row specific. */
+static void rank_preference(void)
+{
+    char wide[1024], rows[1024];
+    uint16_t upload[16] = {0};
+    int i, y;
+    make_dir("rank");
+    make_dir("rank/wide");
+    make_dir("rank/rows");
+    write_solid_png("rank/wide/wide.png", 255, 0, 0);
+    for (i = 0; i < 4; i++) {
+        char name[64];
+        snprintf(name, sizeof(name), "rank/rows/row%d.png", i);
+        write_solid_png(name, 0, 255, 0);
+    }
+    write_text("rank/wide/manifest.json",
+               "[{\"file\":\"wide.png\",\"archive\":\"WA_MRG.MRG\",\"offset\":0,\"words\":4,\"rows\":4,\"bpp\":16}]");
+    write_text("rank/rows/manifest.json",
+               "[{\"file\":\"row0.png\",\"archive\":\"WA_MRG.MRG\",\"offset\":0,\"words\":4,\"rows\":1,\"bpp\":16,\"row_offsets\":[0]},"
+               "{\"file\":\"row1.png\",\"archive\":\"WA_MRG.MRG\",\"offset\":8,\"words\":4,\"rows\":1,\"bpp\":16,\"row_offsets\":[0]},"
+               "{\"file\":\"row2.png\",\"archive\":\"WA_MRG.MRG\",\"offset\":16,\"words\":4,\"rows\":1,\"bpp\":16,\"row_offsets\":[0]},"
+               "{\"file\":\"row3.png\",\"archive\":\"WA_MRG.MRG\",\"offset\":24,\"words\":4,\"rows\":1,\"bpp\":16,\"row_offsets\":[0]}]");
+    snprintf(wide, sizeof(wide), "%s/rank/wide", root);
+    snprintf(rows, sizeof(rows), "%s/rank/rows", root);
+    memset(disc, 0, sizeof(disc));
+    memcpy(disc + 2048, upload, sizeof(upload));
+    disc_ready = 1;
+    TextureDump_SetDiscFiles(disc_file);
+
+    /* The later per-row pack wins the offset-zero tie: all rows are green. */
+    assert(TexturePack_Load(wide, 1, NULL, NULL, NULL, 0) == 1);
+    assert(TexturePack_Load(rows, 2, NULL, NULL, NULL, 0) == 4);
+    TexturePack_Service();
+    TextureDump_Delivered(upload, sizeof(upload), 1, 0);
+    SoftGpu_Load(0, 0, 4, 4, upload);
+    TexturePack_Service();
+    for (y = 0; y < 4; y++) assert(*TextureDump_Cell(0, y, 0) == (0x8000 | 0x03e0));
+    TexturePack_Unload();
+
+    /* The later wide pack overrides every earlier per-row replacement. */
+    assert(TexturePack_Load(rows, 1, NULL, NULL, NULL, 0) == 4);
+    assert(TexturePack_Load(wide, 2, NULL, NULL, NULL, 0) == 1);
+    TexturePack_Service();
+    TextureDump_Delivered(upload, sizeof(upload), 1, 0);
+    SoftGpu_Load(0, 0, 4, 4, upload);
+    TexturePack_Service();
+    for (y = 0; y < 4; y++) assert(*TextureDump_Cell(0, y, 0) == (0x8000 | 0x001f));
+    TexturePack_Unload();
+    disc_ready = 0;
+}
+
+/* A later wide image must still override all rows when an earlier pack has
+ * more entries than the former bounded reverse lookup considered. */
+static void large_rank_preference(void)
+{
+    char wide[1024], rows[1024], manifest[32768];
+    uint16_t upload[4 * 128] = {0};
+    size_t used;
+    int i, y;
+    make_dir("large-rank");
+    make_dir("large-rank/wide");
+    make_dir("large-rank/rows");
+    write_solid_png("large-rank/wide/wide.png", 255, 0, 0);
+    used = (size_t)snprintf(manifest, sizeof(manifest), "[");
+    for (i = 0; i < 128; i++) {
+        char name[64];
+        int written;
+        snprintf(name, sizeof(name), "large-rank/rows/row%d.png", i);
+        write_solid_png(name, 0, 255, 0);
+        written = snprintf(manifest + used, sizeof(manifest) - used,
+                           "%s{\"file\":\"row%d.png\",\"archive\":\"WA_MRG.MRG\",\"offset\":%d,\"words\":4,\"rows\":1,\"bpp\":16}",
+                           i ? "," : "", i, i * 8);
+        assert(written > 0 && (size_t)written < sizeof(manifest) - used);
+        used += (size_t)written;
+    }
+    assert(used + 2 <= sizeof(manifest));
+    strcpy(manifest + used, "]");
+    write_text("large-rank/wide/manifest.json",
+               "[{\"file\":\"wide.png\",\"archive\":\"WA_MRG.MRG\",\"offset\":0,\"words\":4,\"rows\":128,\"bpp\":16}]");
+    write_text("large-rank/rows/manifest.json", manifest);
+    snprintf(wide, sizeof(wide), "%s/large-rank/wide", root);
+    snprintf(rows, sizeof(rows), "%s/large-rank/rows", root);
+    memset(disc, 0, sizeof(disc));
+    memcpy(disc + 2048, upload, sizeof(upload));
+    disc_ready = 1;
+    TextureDump_SetDiscFiles(disc_file);
+    assert(TexturePack_Load(rows, 1, NULL, NULL, NULL, 0) == 128);
+    assert(TexturePack_Load(wide, 2, NULL, NULL, NULL, 0) == 1);
+    TexturePack_Service();
+    TextureDump_Delivered(upload, sizeof(upload), 1, 0);
+    SoftGpu_Load(0, 0, 4, 128, upload);
+    TexturePack_Service();
+    for (y = 0; y < 128; y++) assert(*TextureDump_Cell(0, y, 0) == (0x8000 | 0x001f));
+    TexturePack_Unload();
+    disc_ready = 0;
+}
+
 /* The same asset shipped twice, once under a setting that is on and once
  * under one that is off: the enabled copy must be the one used. */
 static void duplicate_settings(void)
@@ -623,6 +747,8 @@ int main(void)
     named_assets();
     named_folder();
     shared_word();
+    rank_preference();
+    large_rank_preference();
     duplicate_settings();
     bank_sprites();
     field_thumbnail(0);

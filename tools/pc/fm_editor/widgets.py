@@ -143,6 +143,49 @@ def legend(parent, *rows) -> ttk.Frame:
     return frame
 
 
+class Tooltip:
+    """A line of text beside a widget while the pointer rests on it: what a
+    field does, where its row has no room to say. Shown after a moment,
+    gone on leaving or a click."""
+    DELAY = 450
+
+    def __init__(self, widget, text: str, wrap: int = 380):
+        self.widget, self.text, self.wrap = widget, text, wrap
+        self.window = self.pending = None
+        widget.bind("<Enter>", self._schedule, add="+")
+        widget.bind("<Leave>", self.hide, add="+")
+        widget.bind("<ButtonPress>", self.hide, add="+")
+
+    def _schedule(self, _event=None):
+        self._cancel()
+        self.pending = self.widget.after(self.DELAY, self.show)
+
+    def _cancel(self):
+        if self.pending:
+            self.widget.after_cancel(self.pending)
+            self.pending = None
+
+    def show(self):
+        """Open the tip under the widget (also what the tests call)."""
+        self.pending = None
+        if self.window or not self.widget.winfo_exists():
+            return
+        x = self.widget.winfo_rootx() + px(self.widget, 8)
+        y = self.widget.winfo_rooty() + self.widget.winfo_height() + px(self.widget, 2)
+        self.window = tk.Toplevel(self.widget)
+        self.window.wm_overrideredirect(True)
+        self.window.wm_geometry(f"+{x}+{y}")
+        tk.Label(self.window, text=self.text, justify="left", wraplength=px(self.widget, self.wrap),
+                 background=theme.RAISED, foreground=theme.FG, relief="solid", borderwidth=1,
+                 padx=px(self.widget, 6), pady=px(self.widget, 3)).pack()
+
+    def hide(self, _event=None):
+        self._cancel()
+        if self.window:
+            self.window.destroy()
+            self.window = None
+
+
 class ScrolledForm(ttk.Frame):
     """A form with a vertical scrollbar, wheel support and focus visibility.
 
@@ -499,7 +542,8 @@ class CardPicker(tk.Toplevel):
             if not card_matches(self.project, cid, text):
                 continue
             card = self.project.cards[cid]
-            kind = TYPE_NAMES[card.type] if 0 <= card.type < len(TYPE_NAMES) else str(card.type)
+            names = getattr(self.project, "type_names", TYPE_NAMES)
+            kind = names[card.type] if 0 <= card.type < len(names) and names[card.type] else str(card.type)
             self.tree.insert("", "end", iid=str(cid), values=(cid, card.name, kind))
             shown += 1
             if shown >= 800:

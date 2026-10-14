@@ -9,7 +9,8 @@
 int main(void)
 {
     MemoriesMemory *old_ram = calloc(1, sizeof(*old_ram)), *new_ram = calloc(1, sizeof(*new_ram));
-    uint64_t old_global[4], new_global[4] = {0}, old_constant = 22, new_constant = 11;
+    uint64_t old_global[6], new_global[6] = {0}, old_constant = 22, new_constant = 11;
+    uint64_t adjacent[4] = {0}, moved[2] = {0};
     uint64_t *heap = malloc(3 * sizeof(*heap));
     uint32_t heap_token;
     MemoriesState save = {0, tmpfile(), NULL, 0}, load;
@@ -21,6 +22,8 @@ int main(void)
     assert(!GuestRuntime_Bind(old_ram));
     GuestRuntime_RegisterGlobal(old_global, sizeof(old_global), 1, MEMORIES_REGION_GAME);
     GuestRuntime_RegisterGlobal(&old_constant, sizeof(old_constant), 2, MEMORIES_REGION_CONSTANT);
+    GuestRuntime_RegisterGlobal(adjacent, 2 * sizeof(uint64_t), 3, MEMORIES_REGION_GAME);
+    GuestRuntime_RegisterGlobal(adjacent + 2, 2 * sizeof(uint64_t), 4, MEMORIES_REGION_GAME);
     GuestRuntime_RegisterAllocation(heap, 3 * sizeof(*heap));
     heap_token = GuestRuntime_EncodePointer(heap);
     old_global[0] = (uintptr_t)heap;
@@ -28,6 +31,10 @@ int main(void)
     /* Guest text cursors can be one past the final byte. */
     old_global[2] = ((uint64_t)0x90000011u << 32) | 0x90000010u;
     old_global[3] = ((uint64_t)0x9000000fu << 32) | 0x90000000u;
+    /* The second region stays put while its adjacent predecessor moves.
+     * A pointer owned by the second must not become the first's endpoint. */
+    old_global[4] = (uintptr_t)(adjacent + 2);
+    old_global[5] = (uintptr_t)(adjacent + 4);
     heap[0] = 42;
     heap[1] = (uintptr_t)old_ram->ram + 32;
     heap[2] = (uintptr_t)(heap + 3);
@@ -49,6 +56,8 @@ int main(void)
     assert(!GuestRuntime_Bind(new_ram));
     GuestRuntime_RegisterGlobal(new_global, sizeof(new_global), 1, MEMORIES_REGION_GAME);
     GuestRuntime_RegisterGlobal(&new_constant, sizeof(new_constant), 2, MEMORIES_REGION_CONSTANT);
+    GuestRuntime_RegisterGlobal(moved, sizeof(moved), 3, MEMORIES_REGION_GAME);
+    GuestRuntime_RegisterGlobal(adjacent + 2, 2 * sizeof(uint64_t), 4, MEMORIES_REGION_GAME);
     /* The running game may have split the saved heap span into smaller
      * allocations. Preflight replaces every overlapping owned span. */
     uint64_t *small = malloc(sizeof(*small)), *neighbor = malloc(sizeof(*neighbor));
@@ -71,6 +80,8 @@ int main(void)
     Memories_NativeMemoryRestorePayloads(pending, 0x100000000ull, 0x120000000ull, 0x1000);
     assert(new_global[1] == 0x120000123ull);
     assert(new_constant == 11);
+    assert(new_global[4] == (uintptr_t)(adjacent + 2));
+    assert(new_global[5] == (uintptr_t)(adjacent + 4));
     assert(new_global[2] == (((uint64_t)0x90000011u << 32) | 0x91000010u));
     assert(new_global[3] == (((uint64_t)0x9100000fu << 32) | 0x91000000u));
     assert(new_global[0] != (uintptr_t)heap);

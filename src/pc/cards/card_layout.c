@@ -534,6 +534,7 @@ void CardLayout_SetCard(int card_id)
     current.width = CARD_LAYOUT_FRAME_MAX_W;
     current.height = CARD_LAYOUT_FRAME_MAX_H;
     if (full_bleed_of(&source) && resolve_style(&source, card_id, &style, 1)) current = style;
+    LOG(LOG_CARD_LAYOUT, "SetCard id=%d class=%d image=%s", card_id, cls, current.image);
 }
 
 int CardLayout_FullBleed(void)

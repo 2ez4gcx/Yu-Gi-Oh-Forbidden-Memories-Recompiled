@@ -23,7 +23,7 @@ import struct
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import gamedata as g, kit, manifest
+from . import gamedata as g, kit, manifest, values
 from .fixed_decks import set_deck as set_fixed_deck
 from .model import Project
 from .pools import normalize
@@ -763,11 +763,19 @@ def kit_rules(project: Project, modded, retail_files, modded_files) -> tuple:
                            f"({_names(project, bonus.special)}): they keep +500 (Megamorph +1000)")
     draws = kit.extra_draws(retail_slus, slus)
     if draws and draws.count:
-        notes.append(f"rules: the mod draws {draws.count} prizes a win (A1: its loop at 0x{draws.code:08X}); "
-                     f"mod.json has no key for it: set Game > Card drops to {draws.count} (the player's setting "
-                     "card_drops)")
-        readme.append(f"- The mod gives {draws.count} cards a win: set Game > Card drops to {draws.count} to play "
-                      "it that way (a mod cannot set it for you).")
+        # "limits" "card_drops" locks the player's Game > Card drops while
+        # the mod is applied (1 to 99, the setting's range).
+        count = min(max(draws.count, 1), values.CARD_DROPS_MAX)
+        limits = project.other.get("limits")
+        if not isinstance(limits, dict):
+            limits = project.other["limits"] = {}
+        limits["card_drops"] = count
+        notes.append(f"rules: the mod draws {draws.count} prizes a win (A1: its loop at 0x{draws.code:08X}): "
+                     f"\"limits\" \"card_drops\" {count}, which locks Game > Card drops while the mod is applied")
+        if count != draws.count:
+            missing.append(f"{draws.count} prizes a win: the port deals at most {values.CARD_DROPS_MAX}")
+        readme.append(f"- The mod gives {count} cards a win: Game > Card drops shows {count}, set by the mod, "
+                      "while it is applied.")
     if any(memory.bytes(a, 0x40) != retail.bytes(a, 0x40) and b"\x31\x75" in memory.bytes(a, 0x120)
            for a in STAT_CAP_SITES):
         missing.append("ATK, DEF and life points up to 30000 (5 digits): the port keeps 9999")

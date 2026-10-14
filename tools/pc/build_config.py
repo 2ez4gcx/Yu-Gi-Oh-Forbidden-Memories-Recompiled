@@ -162,6 +162,7 @@ def native_sources(target, backend="sdl"):
         "free_duel/*.c",
         "saves/*.c",
         "text/*.c",
+        "tower/*.c",
     ]
     sources = {
         path.relative_to(ROOT).as_posix()

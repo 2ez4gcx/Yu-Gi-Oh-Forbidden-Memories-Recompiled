@@ -113,6 +113,9 @@ s32 Duel_GetTerrainBoost(s32 cardType)
     /* A mod's bonus for this terrain and type (tables.h). */
     s32 bonus;
 
+    if (cardType < 0) {
+        return 0; /* Cards_Type's answer for no card */
+    }
     if (Tables_TerrainBonus(gDuel_bTerrain[0], cardType, &bonus)) {
         return bonus;
     }
@@ -178,11 +181,15 @@ u8 *Duel_SetupCardRecord(s32 a, s32 b) {
 #ifdef MEMORIES_PC
     p->defense_modifier = 0;
 #endif
+#ifdef MEMORIES_PC
+    p->terrain_modifier = Duel_GetTerrainBoost(Cards_Type((s16)p->card_id));
+#else
     p->terrain_modifier =
         Duel_GetTerrainBoost(
             (gDuel_adwCardStats[(s16)p->card_id - 1] >>
              CARD_STAT_TYPE_SHIFT) &
             CARD_STAT_TYPE_MASK);
+#endif
 
     base = D_80177EA4;
     q = &base[idx * 2];

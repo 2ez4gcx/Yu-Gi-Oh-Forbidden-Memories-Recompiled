@@ -23,8 +23,8 @@ import shutil
 from pathlib import Path
 
 from .gamedata import (FUSION_GROUPS, RITUAL_ORIGINS, RITUAL_REQUIREMENT_KEYS, RITUAL_TRIBUTE_MAX, fusion_group_named, ATTRIBUTE_NAMES, CARD_COUNT, DECK_SIZE, DUELIST_NAMES, FRAME_COLOR_NAMES, FRAME_NAMES, POOLS, STAR_NAMES,
-                       EQUIP_BONUS_MAX, STARTER_WEIGHT_LIMIT, TYPE_NAMES, TYPE_MAGIC, GameData)
-from .model import AddedCard, ModInfo, Project, StarterDeck, duelist_named, type_named, KEY_RE
+                       EQUIP_BONUS_MAX, STARTER_WEIGHT_LIMIT, TYPE_NAMES, TYPE_MAGIC, TYPE_LIMIT, GameData, is_monster_type)
+from .model import AddedCard, ModInfo, Project, StarterDeck, duelist_named, same_letters, KEY_RE
 from . import art, board_art, campaign_map, compat, fixed_decks, guardian_stars, packs as packmath, pools as poolmath, roster
 
 INFO_KEYS = ("id", "name", "version", "author", "description")
@@ -54,8 +54,9 @@ def password_text(value):
     return None
 
 
-def _type_value(t: int):
-    return TYPE_NAMES[t] if 0 <= t < len(TYPE_NAMES) else t
+def _type_value(t: int, project=None):
+    names = getattr(project, "type_names", TYPE_NAMES) if project is not None else TYPE_NAMES
+    return names[t] if 0 <= t < len(names) and names[t] else (TYPE_NAMES[t] if 0 <= t < len(TYPE_NAMES) else t)
 
 
 def _attribute_value(a: int):
@@ -66,7 +67,7 @@ def _star_value(s: int):
     return STAR_NAMES[s] if 1 <= s < len(STAR_NAMES) else s
 
 
-def _card_fields(card, base, everything=False) -> dict:
+def _card_fields(card, base, everything=False, project=None) -> dict:
     out = {}
     if everything or card.name != base.name:
         out["name"] = card.name
@@ -77,7 +78,7 @@ def _card_fields(card, base, everything=False) -> dict:
     if everything or card.defense != base.defense:
         out["defense"] = card.defense
     if everything or card.type != base.type:
-        out["type"] = _type_value(card.type)
+        out["type"] = _type_value(card.type, project)
     if everything or card.attribute != base.attribute:
         out["attribute"] = _attribute_value(card.attribute)
     if everything or card.level != base.level:
@@ -85,7 +86,7 @@ def _card_fields(card, base, everything=False) -> dict:
     # A card made a monster without "stars" gets default ones in the game
     # (cards.c default_stars): written, even as none, they stay as shown.
     if everything or (card.star1, card.star2) != (base.star1, base.star2) or \
-            card.type < TYPE_MAGIC <= base.type:
+            is_monster_type(card.type) and not is_monster_type(base.type):
         out["stars"] = [_star_value(card.star1), _star_value(card.star2)]
     if card.frame != base.frame:
         out["frame"] = FRAME_NAMES[card.frame] if 0 <= card.frame < len(FRAME_NAMES) else "Type"
@@ -96,7 +97,7 @@ def build_cards(project: Project) -> list:
     entries = []
     for cid in sorted(project.retail.cards):
         card, retail = project.cards[cid], project.retail.cards[cid]
-        fields = _card_fields(card, retail)
+        fields = _card_fields(card, retail, project=project)
         for name, value in project.text_cards.get(cid, {}).items():
             if fields.get(name) == value:
                 del fields[name]        # the mod's text file carries it, codes and all
@@ -116,7 +117,7 @@ def build_cards(project: Project) -> list:
         base = project.cards[added.base]
         entry = {"copy": added.base, "id": added.key}
         fields = {"name": card.name}
-        fields.update(_card_fields(card, base))     # what is left out is the base's, as the port has it
+        fields.update(_card_fields(card, base, project=project))     # what is left out is the base's, as the port has it
         if not card.is_monster() and card.type != base.type:
             effect = project.retail.cards.get(project.effect_of(cid))
             # The port refuses a copy made another non-monster without a
@@ -612,9 +613,68 @@ def _choice(value, names):
         for i, name in enumerate(names):
             if name and value.lower() == name.lower():
                 return i
-        if value.strip().lstrip("-").isdigit():
-            return int(value)
+        # choice() falls back to Json_Number for an unmatched string, which
+        # reads "0x18" as hex the same as a plain number (json.c); _number
+        # already does that.
+        return _number(value)
     return -1
+
+
+def _type_choice(project, value):
+    """The runtime type resolver, including retail aliases after a rename."""
+    names = getattr(project, "type_names", TYPE_NAMES)
+    choice = _choice(value, names)
+    # cards.c accepts a numeric choice only when the slot is registered.
+    if 0 <= choice < len(names) and names[choice]:
+        return choice
+    if isinstance(value, str):
+        choice = next((i for i, name in enumerate(names) if name and same_letters(value, name)), -1)
+        if choice >= 0:
+            return choice
+        choice = next((i for i, name in enumerate(TYPE_NAMES) if same_letters(value, name)), -1)
+        if choice >= 0 and choice < len(names) and names[choice]:
+            return choice
+    return -1
+
+
+def read_card_types(project: Project, section, messages: list):
+    """Read the registry before cards so a card may name a new type."""
+    if section is None:
+        return
+    if not isinstance(section, dict) or not isinstance(section.get("types"), list):
+        messages.append("\"card_types\" is an object with a \"types\" list; left out")
+        return
+    for index, entry in enumerate(section["types"]):
+        where = f"card_types.types[{index}]"
+        if not isinstance(entry, dict) or type(entry.get("id")) is not int or not isinstance(entry.get("name"), str):
+            messages.append(f"{where}: an object with numeric \"id\" and string \"name\"; left out")
+            continue
+        type_, name = entry["id"], entry["name"]
+        if not (0 <= type_ < TYPE_LIMIT) or not name:
+            messages.append(f"{where}: id is 0-23 or 24-255 with a non-empty name; left out")
+            continue
+        normalized = "".join(c.lower() for c in name if c.isascii() and c.isalnum())
+        # Match encode_type_name(): a name with no glyph the game can show
+        # is never registered, the same as an empty one -- the editor's
+        # model must not hold a type the runtime would refuse to build, or
+        # a card assigned to it here would point at nothing there.
+        if not normalized:
+            messages.append(f'{where}: "{name}" has no glyph the game can display; declaration left out')
+            continue
+        # Match add_card_types_section(): a later declaration may replace its
+        # own ID, but must not shadow another active spelling or a retail
+        # alias retained after that retail type was renamed.
+        collision = next((other for other, other_name in enumerate(project.type_names)
+                          if other != type_ and other_name and
+                          "".join(c.lower() for c in other_name if c.isascii() and c.isalnum()) == normalized), None)
+        if collision is None:
+            collision = next((other for other, other_name in enumerate(TYPE_NAMES)
+                              if other != type_ and
+                              "".join(c.lower() for c in other_name if c.isascii() and c.isalnum()) == normalized), None)
+        if collision is not None:
+            messages.append(f'{where}: "{name}" is already type {collision}\'s name or retail alias; declaration left out')
+            continue
+        project.type_names[type_] = name
 
 
 def _number(value, default=-1):
@@ -639,7 +699,92 @@ def _clamp(value, low, high):
     return max(low, min(high, value))
 
 
-def _apply_fields(card, entry: dict, is_replace: bool, messages: list, where: str, stars_section=None, effect_type=None):
+def _attribute_letters(value: str) -> bytes:
+    """attributes.c same_letters(): punctuation skipped, ASCII folded only.
+
+    The runtime compares UTF-8 bytes rather than Unicode case-folded
+    characters. Keep that deliberately narrow rule here so the editor never
+    resolves a declaration differently from the game.
+    """
+    return bytes(c for c in value.encode("utf-8")
+                 if 48 <= c <= 57 or 65 <= c <= 90 or 97 <= c <= 122 or c >= 0x80).lower()
+
+
+def _attribute_name_has_letters(value: str) -> bool:
+    return bool(_attribute_letters(value))
+
+
+def _attribute_numeric_name(value: str) -> bool:
+    folded = _attribute_letters(value)
+    return bool(folded) and all(48 <= c <= 57 for c in folded)
+
+
+def _attribute_registry(section):
+    """The declarations Attributes_Add() would accept from this manifest.
+
+    The editor loads one mod manifest at a time, so this deliberately models
+    that manifest's registry, including its declaration order. Runtime mods
+    may additionally provide declarations from earlier active mods.
+    """
+    names = list(ATTRIBUTE_NAMES) + [""] * (256 - len(ATTRIBUTE_NAMES))
+    declared = set()
+    entries = section.get("attributes") if isinstance(section, dict) else None
+    if not isinstance(entries, list):
+        return names, declared
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        ident, name = entry.get("id"), entry.get("name")
+        if type(ident) is not int or not isinstance(name, str) or not name:
+            continue
+        if not 0 <= ident <= 255 or ident in (6, 7):
+            continue
+        if not _attribute_name_has_letters(name) or _attribute_numeric_name(name):
+            continue
+        duplicate = any(i != ident and _attribute_letters(name) == _attribute_letters(retail)
+                        for i, retail in enumerate(ATTRIBUTE_NAMES))
+        duplicate = duplicate or any(i != ident and existing and _attribute_letters(name) == _attribute_letters(existing)
+                                     for i, existing in enumerate(names))
+        if duplicate:
+            continue
+        names[ident] = name
+        declared.add(ident)
+    return names, declared
+
+
+def _attribute_choice(value, section) -> int:
+    """The runtime-valid retail or declared attribute represented by value."""
+    names, declared = _attribute_registry(section)
+    found = -1
+    if type(value) is int:
+        found = value
+    elif isinstance(value, str):
+        # Attributes_Find uses strtol(..., 10) before names. Python's int()
+        # accepts trailing whitespace, which strtol does not, so keep the
+        # spelling rule explicit.
+        if re.fullmatch(r"[ \t\n\r\f\v]*[+-]?[0-9]+", value):
+            found = int(value, 10)
+        else:
+            folded = _attribute_letters(value)
+            for i, name in enumerate(ATTRIBUTE_NAMES):
+                if folded == _attribute_letters(name) or folded == _attribute_letters(names[i]):
+                    found = i
+                    break
+            if found < 0:
+                for i in range(len(ATTRIBUTE_NAMES), len(names)):
+                    if names[i] and folded == _attribute_letters(names[i]):
+                        found = i
+                        break
+    # 6 and 7 are the retail magic/trap attributes: never declarable, but a
+    # card may carry them as a number (the editor writes them for a
+    # Magic/Trap card), as the game takes them (cards.c add_entry).
+    if found in (6, 7):
+        return found if type(value) is int else -1
+    return found if 0 <= found < len(ATTRIBUTE_NAMES) or found in declared else -1
+
+
+def _apply_fields(project: Project, card, entry: dict, is_replace: bool, messages: list, where: str,
+                  stars_section=None, attributes_section=None, effect_type=None):
     name = entry.get("name")
     if isinstance(name, str) and name:
         card.name = name
@@ -653,10 +798,10 @@ def _apply_fields(card, entry: dict, is_replace: bool, messages: list, where: st
     if value >= 0:
         card.defense = _clamp(value // 10, 0, 0x1FF) * 10
     if "type" in entry:
-        value = _choice(entry["type"], TYPE_NAMES)
+        value = _type_choice(project, entry["type"])
         if value >= 0:
-            value = _clamp(value, 0, 23)
-            if (not is_replace and value >= TYPE_MAGIC and value != card.type and value != effect_type and
+            value = _clamp(value, 0, TYPE_LIMIT - 1)
+            if (not is_replace and not is_monster_type(value) and value != card.type and value != effect_type and
                     value != 23):     # cards.c
                 messages.append(f"{where}: a copy becomes a non-monster only with a matching retail effect; "
                                 f"\"type\" left out")
@@ -684,9 +829,12 @@ def _apply_fields(card, entry: dict, is_replace: bool, messages: list, where: st
     if value >= 0:
         card.level = _clamp(value, 0, 12)
     if "attribute" in entry:
-        value = _choice(entry["attribute"], ATTRIBUTE_NAMES)
+        value = _attribute_choice(entry["attribute"], attributes_section)
         if value >= 0:
-            card.attribute = _clamp(value, 0, 15)
+            card.attribute = _clamp(value, 0, 255)
+        else:
+            messages.append(f"{where}: \"attribute\" is a retail attribute, or an id/name this mod's own "
+                            f"\"attributes\" declares; left out")
     if "frame" in entry:
         value = _choice(entry["frame"], FRAME_NAMES + ["Type"])
         if not 0 <= value <= len(FRAME_NAMES):
@@ -721,11 +869,11 @@ def _read_notes(entry: dict, messages: list, where: str):
 def _default_stars(project: Project, card, entry: dict, was_monster: bool, model_default: int):
     """As cards.c default_stars: a card made a monster with no "stars" and
     none of its own takes its model's, or the Sun and the Moon."""
-    if card.type >= TYPE_MAGIC or was_monster or "stars" in entry or card.star1 or card.star2:
+    if not is_monster_type(card.type) or was_monster or "stars" in entry or card.star1 or card.star2:
         return
     model = project.resolve(entry.get("model")) if "model" in entry else model_default
     source = project.retail.cards.get(model) if 1 <= model <= CARD_COUNT else None
-    if source is not None and source.type < TYPE_MAGIC:
+    if source is not None and is_monster_type(source.type):
         card.star1, card.star2 = source.star1, source.star2
     else:
         card.star1, card.star2 = STAR_NAMES.index("Sun"), STAR_NAMES.index("Moon")
@@ -749,8 +897,9 @@ def read_cards(project: Project, entries, messages: list):
             continue
         notes = _read_notes(entry, messages, where)
         if is_replace:
-            was_monster = project.cards[base].type < TYPE_MAGIC
-            _apply_fields(project.cards[base], entry, True, messages, where, project.other.get("guardian_stars"))
+            was_monster = is_monster_type(project.cards[base].type)
+            _apply_fields(project, project.cards[base], entry, True, messages, where, project.other.get("guardian_stars"),
+                          project.other.get("attributes"))
             _default_stars(project, project.cards[base], entry, was_monster, base)
             if notes:
                 had = project.notes.get(base)
@@ -781,9 +930,9 @@ def read_cards(project: Project, entries, messages: list):
         if not effect_id or effect_id > CARD_COUNT:
             effect_id = project.effect_of(base)
         effect = project.retail.cards.get(effect_id)
-        was_monster = project.cards[cid].type < TYPE_MAGIC
-        _apply_fields(project.cards[cid], entry, False, messages, where, project.other.get("guardian_stars"),
-                      effect.type if effect else None)
+        was_monster = is_monster_type(project.cards[cid].type)
+        _apply_fields(project, project.cards[cid], entry, False, messages, where, project.other.get("guardian_stars"),
+                      project.other.get("attributes"), effect.type if effect else None)
         _default_stars(project, project.cards[cid], entry, was_monster, base)
         added = project.added[cid]
         added.drops = _json_bool(entry.get("drops"), True)
@@ -929,7 +1078,10 @@ def equip_rules(project: Project, entries, messages: list, kept: list = None) ->
         for allow, key in ((True, "add"), (False, "remove")):
             targets = entry.get(key)
             for target in targets if isinstance(targets, list) else []:
-                t = type_named(target) if isinstance(target, str) else -1
+                # tables.c checks a type name before a card reference.  Use
+                # the project registry so custom types and retail aliases
+                # behave exactly as they do in the game.
+                t = _type_choice(project, target) if isinstance(target, str) else -1
                 if t >= 0 and project.resolve(target) <= 0:
                     rules.append((equip, EQUIP_TYPE, t, allow, order))
                     continue
@@ -1031,11 +1183,11 @@ def read_rituals(project: Project, entries, messages: list):
                             req["card"] = cid
                     if "type" in tribute:
                         value = tribute["type"]
-                        named = type_named(value) if isinstance(value, str) else -1
-                        if named < 0 or named >= TYPE_MAGIC:
+                        named = _type_choice(project, value)
+                        if named < 0 or not is_monster_type(named):
                             valid = False
                         else:
-                            req["type"] = TYPE_NAMES[named]
+                            req["type"] = _type_value(named, project)
                     if "fusion_group" in tribute:
                         value = fusion_group_named(tribute["fusion_group"])
                         if not value:
@@ -1324,6 +1476,7 @@ def apply(project: Project, manifest: dict, messages: list = None, default_id: s
     info.settings = settings if isinstance(settings, list) else []
     project.info = info
     project.other = {k: v for k, v in manifest.items() if k not in INFO_KEYS and k not in TABLE_KEYS}
+    read_card_types(project, manifest.get("card_types"), messages)
     read_cards(project, manifest.get("cards"), messages)
     read_fusions(project, manifest.get("fusions"), messages)
     read_equips(project, manifest.get("equips"), messages)

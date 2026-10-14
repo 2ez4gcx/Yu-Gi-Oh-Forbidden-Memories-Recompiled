@@ -12,13 +12,15 @@
  * texels an axis). This is the one place the grid is set: func_80028B08.c's
  * CardLayout_DrawFrame loops over it, card_layout_art.c's tile layout and
  * its FRAME_W/FRAME_H follow it, and tools/pc/card_frame_window.py's
- * FRAME_TEXELS is the same grid of 177x254 texel tiles (3x3 = 531x762).
- * A row or column left out of the loop is a part of the frame never drawn:
- * with ROWS 2 the bottom third, the stat band, went missing. Changing
- * either number means changing all of those; the tile pages also have room
- * for at most 9 (the digit strip sits on the page after them). */
-#define CARD_LAYOUT_FRAME_COLS 3
-#define CARD_LAYOUT_FRAME_ROWS 3
+ * FRAME_TEXELS is the same grid of 255x254 texel tiles (2x2 = 510x508).
+ * A row or column left out of the loop is a part of the frame never drawn.
+ * Changing either number means changing all of those. The bank has 16
+ * pages: FRAME_SLOTS frame styles of COLS * ROWS pages each, and the digit
+ * strip's page after them (card_layout_art.c), so the grid stays small:
+ * several cards of different styles are on screen together (an attack, a
+ * trap shown beside the attacker) and each needs its own copy. */
+#define CARD_LAYOUT_FRAME_COLS 2
+#define CARD_LAYOUT_FRAME_ROWS 2
 
 /* 1 on success (`*tpage`/`*clut` filled, the tile's own texel w/h in
  * `*w`/`*h`; its texels start at u = v = 0 of that page), 0 when no mod

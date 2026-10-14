@@ -74,7 +74,7 @@ Usage: hd_assets_pack.py --assets <folder> --out <mod folder> [--data game/DATA]
                          [--id forbidden-memories-hd] [--name "Forbidden Memories HD"]
 
 The anime frame's ATK/DFD digits are one picture, textures/anime_digits.png (a
-200x192 strip), and the card_layout "digits" key that points at it
+256x256 strip), and the card_layout "digits" key that points at it
 (notes/modding.md). It is tools/pc/hd_recipes/anime_digits.png (else
 <assets>/anime_digits.png) copied in, as the frames are: drawn once, committed,
 no font needed to build. --digit-font draws a new one from a .ttf

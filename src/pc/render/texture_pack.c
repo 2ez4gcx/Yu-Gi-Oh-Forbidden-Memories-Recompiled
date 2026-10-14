@@ -50,6 +50,10 @@ typedef struct AssetSpec {
 
 static Entry *entries;
 static int entry_count, resolved; /* offsets are absolute on the disc, entries sorted */
+/* For each sorted entry, the furthest byte any entry up to it can cover.
+ * A lookup uses this to skip the prefix which cannot possibly overlap. */
+static uint32_t *prefix_end;
+static unsigned highest_rank;
 /* An upload can arrive from the interrupt tick (a LoadImage in the disc
  * callback), where reading a PNG or the disc's directory is not safe: paint
  * only notes what it needs, and TexturePack_Service does it between frames. */
@@ -119,25 +123,15 @@ static int bank_sprite_count;
 static unsigned bank_sprite_owner;
 static int bank_cached = -1; /* the current primitive normally stays in one sprite */
 
-/* The next level: half of `from` (rounded down, floor(size >> 1), at least
- * 1), each texel the average of those it covers, colors weighted by their
- * alpha so that transparent texels' colors do not bleed into the edges.
- * Rounding down, not up, matters past this function: bind_pack_entry
- * uploads this whole chain as real GL mip levels (glTexImage2D one call a
- * level), and OpenGL only calls a texture "mipmap complete" -- samplable
- * through GL_NEAREST_MIPMAP_NEAREST at all -- when every level's size is
- * exactly max(1, floor(level 0's size >> level)). Rounding up here instead
- * (as this used to) agrees with that formula at every level of a
- * power-of-two image (halving one always lands back on a whole number, so
- * the two roundings never differ), which is why a 512x1024 or 1024x2048
- * frame image rendered fine while this mod's own 1035x1519 and 1036x1520
- * ones, needing no power of two, did not: some level's size came out one
- * texel over what the driver expected, the whole texture was incomplete,
- * and incomplete-texture reads are defined to return nothing. */
+/* The next level: half of `from` (rounded down, at least 1: OpenGL's mip
+ * chain is max(1, floor(size / 2^n)), and a texture of any other sizes is
+ * incomplete, so texelFetch on it returns transparent black), each texel the
+ * average of those it covers, colors weighted by their alpha so that
+ * transparent texels' colors do not bleed into the edges. */
 static int bank_halve(BankImage *image, int from)
 {
-    int width = image->width[from], height = image->height[from],
-        half_w = width > 1 ? width / 2 : 1, half_h = height > 1 ? height / 2 : 1, x, y;
+    int width = image->width[from], height = image->height[from], half_w = width > 1 ? width / 2 : 1,
+        half_h = height > 1 ? height / 2 : 1, x, y;
     const unsigned char *in = image->level[from];
     unsigned char *out = malloc((size_t)half_w * half_h * 4);
     if (!out) return 0;
@@ -516,6 +510,29 @@ static int compare(const void *a, const void *b)
     return x->position < y->position ? -1 : x->position > y->position;
 }
 
+/* A later-loaded pack overrides an earlier one wherever both cover a word.
+ * Within one pack, retain the old first-hit result: the nearer offset wins,
+ * and an exact tie keeps the first entry encountered by the backwards scan. */
+static int preferred_entry(const Entry *candidate, uint32_t candidate_delta,
+                           const Entry *current, uint32_t current_delta)
+{
+    return candidate->rank > current->rank ||
+           (candidate->rank == current->rank && candidate_delta < current_delta);
+}
+
+/* The first entry at or before `low` which might cover offset. */
+static int lookup_first(uint32_t offset, int low)
+{
+    int first = 0, last = low;
+    if (!prefix_end) return 0; /* out of memory while building the index */
+    while (first < last) {
+        int middle = (first + last) / 2;
+        if (prefix_end[middle] > offset) last = middle;
+        else first = middle + 1;
+    }
+    return first;
+}
+
 /* The PNG, as the texture's own grid of 15-bit colors: each texel takes
  * the average of the image pixels that fall on it (a pack image is any
  * size), alpha below half is the transparent color. */
@@ -706,37 +723,55 @@ static int sample(int page_x, int page_y, int depth, int u, int v, uint32_t *rgb
  * word within the row. -1 if none. */
 static int locate(uint32_t offset, int *row, int *word)
 {
-    int low = 0, high = entry_count, i;
+    int low = 0, high = entry_count, i, first, best = -1, best_row = 0, best_word = 0;
+    uint32_t best_delta = 0;
     while (low < high) {
         int middle = (low + high) / 2;
         if (entries[middle].offset <= offset) low = middle + 1;
         else high = middle;
     }
-    /* Entries overlap (the same texture drawn as sub-rectangles), so look
-     * back through those starting at or before the offset. */
-    for (i = low - 1; i >= 0 && i >= low - 64; i--) {
+    /* Entries overlap (the same texture drawn as sub-rectangles, or two
+     * packs describing the same bytes with different geometry), so look
+     * back through those starting at or before the offset. More than one
+     * may cover it: a later-loaded pack wins regardless of its geometry.
+     * Within one pack, the closest start remains the more specific reading,
+     * as it was before packs had ranks. */
+    first = lookup_first(offset, low);
+    for (i = low - 1; i >= first; i--) {
         const Entry *entry = &entries[i];
         uint32_t delta = offset - entry->offset;
+        int found_row = -1, found_word = 0;
         if (entry->row_offsets) {
             int r;
             for (r = 0; r < entry->rows; r++) {
                 int32_t start = entry->row_offsets[r];
                 if ((int32_t)delta >= start && (int32_t)delta < start + entry->words * 2) {
-                    *row = r;
-                    *word = (int)(((int32_t)delta - start) / 2);
-                    return i;
+                    found_row = r;
+                    found_word = (int)(((int32_t)delta - start) / 2);
+                    break;
                 }
             }
         } else if (entry->stride) {
             uint32_t r = delta / (entry->stride * 2), c = (delta % (entry->stride * 2)) / 2;
             if (r < (uint32_t)entry->rows && c < (uint32_t)entry->words) {
-                *row = (int)r;
-                *word = (int)c;
-                return i;
+                found_row = (int)r;
+                found_word = (int)c;
             }
         }
+        if (found_row < 0) continue;
+        if (best < 0 || preferred_entry(entry, delta, &entries[best], best_delta)) {
+            best = i;
+            best_row = found_row;
+            best_word = found_word;
+            best_delta = delta;
+            if (entry->rank == highest_rank) break;
+        }
     }
-    return -1;
+    if (best >= 0) {
+        *row = best_row;
+        *word = best_word;
+    }
+    return best;
 }
 
 /* The entry whose replacement covers texel `texel` of the word at disc byte
@@ -746,13 +781,17 @@ static int locate(uint32_t offset, int *row, int *word)
  * -1 when no entry's crop covers it. */
 static int locate_texel(uint32_t offset, int texel, int *row, int *word)
 {
-    int low = 0, high = entry_count, i;
+    int low = 0, high = entry_count, i, first, best = -1, best_row = 0, best_word = 0;
+    uint32_t best_delta = 0;
     while (low < high) {
         int middle = (low + high) / 2;
         if (entries[middle].offset <= offset) low = middle + 1;
         else high = middle;
     }
-    for (i = low - 1; i >= 0 && i >= low - 64; i--) {
+    /* As locate(): a later-loaded pack wins wherever its crop covers this
+     * texel.  Within one pack, the closest start wins. */
+    first = lookup_first(offset, low);
+    for (i = low - 1; i >= first; i--) {
         const Entry *entry = &entries[i];
         uint32_t delta = offset - entry->offset;
         int r = -1, c = 0, x;
@@ -776,11 +815,19 @@ static int locate_texel(uint32_t offset, int texel, int *row, int *word)
         if (r < 0) continue;
         x = c * per_word(entry->bpp) + texel;
         if (x < entry->crop_left || x >= entry->crop_left + entry->crop_width) continue;
-        *row = r;
-        *word = c;
-        return i;
+        if (best < 0 || preferred_entry(entry, delta, &entries[best], best_delta)) {
+            best = i;
+            best_delta = delta;
+            best_row = r;
+            best_word = c;
+            if (entry->rank == highest_rank) break;
+        }
     }
-    return -1;
+    if (best >= 0) {
+        *row = best_row;
+        *word = best_word;
+    }
+    return best;
 }
 
 /* Recall: the first bytes on the disc of every image and palette the pack
@@ -946,6 +993,33 @@ static int resolve(void)
         return 0;
     }
     qsort(entries, (size_t)entry_count, sizeof(*entries), compare);
+    free(prefix_end);
+    prefix_end = malloc((size_t)entry_count * sizeof(*prefix_end));
+    highest_rank = 0;
+    if (prefix_end) {
+        uint32_t furthest = 0;
+        for (i = 0; i < entry_count; i++) {
+            const Entry *entry = &entries[i];
+            uint64_t end;
+            if (entry->row_offsets) {
+                int r;
+                end = entry->offset;
+                for (r = 0; r < entry->rows; r++) {
+                    int64_t row_end = (int64_t)entry->offset + entry->row_offsets[r] + entry->words * 2;
+                    if (row_end > (int64_t)end) end = (uint64_t)row_end;
+                }
+            } else {
+                end = (uint64_t)entry->offset + (uint64_t)entry->stride * entry->rows * 2;
+            }
+            if (end > UINT32_MAX) end = UINT32_MAX;
+            if ((uint32_t)end > furthest) furthest = (uint32_t)end;
+            prefix_end[i] = furthest;
+            if (entry->rank > highest_rank) highest_rank = entry->rank;
+        }
+    } else {
+        for (i = 0; i < entry_count; i++)
+            if (entries[i].rank > highest_rank) highest_rank = entries[i].rank;
+    }
     recall_heads();
     resolved = 1;
     fprintf(stderr, "memories-pc: texture packs: %d images\n", entry_count);
@@ -1022,6 +1096,10 @@ static void paint(int x, int y, int w, int h)
                         }
                         continue;
                     }
+                    /* A selected 4-bit texture can overlap an 8-bit one.
+                     * Its texel number is not an index into the 8-bit
+                     * image, so leave incompatible fallback texels alone. */
+                    if (owner->bpp != entry->bpp) continue;
                 }
                 color = owner->pixels[orow * owner->words * per + oword * per + k];
                 for (s = 0; s < 4 / per; s++) *TextureDump_Cell(vx, vy, sub + s) = color;
@@ -1130,6 +1208,9 @@ static void free_entries(void)
     free(entries);
     entries = NULL;
     entry_count = 0;
+    free(prefix_end);
+    prefix_end = NULL;
+    highest_rank = 0;
     free(recalled);
     recalled = NULL;
     recalled_count = 0;
@@ -1362,6 +1443,9 @@ static int install(void)
      * tick. Until then paint only notes what it needs and sample sees no
      * image. */
     resolved = 0; /* the new entries, and the order, with the others */
+    free(prefix_end);
+    prefix_end = NULL;
+    highest_rank = 0;
     wanted_resolve = 1;
     generation++;
     return 1;

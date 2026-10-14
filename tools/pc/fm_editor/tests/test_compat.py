@@ -9,7 +9,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from fm_editor import compat, gamedata as g, manifest, validate
+from fm_editor import compat, gamedata as g, manifest, monster_effects, validate
 from fm_editor.model import Project
 from fm_editor.tests.fixtures import Fixture
 
@@ -92,6 +92,97 @@ class FeatureTest(unittest.TestCase):
             with self.subTest(value=value):
                 self.assertEqual(self.needs(value), 11)
 
+    def test_api_13(self):
+        """A mod's lock on the cards a won duel deals: a game of API 12 or
+        older would leave it out and deal the player's count."""
+        self.assertEqual(self.needs({"limits": {"card_drops": 5}}), 13)
+        self.assertEqual(self.needs({"limits": {"card_drops": 5, "deck_copies": 4}}), 13)
+        api, reasons = compat.required({"limits": {"card_drops": 99, "attack": 9999}})
+        self.assertEqual(api, 13)
+        self.assertEqual(len(reasons), 1)
+        self.assertIn("card_drops", reasons[0])
+
+    def test_api_14(self):
+        """The tower (notes/tower-mode.md): a game of API 12 (v0.3.0) would
+        leave each of these out."""
+        for value in ({"tower": {"floors": [{"duelist": 1}]}},
+                      {"duelists": [{"id": "g", "copy": 1, "tower_only": True}]},
+                      {"duelists": [{"id": "g", "copy": 1, "unlock": {"tower": 2}}]},
+                      {"menu": {"buttons": [{"id": "t", "label": "T", "menu": "second", "action": "tower"}]}}):
+            with self.subTest(value=value):
+                self.assertEqual(self.needs(value), 14)
+        self.assertEqual(self.needs({"duelists": [{"id": "g", "copy": 1, "unlock": {"beat": 2}}]}), 0)
+        self.assertIn("newer than v0.3.0", compat.release_text(14))
+
+    def test_api_15_card_types(self):
+        value = {"card_types": {"types": [{"id": 0, "name": "Wyrm"}, {"id": 24, "name": "Cyberse"}]}}
+        self.assertEqual(self.needs(value), 15)
+        p = Project(fixture().game())
+        p.other.update(value)
+        self.assertFalse([issue for issue in validate.validate(p) if issue.level == "error"])
+
+    def test_custom_type_name_survives_import_and_save(self):
+        p = Project(fixture().game())
+        manifest.apply(p, {"card_types": {"types": [{"id": 24, "name": "Cyberse"}]},
+                           "cards": [{"replace": 1, "type": "Cyberse"}]})
+        self.assertEqual(p.cards[1].type, 24)
+        self.assertEqual(manifest.build(p)["cards"][0]["type"], "Cyberse")
+
+    def test_type_import_uses_runtime_collisions_aliases_and_equips(self):
+        p = Project(fixture().game())
+        messages = manifest.apply(p, {
+            "card_types": {"types": [
+                {"id": 0, "name": "Wyrm"},
+                {"id": 24, "name": "Cyberse"},
+                {"id": 25, "name": "Dragon"},
+            ]},
+            "cards": [{"replace": 1, "type": "Dragon"}],
+            "equips": [{"card": 660, "add": ["Cyberse"]}],
+        })
+        self.assertEqual(p.type_names[0], "Wyrm")
+        self.assertEqual(p.type_names[24], "Cyberse")
+        self.assertIsNone(p.type_names[25])
+        self.assertEqual(p.cards[1].type, 0)       # Dragon is Wyrm's retail alias.
+        self.assertEqual(manifest._type_choice(p, "Cyber-Se"), 24)
+        self.assertEqual(manifest._type_choice(p, 25), -1)
+        self.assertTrue(any("already type 0" in message for message in messages))
+        self.assertIn((660, manifest.EQUIP_TYPE, 24, True, 1),
+                      manifest.equip_rules(p, [{"card": 660, "add": ["Cyberse"]}], []))
+
+    def test_type_name_with_no_glyph_is_never_registered(self):
+        # encode_type_name (cards.c) rejects the whole declaration, not just
+        # the letters it cannot show: the editor's model must agree, or a
+        # card assigned to this id here would point at nothing at runtime.
+        p = Project(fixture().game())
+        messages = manifest.apply(p, {"card_types": {"types": [{"id": 24, "name": "\U0001F600"}]}})
+        self.assertIsNone(p.type_names[24])
+        self.assertTrue(any("no glyph" in message for message in messages))
+
+    def test_type_reference_accepts_hex_like_the_runtime(self):
+        # choice() (cards.c) falls back to Json_Number for an unmatched
+        # string, which reads "0x18" as hex the same as any other number.
+        p = Project(fixture().game())
+        manifest.apply(p, {"card_types": {"types": [{"id": 24, "name": "Cyberse"}]}})
+        self.assertEqual(manifest._type_choice(p, "0x18"), 24)
+
+    def test_api_16_attributes(self):
+        self.assertEqual(self.needs({"attributes": {"attributes": [{"id": 8, "name": "Metal"}]}}), 16)
+
+    def test_monster_effect_filter_on_a_custom_type(self):
+        # monster_effects.c filter(): a declared monster type filters, 255
+        # (the filter's "any" byte) and an undeclared id do not.
+        p = Project(fixture().game())
+        manifest.apply(p, {"card_types": {"types": [{"id": 200, "name": "Titan"}, {"id": 255, "name": "Omega"}]}})
+        boost = {"when": "face_up", "do": "boost", "attack": 100}
+        for ok in ({**boost, "type": "Titan"}, {**boost, "type": 200}, {**boost, "type": "Dragon"},
+                   {**boost, "for_each": {"type": "titan"}}):
+            with self.subTest(effect=ok):
+                self.assertEqual(monster_effects.problems([ok], p.resolve, type_names=p.type_names), [])
+        self.assertEqual(monster_effects.normalize({**boost, "type": 200}, p.resolve, type_names=p.type_names)["type"], "Titan")
+        for bad in ({**boost, "type": "Omega"}, {**boost, "type": 201}, {**boost, "type": "Magic"}):
+            with self.subTest(effect=bad):
+                self.assertTrue(monster_effects.problems([bad], p.resolve, type_names=p.type_names))
+
     def test_reasons_are_the_highest_apis(self):
         api, reasons = compat.required({"card_text_colors": {}, "ui": {}, "limits": {"swords_turns": 5}})
         self.assertEqual(api, 11)
@@ -163,7 +254,8 @@ class StampTest(unittest.TestCase):
     def test_release_text(self):
         self.assertIn("v0.2.0", compat.release_text(9))
         self.assertIn("v0.2.1-preview.1 or newer", compat.release_text(10))
-        self.assertIn("newer than v0.2.1-preview.1", compat.release_text(11))
+        self.assertIn("v0.3.0 or newer", compat.release_text(11))
+        self.assertIn("newer than v0.3.0", compat.release_text(13))
 
 
 class ExternalPacksTest(unittest.TestCase):

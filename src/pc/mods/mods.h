@@ -73,6 +73,10 @@ void Mods_SetEnabled(int mod, int enabled);
 struct JsonValue;
 void Mods_VisitCards(void (*visit)(const char *id, const char *directory, const struct JsonValue *cards, void *context),
                      void *context);
+/* Every applied manifest, in load order.  Tables which have their own
+ * top-level section use this rather than borrowing the cards visitor. */
+void Mods_VisitManifests(void (*visit)(const char *id, const char *directory,
+                                       const struct JsonValue *manifest, void *context), void *context);
 /* The mods applied at startup, in the order they were loaded: where two
  * of them set the same thing, the later one wins. */
 int Mods_LoadedCount(void);

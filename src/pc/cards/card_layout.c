@@ -238,8 +238,8 @@ int CardLayout_StatLabel(int dfd, char *path, size_t size, int *x, int *y, int *
     if (!path[0]) return 0;
     *x = (int)Json_Number(Json_Member(label, "x"), 0);
     *y = (int)Json_Number(Json_Member(label, "y"), 0);
-    *w = (int)Json_Number(Json_Member(label, "width"), 16);
-    *h = (int)Json_Number(Json_Member(label, "height"), 8);
+    *w = frame_box_dimension(label, "width", 16, CARD_LAYOUT_FRAME_MAX_W);
+    *h = frame_box_dimension(label, "height", 8, CARD_LAYOUT_FRAME_MAX_H);
     return *w > 0 && *h > 0;
 }
 
@@ -267,13 +267,19 @@ int CardLayout_TypeLabel(int kind, char *path, size_t size, int *x, int *y, int 
     type_labels = layout_part(style, source.layout, "type_label");
     label = Json_Member(type_labels, type_label_names[idx]);
     *visible = part_visible(label, 1);
-    if (source.mod < 0 || !full_bleed_of(&source)) return 0;
+    /* Hidden means hidden: a style that supplies both "hide" and an "image"
+     * (switching one back off without deleting the other) must not still
+     * get a replacement drawn out from under it -- stop here, the same as
+     * "hide" with no image at all does, rather than resolving the image and
+     * leaving the caller to notice *visible is false after already having
+     * what it needs to draw it. */
+    if (!*visible || source.mod < 0 || !full_bleed_of(&source)) return 0;
     mod_file(source.mod, Json_String(Json_Member(label, "image"), NULL), "\"type_label\"", path, size);
     if (!path[0]) return 0;
     *x = (int)Json_Number(Json_Member(label, "x"), 0);
     *y = (int)Json_Number(Json_Member(label, "y"), 0);
-    *w = (int)Json_Number(Json_Member(label, "width"), 56);
-    *h = (int)Json_Number(Json_Member(label, "height"), 16);
+    *w = frame_box_dimension(label, "width", 56, CARD_LAYOUT_FRAME_MAX_W);
+    *h = frame_box_dimension(label, "height", 16, CARD_LAYOUT_FRAME_MAX_H);
     return *w > 0 && *h > 0;
 }
 

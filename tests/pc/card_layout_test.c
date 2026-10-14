@@ -864,6 +864,33 @@ static void type_label_replaces_and_hides(void)
     CHECK(!CardLayout_TypeLabel(CARD_TYPE_EQUIP, path, sizeof(path), &x, &y, &w, &h, &visible));
     CHECK(!visible && !*path);
 
+    /* "hide" together with an "image" (switching one back off without
+     * deleting the other): still nothing, not the image either. */
+    reset();
+    add_mod("x", "/mods/x",
+            "{\"id\": \"x\", \"card_layout\": {\"frame_styles\": {\"custom\": {\"image\": \"f.png\","
+            "\"hand_color\": \"purple\", \"type_label\": {"
+            "\"trap\": {\"image\": \"t.png\", \"hide\": true}}}},"
+            "\"default_style\": \"custom\"}}",
+            1, "full_bleed", 1);
+    CardLayout_SetCard(0);
+    CHECK(!CardLayout_TypeLabel(CARD_TYPE_TRAP, path, sizeof(path), &x, &y, &w, &h, &visible));
+    CHECK(!visible && !*path);
+
+    /* An absurd width/height is bounded rather than handed to the renderer
+     * raw (card_layout.c's frame_box_dimension, the same clamp the main
+     * frame box uses). */
+    reset();
+    add_mod("x", "/mods/x",
+            "{\"id\": \"x\", \"card_layout\": {\"frame_styles\": {\"custom\": {\"image\": \"f.png\","
+            "\"hand_color\": \"purple\", \"type_label\": {"
+            "\"trap\": {\"image\": \"t.png\", \"width\": 99999, \"height\": 99999}}}},"
+            "\"default_style\": \"custom\"}}",
+            1, "full_bleed", 1);
+    CardLayout_SetCard(0);
+    CHECK(CardLayout_TypeLabel(CARD_TYPE_TRAP, path, sizeof(path), &x, &y, &w, &h, &visible));
+    CHECK(w == CARD_LAYOUT_FRAME_MAX_W && h == CARD_LAYOUT_FRAME_MAX_H);
+
     /* A position-only layout (full_bleed off, nothing to replace the frame
      * with) can still hide retail's own built-in caption. */
     reset();

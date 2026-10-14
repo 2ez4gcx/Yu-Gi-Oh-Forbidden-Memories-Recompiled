@@ -19,7 +19,7 @@ from pathlib import Path
 from .gamedata import FRAME_COLOR_NAMES, TYPE_MAGIC
 from .model import type_named
 
-HOST_API = 16
+HOST_API = 17
 
 # The release each mod API first shipped in, for the hints. An API past the
 # last listed is newer than every release.
@@ -206,7 +206,7 @@ def features(manifest: dict, project=None) -> list:
     # --- API 14 -------------------------------------------------------------
     if "tower" in manifest:
         add(14, "a tower (\"tower\")")
-    for entry in _entries(manifest.get("duelists")):
+    for entry in _entries(manifest.get("duelists")) + _roster_files(project):
         if "tower_only" in entry:
             add(14, "a duelist of the tower's alone (\"tower_only\")")
         if isinstance(entry.get("unlock"), dict) and "tower" in entry["unlock"]:
@@ -220,7 +220,37 @@ def features(manifest: dict, project=None) -> list:
     # --- API 16 -------------------------------------------------------------
     if "attributes" in manifest:
         add(16, "mod-defined card attributes (\"attributes\")")
+    # --- API 17 -------------------------------------------------------------
+    for entry in _entries(manifest.get("duelists")) + _roster_files(project):
+        if "bust" in entry:
+            add(17, "a duelist's bust (\"bust\")")
+        if "replace_bust" in entry:
+            add(17, "a disc duelist's bust in the campaign (\"replace_bust\")")
+    if _named_expression(manifest.get("tower")):
+        add(17, "a story's character by its bust's expression (\"expression\": a name)")
     return out
+
+
+def _roster_files(project) -> list:
+    """The duelists the mod keeps in files of their own (duelists/<id>.json,
+    or the file mod.json's "duelists" names), as they will be written: the
+    manifest's list does not show them."""
+    from . import roster
+    if project is None:
+        return []
+    return [roster.entry(e, False) for e in roster.entries(project) if e.origin != "manifest"]
+
+
+def _named_expression(value) -> bool:
+    """Whether a tower's stories name a side's expression by a name (a
+    bust's) rather than a number."""
+    if isinstance(value, dict):
+        if isinstance(value.get("expression"), str) and ("duelist" in value or "character" in value):
+            return True
+        return any(_named_expression(v) for v in value.values())
+    if isinstance(value, list):
+        return any(_named_expression(v) for v in value)
+    return False
 
 
 def required(manifest: dict, project=None) -> tuple:

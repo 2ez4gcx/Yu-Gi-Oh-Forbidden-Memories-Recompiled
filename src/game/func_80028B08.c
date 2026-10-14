@@ -529,21 +529,21 @@ void func_80028B08(DisplayObject *obj, s32 arg1) {
                 CardLayout_DrawStatLabel(win->field_30.h.field_30, win->field_30.h.field_32,
                                          1, arg1, arg, win->field_0C, EXT);
             }
-            if (CardLayout_FullBleed() && atk_layout.visible &&
-                CardLayout_DrawDigits(win->field_30.h.field_30, win->field_30.h.field_32,
-                                      atk_layout.x, atk_layout.y, buf1, digits, (rec->field_3C & 0x80) != 0,
-                                      arg1, arg, win->field_0C, EXT)) {
-                if (def_layout.visible) {
-                    CardLayout_DrawDigits(win->field_30.h.field_30, win->field_30.h.field_32,
-                                          def_layout.x, def_layout.y, buf2, digits, (rec->field_3C & 0x40) != 0,
-                                          arg1, arg, win->field_0C, EXT);
-                }
-            } else {
+            {
+            s32 atk_custom = 0, def_custom = 0;
+            if (CardLayout_FullBleed() && atk_layout.visible)
+                atk_custom = CardLayout_DrawDigits(win->field_30.h.field_30, win->field_30.h.field_32,
+                                                    atk_layout.x, atk_layout.y, buf1, digits,
+                                                    (rec->field_3C & 0x80) != 0, arg1, arg, win->field_0C, EXT);
+            if (CardLayout_FullBleed() && def_layout.visible)
+                def_custom = CardLayout_DrawDigits(win->field_30.h.field_30, win->field_30.h.field_32,
+                                                    def_layout.x, def_layout.y, buf2, digits,
+                                                    (rec->field_3C & 0x40) != 0, arg1, arg, win->field_0C, EXT);
 
             /* A fallback style's own "color" (card_layout.h's CardLayoutPlacement):
              * a filter on the card's own fade tint, not a replacement for it,
              * so the box still dims/fades with the rest of the card. */
-            if (atk_layout.visible) {
+            if (!atk_custom && atk_layout.visible) {
             PRM->rgb = CardLayout_Tint(win->field_0C, atk_layout.r, atk_layout.g, atk_layout.b);
             PRM->uv.b.hi = (PRM->uv.b.hi & 0x80) + 0x10;
             PRM->xy.h.x = win->field_30.h.field_30 + atk_left;
@@ -559,10 +559,18 @@ void func_80028B08(DisplayObject *obj, s32 arg1) {
             }
             }
 
-            if (def_layout.visible) {
+            if (!def_custom && def_layout.visible) {
             PRM->rgb = CardLayout_Tint(win->field_0C, def_layout.r, def_layout.g, def_layout.b);
             PRM->xy.h.x = win->field_30.h.field_30 + def_left;
             PRM->xy.h.y = win->field_30.h.field_32 + def_top;
+            /* ATK's own fallback block (above) is the only other place this
+             * digit glyph footprint gets set, and -- now that the two
+             * fallbacks run independently -- it may not have run this call
+             * (ATK drawn via the custom strip, or hidden outright). Set it
+             * here too rather than leaving this block trusting whatever
+             * extent the earlier ATK/DFD label sprite (field_3C.word, line
+             * ~446) left behind. */
+            *(u32 *)&PRM->extent = 0x000D0006;
             PRM->cxcy.h.cy = 0xF8;
             if (rec->field_3C & 0x40) {
                 PRM->cxcy.h.cy = 0xF9;

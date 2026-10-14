@@ -566,7 +566,8 @@ CardLayoutPlacement CardLayout_Get(CardLayoutElement element)
     switch (element) {
     case CARD_LAYOUT_FRAME: {
         /* The current card's frame style, at most 140x196: the retail
-         * viewer's own card-plate footprint.
+         * viewer's own card-plate footprint. This is intentionally not a
+         * movable manifest part: only full_bleed replaces the retail plate.
          * A style's optional back_image uses this same box. */
         p.visible = !full_bleed;
         p.w = current.width;

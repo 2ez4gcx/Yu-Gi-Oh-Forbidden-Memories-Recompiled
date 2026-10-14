@@ -989,6 +989,9 @@ value, while `"atk_label": {"hide": true}` does the reverse. `"hidden":
 true` and `"show": false` are accepted aliases. Put the flag in a frame
 style to affect only that style, or at the top level to affect every style
 that does not supply its own part.
+The large card frame itself is not hideable: `full_bleed` replaces the retail
+plate with the style's frame image, while a fallback style keeps the retail
+plate.
 
 `atk`/`def`/`stars`/`attribute` (and `spell`'s `icon`) also move a card drawn
 in a *fallback* style (`full_bleed` off, retail's own frame and title plate

@@ -648,7 +648,11 @@ duelist's bust is its own wherever a story shows it.
 
 The pictures are saved in `busts/<id>/` (`<expression>.png`,
 `<expression>-talk1.png`, `<expression>-blink.png`); a bust read from a mod
-keeps its own paths. Conflicts says what the game would read otherwise (a
+keeps its own paths. A bust one of whose pictures cannot be read is kept as
+written, its files as they are (Save As carries them), and the page does not
+edit it until they are mended. Taking a bust out removes its pictures from
+the mod, but not one something else shows too (a tower story's picture, say).
+Conflicts says what the game would read otherwise (a
 frame of another size than the default's, which it stretches; a default that
 is none of them; a fifth expression on, which comes in as another character;
 `replace_bust` on a duelist the campaign shows as nobody). A bust needs mod

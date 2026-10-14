@@ -776,13 +776,34 @@ def files(project, decks: dict, drops: dict) -> dict:
     return out
 
 
+def used_elsewhere(project) -> set:
+    """The mod's files something besides the roster names: a PNG a tower's
+    story or scene shows (or any other key of mod.json's the editor keeps as
+    written), and the files the other tabs write (Project.files). A bust's
+    picture that is one of them stays when the bust goes."""
+    out = set(getattr(project, "files", {}) or {})
+
+    def walk(value):
+        if isinstance(value, str):
+            if value.lower().endswith(".png"):
+                out.add(value.replace("\\", "/"))
+        elif isinstance(value, dict):
+            for item in value.values():
+                walk(item)
+        elif isinstance(value, list):
+            for item in value:
+                walk(item)
+    walk(getattr(project, "other", None))
+    return out
+
+
 def write(project, folder, decks: dict, drops: dict):
     """The roster's files into the mod folder; a file the roster was read
     from and now has no use for (a duelist removed, renamed, a pool back as
-    its base's) goes."""
+    its base's) goes -- unless something else uses it (used_elsewhere)."""
     folder = Path(folder)
     made = files(project, decks, drops)
-    for rel in sorted(getattr(project, "roster_owned", set()) - set(made)):
+    for rel in sorted(getattr(project, "roster_owned", set()) - set(made) - used_elsewhere(project)):
         target = folder / rel
         if target.is_file():
             target.unlink()
@@ -794,10 +815,15 @@ def write(project, folder, decks: dict, drops: dict):
     project.roster_owned = set(made)
 
 
-def owned(project, rel) -> bool:
+def owned(project, rel, elsewhere=None) -> bool:
     """Whether a file of the folder the mod was read from is the roster's to
-    write (save_mod does not copy it: it writes it afresh)."""
-    return str(rel).replace("\\", "/") in getattr(project, "roster_owned", set())
+    write (save_mod does not copy it: it writes it afresh); not one
+    something else uses too (used_elsewhere, `elsewhere` when worked out
+    already), which Save As copies."""
+    rel = str(rel).replace("\\", "/")
+    if rel not in getattr(project, "roster_owned", set()):
+        return False
+    return rel not in (used_elsewhere(project) if elsewhere is None else elsewhere)
 
 
 # --- checks ----------------------------------------------------------------------------------

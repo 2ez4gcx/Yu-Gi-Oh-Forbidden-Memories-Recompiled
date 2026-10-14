@@ -198,14 +198,20 @@ class BustView:
             self.caption.configure(text=f"{image.width}×{image.height}"
                                         + ("" if fit.size == image.size else f", shrunk to {fit.width}×{fit.height}")
                                         + ", at the console's 320×240")
-        has = e is not None
+        # A bust a picture of which could not be read is written back as it
+        # was, pictures and all: an edit would not be saved, so none is made.
+        kept = b is not None and b.unread
+        if kept:
+            self.caption.configure(text="A picture of this bust could not be read: it is kept as written, its "
+                                        "files as they are. Mend them and open the mod again to edit it.")
+        has = e is not None and not kept
         for button in (self.rename_button, self.remove_button, self.default_button, self.up_button,
                        self.down_button, self.picture_button, self.talk_button, self.blink_button):
             button.state(["!disabled"] if has else ["disabled"])
         self.untalk_button.state(["!disabled"] if has and e.talk else ["disabled"])
         self.unblink_button.state(["!disabled"] if has and e.blink is not None else ["disabled"])
         self.drop_button.state(["!disabled"] if b is not None else ["disabled"])
-        self.add_button.state(["!disabled"] if self.subject() != 0 else ["disabled"])
+        self.add_button.state(["!disabled"] if self.subject() != 0 and not kept else ["disabled"])
 
     # --- edits ----------------------------------------------------------------------------
 

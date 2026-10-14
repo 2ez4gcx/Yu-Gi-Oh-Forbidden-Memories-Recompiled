@@ -124,6 +124,63 @@ class BustTest(unittest.TestCase):
         self.assertEqual(listed["c"]["bust"], {"default": "y", "expressions": [{"name": "y", "image": "art/none.png"}]})
         self.assertTrue((self.folder / "art/g-open.png").is_file())
 
+    def test_partly_unread_bust_keeps_its_pictures(self):
+        """A bust one of whose pictures is missing is kept as written: Save
+        leaves the pictures it has where they are, Save As carries them (the
+        bug: they were the editor's, unwritten, so Save deleted them)."""
+        self.folder.mkdir(parents=True)
+        (self.folder / "art").mkdir()
+        (self.folder / "art/g.png").write_bytes(figure(CALM))
+        (self.folder / "art/g-blink.png").write_bytes(figure(CALM, shut=True))
+        written = {"default": "x", "expressions": [
+            {"name": "x", "image": "art/g.png", "talk": "art/missing.png", "blink": "art/g-blink.png"}]}
+        (self.folder / "mod.json").write_text(json.dumps({"id": "m", "name": "M", "duelists": [
+            {"id": "g", "copy": 1, "bust": written}]}))
+        p, messages = manifest.open_mod(self.p.retail, self.folder)
+        self.assertEqual(messages, ["duelist g bust expressions[0]: no file art/missing.png; kept as written"])
+        manifest.save_mod(p, self.folder)
+        self.assertEqual((self.folder / "art/g.png").read_bytes(), figure(CALM))
+        self.assertEqual((self.folder / "art/g-blink.png").read_bytes(), figure(CALM, shut=True))
+        self.assertEqual(json.loads((self.folder / "mod.json").read_text())["duelists"][0]["bust"], written)
+        again, _ = manifest.open_mod(self.p.retail, self.folder)
+        elsewhere = Path(self.tmp.name) / "copy"
+        manifest.save_mod(again, elsewhere)
+        self.assertEqual((elsewhere / "art/g.png").read_bytes(), figure(CALM))
+        self.assertEqual((elsewhere / "art/g-blink.png").read_bytes(), figure(CALM, shut=True))
+        self.assertEqual(json.loads((elsewhere / "mod.json").read_text())["duelists"][0]["bust"], written)
+
+    def test_shared_picture_outlives_the_bust(self):
+        """A PNG a bust and a tower story both show stays when the bust is
+        taken out, on Save and on Save As (the bug: the bust's going took
+        the story's picture with it)."""
+        self.folder.mkdir(parents=True)
+        (self.folder / "art").mkdir()
+        (self.folder / "art/g.png").write_bytes(figure(CALM))
+        (self.folder / "mod.json").write_text(json.dumps({"id": "m", "name": "M", "duelists": [
+            {"id": "g", "copy": 1, "bust": "art/g.png"}],
+            "tower": {"intro": {"characters": {"left": "art/g.png"}, "lines": ["Hi."]},
+                      "floors": [{"duelist": 1}]}}))
+        p, messages = manifest.open_mod(self.p.retail, self.folder)
+        self.assertEqual(messages, [])
+        g = roster.find(p, "g")
+        roster.drop_bust(p, g)
+        elsewhere = Path(self.tmp.name) / "copy"
+        manifest.save_mod(p, elsewhere)
+        self.assertEqual((elsewhere / "art/g.png").read_bytes(), figure(CALM))
+        manifest.save_mod(p, self.folder)
+        self.assertEqual((self.folder / "art/g.png").read_bytes(), figure(CALM))
+        self.assertNotIn("bust", json.loads((self.folder / "mod.json").read_text())["duelists"][0])
+        # Not shared, a bust's picture still goes with it.
+        (self.folder / "art/h.png").write_bytes(figure(SAD))
+        data = json.loads((self.folder / "mod.json").read_text())
+        data["duelists"][0]["bust"] = "art/h.png"
+        (self.folder / "mod.json").write_text(json.dumps(data))
+        p, _ = manifest.open_mod(self.p.retail, self.folder)
+        roster.drop_bust(p, roster.find(p, "g"))
+        manifest.save_mod(p, self.folder)
+        self.assertFalse((self.folder / "art/h.png").exists())
+        self.assertTrue((self.folder / "art/g.png").is_file())
+
     def test_checks(self):
         p = self.p
         ghost = roster.add_copy(p, 1, "Ghost")

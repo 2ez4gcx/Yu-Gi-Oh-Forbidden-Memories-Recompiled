@@ -129,10 +129,21 @@ def _read_png(folder, rel, where, messages):
 
 def read(value, folder, where: str, messages: list, owned: set):
     """A duelists entry's "bust" (busts.c Busts_Read), its pictures from
-    `folder`; the paths read go in `owned`. None when it is none."""
+    `folder`; the paths read go in `owned` -- the editor's to write afresh,
+    or to delete once nothing uses them -- only when every picture of it was
+    read: a bust kept as written keeps its files as they are. None when it is
+    none."""
     if value is None:
         return None
     bust = Bust(written=_copy.deepcopy(value))
+    mine = set()
+    bust = _read(value, folder, where, messages, mine, bust)
+    if not bust.unread:
+        owned.update(mine)
+    return bust
+
+
+def _read(value, folder, where, messages, owned, bust):
     if isinstance(value, str):
         data = _read_png(folder, value, f"{where} bust", messages)
         bust.default = "default"

@@ -144,7 +144,9 @@ static void rect(const JsonValue *part, int *x, int *y, int *w, int *h, int dx, 
 
 static int frame_box_dimension(const JsonValue *frame, const char *key, int fallback, int maximum)
 {
-    double value = Json_Number(Json_Member(frame, key), fallback);
+    /* Json_Number is a checked signed-whole-number parser, so this stays a
+     * long until after both bounds checks (no floating NaN conversion path). */
+    long value = Json_Number(Json_Member(frame, key), fallback);
 
     if (value < 1) return fallback;
     if (value > maximum) return maximum;

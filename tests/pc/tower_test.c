@@ -79,15 +79,23 @@ void Tower_MakeArt(TowerConfig *config) { (void)config; }
 static int teana_replaces;
 int Duelists_Bust(int duelist) { return duelist == 40 ? 0 : duelist == 7 ? 1 : duelist == 2 ? 2 : -1; }
 int Duelists_ReplacesBust(int duelist) { return duelist == 2 && teana_replaces; }
+static const char *const bust_names[3][3] = {{"calm", "angry", "sad"}, {"smug", "shocked", ""}, {"stern", "", ""}};
 int Busts_Named(int bust, const char *name)
 {
-    static const char *const names[3][3] = {{"calm", "angry", "sad"}, {"smug", "shocked", ""}, {"stern", "", ""}};
     int k;
     for (k = 0; bust >= 0 && bust < 3 && k < 3; k++) {
-        if (names[bust][k][0] && !strcmp(names[bust][k], name)) return k;
+        if (bust_names[bust][k][0] && !strcmp(bust_names[bust][k], name)) return k;
     }
     return -1;
 }
+int Busts_Count(int bust) { return bust == 0 ? 3 : bust == 1 ? 2 : bust == 2 ? 1 : 0; }
+int Busts_Default(int bust) { return bust >= 0 && bust < 3 ? 0 : -1; }
+const char *Busts_Name(int bust, int expression)
+{
+    return expression >= 0 && expression < Busts_Count(bust) ? bust_names[bust][expression] : NULL;
+}
+/* The codes' number n: the default (0 here), then the list's order. */
+int Busts_Ordered(int bust, int n) { return n >= 0 && n < Busts_Count(bust) ? n : Busts_Default(bust); }
 
 int Tables_TerrainNamed(const char *text)
 {
@@ -675,17 +683,41 @@ static void busts_cast(void)
                  "  {\"duelist\": \"opponent\", \"expression\": \"calm\"}}, \"lines\": [\"Bye.\"]}}]}}");
     tower = Tower_Config();
     CHECK(tower && notes == 6);
-    CHECK(heard("bust has no expression \"glad\"; its default is shown instead"));
-    CHECK(heard("has no bust of its own (its duelists entry's \"bust\"); \"expression\" is 0 to 3 here"));
+    /* Each note says what is shown: the bust's default by its name, or the
+     * campaign's character as it first comes in. */
+    CHECK(heard("a duelist's bust has no expression \"glad\"; its default, \"calm\", is shown instead"));
+    CHECK(heard("has no bust of its own (its duelists entry's \"bust\"); \"expression\" \"calm\" is left out and "
+                "the campaign's character 1 is shown as it first comes in (expression 0)"));
     CHECK(heard("\"expression\" by name is a duelist's bust's (\"duelist\" and \"expression\"); a campaign character's is 0 to 3"));
     CHECK(heard("\"expression\" by name is the duelist's bust's; with an \"image\" the image is shown"));
-    CHECK(heard("the opponent's bust has no expression \"glad\"; its default is shown instead"));
-    CHECK(heard("the opponent, a duelist, has no bust of its own; \"expression\" by name is left out"));
+    CHECK(heard("the opponent's (a duelist's) bust has no expression \"glad\"; its default, \"calm\", is shown instead"));
+    CHECK(heard("the opponent, a duelist, has no bust of its own (its duelists entry's \"bust\"); \"expression\" "
+                "\"calm\" is left out and the campaign's character 1 is shown as it first comes in (expression 0)"));
     line = line_of(tower->intro, 0);
-    CHECK(line->cast[0].kind == TOWER_CAST_DUELIST && !line->cast[0].expression_name[0]);
-    CHECK(line->cast[1].kind == TOWER_CAST_RETAIL && line->cast[1].id == 0x01 && !line->cast[1].expression_name[0]);
-    CHECK(!line_of(tower->floors[0].before, 0)->cast[1].expression_name[0]);
+    CHECK(line->cast[0].kind == TOWER_CAST_DUELIST && !strcmp(line->cast[0].expression_name, "calm"));
+    CHECK(line->cast[1].kind == TOWER_CAST_RETAIL && line->cast[1].id == 0x01 && !line->cast[1].expression_name[0] &&
+          line->cast[1].expression == 0);
+    CHECK(!strcmp(line_of(tower->floors[0].before, 0)->cast[1].expression_name, "calm"));
     CHECK(!line_of(tower->floors[1].after, 0)->cast[1].expression_name[0]);
+
+    /* A disc duelist whose bust only adds expressions, named with one it
+     * lacks: still its bust, in its default -- as the note says -- not the
+     * campaign's character (the bug: the name was dropped, and with it the
+     * bust). The same for the floor's opponent. */
+    Tower_Reset();
+    forget();
+    read_as("b", "{\"tower\": {\"intro\": {\"characters\": {\"left\": {\"duelist\": \"Seto\", \"expression\": \"glad\"}},"
+                 " \"lines\": [\"One.\"]},"
+                 " \"floors\": [{\"duelist\": \"Seto\", \"before\": {\"characters\": {\"right\":"
+                 "  {\"duelist\": \"opponent\", \"expression\": \"glad\"}}, \"lines\": [\"Hi.\"]}}]}}");
+    tower = Tower_Config();
+    CHECK(tower && notes == 2);
+    CHECK(heard("Seto's bust has no expression \"glad\"; its default, \"smug\", is shown instead"));
+    CHECK(heard("the opponent's (Seto's) bust has no expression \"glad\"; its default, \"smug\", is shown instead"));
+    line = line_of(tower->intro, 0);
+    CHECK(line->cast[0].kind == TOWER_CAST_DUELIST && line->cast[0].duelist == 7 &&
+          !strcmp(line->cast[0].expression_name, "smug"));
+    CHECK(!strcmp(line_of(tower->floors[0].before, 0)->cast[1].expression_name, "smug"));
 }
 
 int main(void)

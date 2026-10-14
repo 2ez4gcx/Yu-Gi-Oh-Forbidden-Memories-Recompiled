@@ -335,9 +335,14 @@ A later line naming another expression of the same bust changes the face in
 place, as the campaign does (`F6 id 4e`), when both are in one of the bust's
 records (four expressions a record, [More
 duelists](more-duelists.md#bust--the-large-character)); else the new one slides
-in as another character. A name the bust lacks is noted and its default shown;
-a name for a duelist without a bust, or for a campaign character or a PNG, is
-noted and left out. The speaker's bust talks and blinks with its own frames.
+in as another character. A name the bust lacks is noted and the bust is shown
+in its default (named in the note) -- for a disc duelist without
+`replace_bust` too, since a name asks for the bust. A name for a duelist
+without a bust is noted and left out, and the side is the campaign's
+character as it first comes in (expression 0; nothing for a villager or a
+shrine mage, who have none); a name for a campaign character
+(`{"character": n}`) is noted and left out, and with an `"image"` the image is
+shown. The speaker's bust talks and blinks with its own frames.
 
 **Limits.** Two sides, no middle (the campaign has two places; the third
 record is the small portrait). One character may stand on one side at a

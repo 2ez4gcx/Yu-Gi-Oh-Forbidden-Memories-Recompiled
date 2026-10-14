@@ -53,6 +53,10 @@ void Tower_MakeArt(TowerConfig *config) { (void)config; }
 int Duelists_Bust(int duelist) { (void)duelist; return -1; }
 int Duelists_ReplacesBust(int duelist) { (void)duelist; return 0; }
 int Busts_Named(int bust, const char *name) { (void)bust; (void)name; return -1; }
+int Busts_Count(int bust) { (void)bust; return 0; }
+int Busts_Default(int bust) { (void)bust; return -1; }
+const char *Busts_Name(int bust, int expression) { (void)bust; (void)expression; return NULL; }
+int Busts_Ordered(int bust, int n) { (void)bust; (void)n; return -1; }
 /* The duelists' conditions: "beat" is met by the save's first byte. */
 int Duelists_ConditionsMet(const void *state, const char *beat, int wins, int story, const char *card, int copies)
 {

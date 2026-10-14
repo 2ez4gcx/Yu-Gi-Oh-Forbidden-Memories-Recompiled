@@ -261,6 +261,40 @@ static int read_scene(const char *mod, const char *where, const JsonValue *value
     return TOWER_SCENE_KEEP;
 }
 
+/* A side's expression by name, its duelist known (`opponent`: as the
+ * floor's): a name its bust lacks is the bust's default, by that name, so
+ * the bust is still what is shown; a name for a duelist without a bust is
+ * left out, and the side is the campaign's character as it first comes in
+ * (expression 0), or nothing when the duelist has none. */
+static void bust_expression(const char *mod, const char *where, TowerCast *cast, int duelist, int opponent)
+{
+    int bust = Duelists_Bust(duelist), character;
+    const char *name = Duelists_Name(duelist) ? Duelists_Name(duelist) : "the duelist";
+    char who[96], whose[96];
+    if (!cast->expression_name[0]) return;
+    snprintf(who, sizeof(who), opponent ? "the opponent, %s," : "%s", name);
+    snprintf(whose, sizeof(whose), opponent ? "the opponent's (%s's) bust" : "%s's bust", name);
+    if (bust >= 0) {
+        const char *fallback = Busts_Name(bust, Busts_Default(bust));
+        if (Busts_Named(bust, cast->expression_name) >= 0 || !fallback) return;
+        Mods_Note(mod, "%s: %s has no expression \"%s\"; its default, \"%s\", is shown instead", where, whose,
+                  cast->expression_name, fallback);
+        snprintf(cast->expression_name, sizeof(cast->expression_name), "%s", fallback);
+        return;
+    }
+    character = Tower_DuelistCharacter(duelist);
+    if (character)
+        Mods_Note(mod, "%s: %s has no bust of its own (its duelists entry's \"bust\"); \"expression\" \"%s\" is left "
+                  "out and the campaign's character %d is shown as it first comes in (expression 0)", where, who,
+                  cast->expression_name, character);
+    else
+        Mods_Note(mod, "%s: %s has no bust of its own (its duelists entry's \"bust\") and no character in the "
+                  "campaign; \"expression\" \"%s\" is left out%s", where, who, cast->expression_name,
+                  opponent ? " and the side stays empty" : "");
+    cast->expression_name[0] = 0;
+    cast->expression = 0;
+}
+
 /* One side's character: "none", a character of the campaign's by its
  * number (1-64), a duelist ("Seto"; "opponent", the floor's), a PNG of the
  * mod's, or an object of one of those ("character", "duelist", "image")
@@ -360,22 +394,13 @@ static TowerCast read_cast(const char *mod, const char *where, const JsonValue *
          * name or by the codes' number. A disc duelist whose bust only
          * adds expressions is still the campaign's character unless a
          * name of its bust's asks for one of them. */
-        int bust = Duelists_Bust(cast.duelist);
-        if (bust >= 0 && cast.expression_name[0] && Busts_Named(bust, cast.expression_name) < 0) {
-            Mods_Note(mod, "%s: %s's bust has no expression \"%s\"; its default is shown instead", where,
-                      Duelists_Name(cast.duelist) ? Duelists_Name(cast.duelist) : "the duelist", cast.expression_name);
-            cast.expression_name[0] = 0;
-            cast.expression = 0;
-        }
+        int bust;
+        bust_expression(mod, where, &cast, cast.duelist, 0);
+        bust = Duelists_Bust(cast.duelist);
         if (bust >= 0 && (cast.expression_name[0] || cast.duelist >= DUELISTS_RETAIL_COUNT ||
                           Duelists_ReplacesBust(cast.duelist))) {
             cast.kind = TOWER_CAST_DUELIST;
             return cast;
-        }
-        if (bust < 0 && cast.expression_name[0]) {
-            Mods_Note(mod, "%s: %s has no bust of its own (its duelists entry's \"bust\"); \"expression\" is 0 to 3 here",
-                      where, Duelists_Name(cast.duelist) ? Duelists_Name(cast.duelist) : "the duelist");
-            cast.expression_name[0] = 0;
         }
     }
     cast.id = Tower_DuelistCharacter(cast.duelist);
@@ -579,20 +604,11 @@ static TowerStory read_story(const char *mod, const char *where, const JsonValue
  * name: the floor's opponent is known now, so the name is checked here. */
 static void opponent_expressions(const char *mod, const char *where, TowerStory story, int duelist)
 {
-    int i, s, bust = Duelists_Bust(duelist);
+    int i, s;
     for (i = 0; i < story.count; i++) {
         for (s = 0; s < TOWER_SIDES; s++) {
             TowerCast *cast = &config.lines[story.first + i].cast[s];
-            if (cast->kind != TOWER_CAST_OPPONENT || !cast->expression_name[0]) continue;
-            if (bust < 0)
-                Mods_Note(mod, "%s: the opponent, %s, has no bust of its own; \"expression\" by name is left out",
-                          where, Duelists_Name(duelist) ? Duelists_Name(duelist) : "the duelist");
-            else if (Busts_Named(bust, cast->expression_name) < 0)
-                Mods_Note(mod, "%s: the opponent's bust has no expression \"%s\"; its default is shown instead",
-                          where, cast->expression_name);
-            else
-                continue;
-            cast->expression_name[0] = 0;
+            if (cast->kind == TOWER_CAST_OPPONENT) bust_expression(mod, where, cast, duelist, 1);
         }
     }
 }

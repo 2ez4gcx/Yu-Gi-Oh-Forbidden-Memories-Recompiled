@@ -221,10 +221,12 @@ class BustTest(unittest.TestCase):
                                 "right": {"duelist": "Seto", "expression": "calm"}}, "lines": ["Hi."]}
         found = tower.check({"intro": story, "floors": [{"duelist": 1}]}, lambda n: roster.named(p, n),
                             lambda n: p.resolve(n), lambda n: roster.bust_of(p, roster.named(p, n)))
+        # Each says what the game shows instead (tower_config.c bust_expression).
         self.assertIn(("warning", "tower.intro.characters.left.expression",
-                       "Ghost's bust has no expression \"glad\"; its default is shown"), found)
+                       "Ghost's bust has no expression \"glad\"; its default, \"calm\", is shown instead"), found)
         self.assertIn(("warning", "tower.intro.characters.right.expression",
-                       "Seto has no bust of its own (the Duelists tab's Bust); left out"), found)
+                       "Seto has no bust of its own (the Duelists tab's Bust); left out, and the campaign's "
+                       "character is shown as it first comes in (expression 0)"), found)
         story["characters"] = {"left": {"duelist": "Ghost", "expression": "angry"}}
         self.assertEqual(tower.check({"intro": story, "floors": [{"duelist": 1}]}, lambda n: roster.named(p, n),
                                      lambda n: p.resolve(n), lambda n: roster.bust_of(p, roster.named(p, n))), [])

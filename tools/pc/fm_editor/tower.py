@@ -668,10 +668,11 @@ def _check_cast(value, where, duelist_named, add):
             b = bust_of(who)
             if b is None:
                 add("warning", f"{where}.expression", f"{who} has no bust of its own (the Duelists tab's Bust); "
-                                                      "left out")
-            elif bustm.find(b, expression) is None:
+                                                      "left out, and the campaign's character is shown as it first "
+                                                      "comes in (expression 0)")
+            elif bustm.find(b, expression) is None and b.expressions:
                 add("warning", f"{where}.expression", f"{who}'s bust has no expression \"{expression}\"; its "
-                                                      "default is shown")
+                                                      f"default, \"{bustm.order(b)[0].name}\", is shown instead")
     elif "expression" in cast and (_number(expression) is None or not 0 <= _number(expression) <= 3):
         add("warning", f"{where}.expression", "is 0 to 3, or the name of a duelist's bust's")
     if "image" in cast:

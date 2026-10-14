@@ -370,6 +370,11 @@ void func_80028B08(DisplayObject *obj, s32 arg1) {
 
     wrap = 0xFFFF;
     win = (DisplayObject *)obj->field_54;
+#ifdef MEMORIES_PC
+    /* The retail plate hidden only by a frame drawn this call (the end of
+     * this function): a return before it leaves the plate shown. */
+    win->attribute &= ~GsDOFF;
+#endif
     if ((obj->attribute & (1<<31) ) != 0) {
         return;
     }
@@ -679,12 +684,13 @@ void func_80028B08(DisplayObject *obj, s32 arg1) {
 #ifdef MEMORIES_PC
         PRM->xy.h.x = sa + star_layout.x;
         PRM->xy.h.y = win->field_30.h.field_32 + star_layout.y;
-        /* `stars.x` is deliberately a literal offset from the card window,
-         * matching the retail 0x77 coordinate.  Do not add a level-based
-         * centring term here: it would make one JSON position mean different
-         * things for different cards (and only when full-bleed is enabled).
-         * The normal right-to-left drawing loop below remains responsible for
-         * the row's width, exactly as it is in the original game. */
+        if (CardLayout_FullBleed()) {
+            /* star_layout.x is the row's centre, not retail's first-star
+             * anchor (notes/modding.md, the HD pack's anime frame): up to 12
+             * stars at a fixed 9px each would run past the frame's edge from
+             * a fixed anchor, so centre them instead. */
+            PRM->xy.h.x = sa + star_layout.x + 9 * (s32)rec->field_3A / 2 - 9;
+        }
         PRM->rgb = CardLayout_Tint(win->field_0C, star_layout.r, star_layout.g, star_layout.b);
 #endif
         *(u32 *)&PRM->extent = sb;

@@ -421,6 +421,12 @@ static int resolve_style(const LayoutSource *source, int card, CardLayoutStyle *
         note_once(source, "no \"frame_styles\" entry named", name);
         return 0;
     }
+    /* The name is looked up again later (CardLayout_Get's per-style parts):
+     * a cut one would find nothing there. */
+    if (strlen(name) >= sizeof(out->name)) {
+        note_once(source, "\"frame_styles\" name longer than 31 characters", name);
+        return 0;
+    }
     /* "hand_colour", the key's first spelling, is still read; "hand_color" wins when both are there. */
     hand = Json_Member(style, "hand_color");
     if (!hand) hand = Json_Member(style, "hand_colour");
@@ -555,7 +561,8 @@ int CardLayout_TitleStyled(int card_id)
     CardLayoutStyle style;
     const JsonValue *styles, *style_node;
 
-    if (!full_bleed_of(&source) || !resolve_style(&source, card_id, &style, 0)) return 0;
+    /* Only a full-bleed style, as the low-resolution title mask (func_80028B08.c) */
+    if (!full_bleed_of(&source) || !resolve_style(&source, card_id, &style, 0) || !style.full_bleed) return 0;
     styles = Json_Member(source.layout, "frame_styles");
     style_node = styles && *style.name ? Json_Member(styles, style.name) : NULL;
     return layout_part(style_node, source.layout, "title") != NULL;
@@ -599,6 +606,10 @@ CardLayoutPlacement CardLayout_Get(CardLayoutElement element)
     CardLayoutPlacement p = {1, 0, 0, 0, 0, 0x80, 0x80, 0x80};
     LayoutSource source = find_source();
     int full_bleed = full_bleed_of(&source) && current.full_bleed;
+    /* The setting off (a fresh install's default): every part where retail
+     * has it. A layout's top-level places are measured on its own frame
+     * (the HD pack's anime frame), not on the retail plate. */
+    if (!full_bleed_of(&source)) source.layout = NULL;
     int spell = CardLayout_IsSpell();
     const JsonValue *styles = Json_Member(source.layout, "frame_styles");
     const JsonValue *style_node = styles && *current.name ? Json_Member(styles, current.name) : NULL;

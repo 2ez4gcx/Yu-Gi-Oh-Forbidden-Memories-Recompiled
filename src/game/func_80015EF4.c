@@ -186,32 +186,24 @@ void func_80015EF4(void *record, POLY_GT4 *prim, POLY_FT4 *sprite, s32 *color)
      * above) stay exactly what retail computed, and the custom texture
      * rotates with them like any other face of this quad.
      *
-     * holder->field_18 (the >= 0xF test just above rot[0].vy's own store)
-     * is NOT a face-down signal -- 0xF is DUEL_CARD_SIDE_RECORD_COUNT
-     * (duel_card_layout.h), and that test is retail's own "mine or the
-     * opponent's" check, mirroring the far side's models 180 degrees so
-     * both sides face each other. The record's own DUEL_CARD_FLAG_FACE_DOWN
-     * is the real one; it is retail's own face-down signal here too: the
-     * flag alone never changes which texture this 3D quad samples, only
-     * rot[0].vz below, which rotates the quad into a mirrored view of its
-     * own front, so retail's "back" on this path is only ever that mirrored
-     * front at a recolored palette row, never a real back asset. A style's
-     * own front art mirrored the same way reads as wrong (unlike retail's
-     * neutral card-back pattern, which looks fine either way), so the
-     * face-down case reaches for the style's own field_back_image instead;
-     * with none set, nothing here overrides and retail's own mirrored-front
-     * fallback stays exactly as before. */
+     * The face is the one retail's own uv pick above shows: the back when
+     * the quad faces away (NormalClip), which a face-down card does (it is
+     * turned over) and a face-up one does for half of a turn. The style's
+     * field_back_image there, else retail's own back. */
     {
         int field_tpage, field_u, field_v, field_clut, field_w, field_h;
         int card_id = ((DuelCardRecord *)record)->card_id;
-        int face_down = (((DuelCardRecord *)record)->flags & DUEL_CARD_FLAG_FACE_DOWN) != 0;
+        /* The face the quad shows, as retail's uv pick above: its back
+         * (u 0x38, v 0x80) when it faces away -- face down, or a face-up
+         * card mid-turn. */
+        int face_down = NormalClip(*(PSXLONG *)&prim->x0, *(PSXLONG *)&prim->x1, *(PSXLONG *)&prim->x2) <= 0;
         int got = face_down
             ? CardLayoutArt_FieldBackCell(card_id, &field_tpage, &field_u, &field_v, &field_clut, &field_w,
                                           &field_h)
             : CardLayoutArt_FieldFrameCell(card_id, &field_tpage, &field_u, &field_v, &field_clut, &field_w,
                                            &field_h);
         if (got) {
-            prim->tpage = (u16)field_tpage;
+            prim->tpage = (u16)(field_tpage | ((obj->attribute >> 23) & 0x60));   /* the blend, as retail's */
             prim->clut = (u16)field_clut;
             prim->u0 = prim->u2 = (u8)field_u;
             prim->u1 = prim->u3 = (u8)(field_u + field_w);

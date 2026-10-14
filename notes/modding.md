@@ -1080,7 +1080,8 @@ A card is drawn in a frame **style**: a picture and the color its small card
 wears in the hand, together, so the card view and the hand can never
 disagree. Three keys say it:
 
-- `frame_styles`: name -> `{"image", "hand_image", "hand_color", "width", "height", "full_bleed"}`.
+- `frame_styles`: name -> `{"image", "hand_image", "field_image", "field_back_image", "back_image",
+  "library_icon", "hand_color", "width", "height", "full_bleed"}`.
   `image` is relative to the mod's directory, as a `title` mod's pictures
   are, drawn as one textured quad behind everything else, at `width`/`height`
   (140x196 with neither given). A frame may be smaller, but its dimensions
@@ -1096,8 +1097,13 @@ disagree. Three keys say it:
   is that color wears.
   `hand_image`, when present, is a PNG reduced to the 52x60 sprite for that
   style's flat duel-hand and flat field-card frame. Its artwork is drawn under the game's own card
-  art, stats and markers; it does not replace the 3D field-card, which still
-  uses `hand_color`.
+  art, stats and markers. It is also the 3D field card's frame unless the
+  style gives `field_image` (the same 52x60 size); with neither, the 3D field
+  card uses `hand_color`.
+  `field_back_image` (52x60) is the face-down card's back in the hand and on
+  the field; `back_image` is the back the card viewer shows while a card
+  turns, stretched to the style's `width`/`height` (254 at most each). Without
+  them the retail card back is drawn.
   `library_icon` is a PNG reduced to the Library grid's 12x14
   cell; without it, the grid uses the style's `hand_color` palette row.
   `full_bleed` defaults on for a style with an `image`; set it to `false`

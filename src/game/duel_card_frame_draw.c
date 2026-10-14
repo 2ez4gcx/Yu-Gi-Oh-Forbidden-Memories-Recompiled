@@ -250,7 +250,7 @@ void func_80016784(DisplayObject *object, s32 arg1, s32 arg2, s32 arg3) {
                  * draws through this same function), and a style's art has
                  * no "back" of its own to show there. Its card art, stats
                  * and type marker above remain the game's own overlays. */
-                if (object->field_69 == 0 &&
+                if (object->field_69 == 0 && object->field_67 == 0 &&   /* not the 0xC000 variant */
                     CardLayoutArt_HandFrameCell(card->card_id, &hand_tpage, &hand_u, &hand_v,
                                                  &hand_clut, &hand_w, &hand_h)) {
                     /* `fl` here is field_14|0x10000 for an ordinary (not

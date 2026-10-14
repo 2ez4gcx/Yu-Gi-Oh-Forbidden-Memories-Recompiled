@@ -218,12 +218,11 @@ static void full_bleed_mod(void)
     CHECK(p.visible && p.x == 18 && p.y == 10);
 }
 
-/* The same manifest, but the mod's own full_bleed setting is off: retail's
- * frame and title plate stay on screen, and CARD_LAYOUT_ATTRIBUTE's
- * width/height (the stretch into a full-bleed cutout) stay retail's 0x0 --
- * but every element's own position and color still read from the manifest,
- * same as with full_bleed on. A fallback style can recolor or nudge the
- * stock stat boxes without opting into a custom frame image. */
+/* The same manifest, but the mod's own full_bleed setting is off (a fresh
+ * install's default): retail's frame and title plate stay on screen, and
+ * every element is where retail has it -- the manifest's places are
+ * measured on its own frame, not on the retail plate. A fallback style
+ * (a style with no image) can still move parts while the setting is on. */
 static void setting_off(void)
 {
     CardLayoutPlacement p;
@@ -233,13 +232,13 @@ static void setting_off(void)
     CHECK(CardLayout_Get(CARD_LAYOUT_FRAME).visible);
     CHECK(CardLayout_Get(CARD_LAYOUT_TITLE).visible);
     p = CardLayout_Get(CARD_LAYOUT_ATK);
-    CHECK(p.x == 38 && p.y == 178);
+    CHECK(p.x == 0x61 && p.y == 0x9D);
     p = CardLayout_Get(CARD_LAYOUT_DEF);
-    CHECK(p.x == 104 && p.y == 178);
+    CHECK(p.x == 0x61 && p.y == 0xAB);
     p = CardLayout_Get(CARD_LAYOUT_LEVEL_STARS);
-    CHECK(p.x == 80 && p.y == 153);
+    CHECK(p.x == 0x77 && p.y == 0x20);
     p = CardLayout_Get(CARD_LAYOUT_ATTRIBUTE);
-    CHECK(p.x == 114 && p.y == 149 && p.w == 0 && p.h == 0);
+    CHECK(p.x == 0x6E && p.y == 0xD && p.w == 0 && p.h == 0);
 }
 
 /* A player who has never touched the setting (no key at all, not even an
@@ -697,15 +696,15 @@ static void color_tint(void)
     p = CardLayout_Get(CARD_LAYOUT_ATTRIBUTE);
     CHECK(p.g == 50 && p.r == 0x80 && p.b == 0x80);
 
-    /* full_bleed off: position and color still apply, same as setting_off's
-     * own check for position alone. */
+    /* full_bleed off: the layout is not in use, retail's own color (as
+     * setting_off's retail positions). */
     reset();
     add_mod("x", "/mods/x",
             "{\"id\": \"x\", \"card_layout\": {"
             "\"def\": {\"color\": {\"r\": 10, \"g\": 20, \"b\": 30}}}}",
             1, "full_bleed", 0);
     p = CardLayout_Get(CARD_LAYOUT_DEF);
-    CHECK(p.r == 10 && p.g == 20 && p.b == 30);
+    CHECK(p.r == 0x80 && p.g == 0x80 && p.b == 0x80);
 }
 
 /* A mod with several full-bleed styles, each its own frame image, can give

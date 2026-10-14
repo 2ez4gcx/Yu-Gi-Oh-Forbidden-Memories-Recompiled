@@ -99,223 +99,147 @@ typedef char frame_slots_fit_before_the_digits[FRAME_SLOTS * FRAME_SLOT_PAGES <=
 typedef char frame_palettes_fit_the_bank_width[FRAME_SLOTS * 256 <= 1024 ? 1 : -1];
 #define FRAME_CLUT_Y FRAME_TILE_H   /* right after the first tile's last pixel row, same bank, no overlap */
 
-/* The 52x60 hand frame, in the lower half with the other small assets (see
- * the map above CardLayoutArt_StatLabelCell). Its palette is on row 255,
- * free in every top-half page (a frame tile is FRAME_TILE_H tall and the
- * frame palettes are on row 254). */
-#define HAND_W 52
-#define HAND_H 60
-#define HAND_PAGE_X 832
-#define HAND_PAGE_Y 300
-#define HAND_V (HAND_PAGE_Y & 255)
-#define HAND_CLUT_X 0
-#define HAND_CLUT_Y 255
-static char hand_path[1024];
-static char hand_bank_path[1024];
-static unsigned char *hand_indices;
-static unsigned short hand_clut[256];
-static int hand_png_w, hand_png_h;
+/* The small assets of a frame style: the 52x60 hand, field and face-down
+ * sprites, the 12x14 Library icon, the ATK/DFD captions and the
+ * "[Trap Card]"-style captions. Cards of several styles are on screen
+ * together (a hand, the field, the Library grid, an attack's two cards),
+ * and the quads are rasterised when the frame is presented, from whatever
+ * the bank holds then, so each kind keeps several pictures in the bank at
+ * once (slots, the one asked for longest ago replaced), each its own cell
+ * and palette. A picture is decoded once, when it takes a slot.
+ *
+ * The cells are in the lower half of the bank (see the map above
+ * CardLayoutArt_StatLabelCell): x, y in halfwords, and the palette's row;
+ * every palette is at SMALL_CLUT_X. */
+#define SMALL_CLUT_X 512
+typedef struct {
+    char path[1024];
+    unsigned char *indices;   /* NULL: the picture failed */
+    unsigned short clut[256];
+    int png_w, png_h;
+    int stored;               /* its texels and palette are in the bank, its HD sprite registered */
+    unsigned long long used;  /* 0: free; else small_clock when last asked for */
+} SmallSlot;
+typedef struct {
+    const char *what;
+    int w, h, pad;            /* texels; pad: bank_pad_edge's extra row and column */
+    int count;
+    const short (*cell)[3];   /* x, y, palette row */
+    SmallSlot *slots;
+} SmallKind;
+static unsigned long long small_clock;
 
-static void hand_build(const char *path)
+/* 52x60 cells (27x61 halfwords with the padded edge). */
+#define SPRITE_W 52
+#define SPRITE_H 60
+static const short hand_cells[][3] = {
+    {640, 335, 476}, {667, 335, 477}, {694, 335, 478}, {721, 335, 479}, {748, 335, 480}, {775, 335, 481}};
+static const short field_cells[][3] = {
+    {802, 335, 482}, {829, 335, 483}, {856, 335, 484}, {768, 396, 485}, {795, 396, 486}};
+static const short field_back_cells[][3] = {
+    {822, 396, 487}, {849, 396, 488}, {612, 256, 489}, {612, 317, 490}, {612, 378, 491}};
+/* 12x14 cells (7x15 with the padded edge). */
+static const short library_cells[][3] = {
+    {784, 320, 468}, {791, 320, 469}, {798, 320, 470}, {805, 320, 471},
+    {812, 320, 472}, {819, 320, 473}, {826, 320, 474}, {833, 320, 475}};
+/* 64x32 cells (32x32), not padded: the captions' own draw reads inside them. */
+static const short stat_label_cells[][3] = {
+    {640, 288, 457}, {672, 288, 458}, {704, 288, 459}, {736, 288, 460},
+    {768, 288, 461}, {800, 288, 462}, {832, 288, 463}, {864, 288, 464}};
+static const short type_label_cells[][3] = {
+    {640, 256, 449}, {672, 256, 450}, {704, 256, 451}, {736, 256, 452},
+    {768, 256, 453}, {800, 256, 454}, {832, 256, 455}, {864, 256, 456}};
+#define SLOTS_OF(cells) ((int)(sizeof(cells) / sizeof(cells[0])))
+static SmallSlot hand_slots[SLOTS_OF(hand_cells)], field_slots[SLOTS_OF(field_cells)],
+    field_back_slots[SLOTS_OF(field_back_cells)], library_slots[SLOTS_OF(library_cells)],
+    stat_label_slots[SLOTS_OF(stat_label_cells)], type_label_slots[SLOTS_OF(type_label_cells)];
+static SmallKind hand_kind = {"hand frame", SPRITE_W, SPRITE_H, 1, SLOTS_OF(hand_cells), hand_cells, hand_slots};
+static SmallKind field_kind = {"field frame", SPRITE_W, SPRITE_H, 1, SLOTS_OF(field_cells), field_cells, field_slots};
+static SmallKind field_back_kind = {"field back", SPRITE_W, SPRITE_H, 1, SLOTS_OF(field_back_cells),
+                                    field_back_cells, field_back_slots};
+static SmallKind library_kind = {"library icon", 12, 14, 1, SLOTS_OF(library_cells), library_cells, library_slots};
+static SmallKind stat_label_kind = {"stat label", 64, 32, 0, SLOTS_OF(stat_label_cells), stat_label_cells,
+                                    stat_label_slots};
+static SmallKind type_label_kind = {"type label", 64, 32, 0, SLOTS_OF(type_label_cells), type_label_cells,
+                                    type_label_slots};
+static SmallKind *const small_kinds[] = {&hand_kind, &field_kind, &field_back_kind, &library_kind,
+                                         &stat_label_kind, &type_label_kind};
+
+/* `path`'s cell of `kind`, decoded and stored into a slot first when it is in
+ * none; 0 when there is no picture or it cannot be read. */
+static int small_cell(SmallKind *kind, const char *path, int *tpage, int *u, int *v, int *clut, int *w, int *h)
 {
+    SmallSlot *slot = NULL;
+    uint16_t *bank;
     char why[128];
+    int i, x, y, cx, cy, row;
 
-    if (!strcmp(hand_path, path)) return;
-    free(hand_indices);
-    hand_indices = NULL;
-    hand_png_w = hand_png_h = 0;
-    hand_bank_path[0] = 0;
-    snprintf(hand_path, sizeof(hand_path), "%s", path);
-    CardArt_ImageSize(path, &hand_png_w, &hand_png_h);
-    hand_indices = malloc(HAND_W * HAND_H);
-    if (hand_indices && !CardArt_IndexedImage(path, HAND_W, HAND_H, hand_indices, hand_clut, why, sizeof(why))) {
-        LOG(LOG_CARD_LAYOUT, "hand frame: %s: %s", path, why);
-        free(hand_indices);
-        hand_indices = NULL;
+    if (!path || !*path || !(bank = SoftGpu_Bank(FRAME_BANK))) return 0;
+    for (i = 0; i < kind->count && !slot; i++) {
+        if (kind->slots[i].used && !strcmp(kind->slots[i].path, path)) slot = &kind->slots[i];
     }
-    if (hand_indices && hand_png_w > 0) TexturePack_BankImagePreload(path);
+    if (!slot) {
+        slot = &kind->slots[0];
+        for (i = 1; i < kind->count; i++) {
+            if (kind->slots[i].used < slot->used) slot = &kind->slots[i];
+        }
+        free(slot->indices);
+        memset(slot, 0, sizeof(*slot));
+        snprintf(slot->path, sizeof(slot->path), "%s", path);
+        CardArt_ImageSize(path, &slot->png_w, &slot->png_h);
+        slot->indices = malloc((size_t)kind->w * kind->h);
+        if (slot->indices &&
+            !CardArt_IndexedImage(path, kind->w, kind->h, slot->indices, slot->clut, why, sizeof(why))) {
+            LOG(LOG_CARD_LAYOUT, "%s: %s: %s", kind->what, path, why);
+            free(slot->indices);
+            slot->indices = NULL;
+        }
+        if (slot->indices && slot->png_w > 0) TexturePack_BankImagePreload(path);
+    }
+    slot->used = ++small_clock;
+    if (!slot->indices) return 0;
+    i = (int)(slot - kind->slots);
+    cx = kind->cell[i][0];
+    cy = kind->cell[i][1];
+    row = kind->cell[i][2];
+    if (!slot->stored) {
+        for (y = 0; y < kind->h; y++) {
+            for (x = 0; x < kind->w; x += 2) {
+                bank[(cy + y) * SOFT_GPU_WIDTH + cx + x / 2] =
+                    (uint16_t)(slot->indices[y * kind->w + x] | (slot->indices[y * kind->w + x + 1] << 8));
+            }
+        }
+        if (kind->pad) bank_pad_edge(bank, cx, cy, kind->w, kind->h);
+        memcpy(&bank[row * SOFT_GPU_WIDTH + SMALL_CLUT_X], slot->clut, sizeof(slot->clut));
+        slot->stored = 1;
+        if (slot->png_w > 0 && slot->png_h > 0) {
+            TexturePack_BankSpritesUseOwner(TEXTURE_BANK_OWNER_LAYOUT_FRAME);
+            TexturePack_AddBankSprite(FRAME_BANK, cx & ~63, cy & ~255, 1, SMALL_CLUT_X, row, (cx & 63) * 2, cy & 255,
+                                      kind->w, kind->h, path);
+        }
+    }
+    *tpage = LAYOUT_TPAGE(cx, cy);
+    *u = (cx & 63) * 2;   /* texels: two a halfword at 8bpp */
+    *v = cy & 255;
+    *clut = (row << 6) | (SMALL_CLUT_X / 16);
+    *w = kind->w;
+    *h = kind->h;
+    return 1;
 }
 
 int CardLayoutArt_HandFrameCell(int card_id, int *tpage, int *u, int *v, int *clut, int *w, int *h)
 {
-    const char *path = CardLayout_HandFramePath(card_id);
-    uint16_t *bank;
-    int x, y;
-
-    if (!path || !*path || !(bank = SoftGpu_Bank(FRAME_BANK))) return 0;
-    hand_build(path);
-    if (!hand_indices) return 0;
-    if (strcmp(hand_bank_path, path)) {
-        for (y = 0; y < HAND_H; y++) {
-            for (x = 0; x < HAND_W; x += 2) {
-                bank[(HAND_PAGE_Y + y) * SOFT_GPU_WIDTH + HAND_PAGE_X + x / 2] =
-                    (uint16_t)(hand_indices[y * HAND_W + x] | (hand_indices[y * HAND_W + x + 1] << 8));
-            }
-        }
-        bank_pad_edge(bank, HAND_PAGE_X, HAND_PAGE_Y, HAND_W, HAND_H);
-        memcpy(&bank[HAND_CLUT_Y * SOFT_GPU_WIDTH + HAND_CLUT_X], hand_clut, sizeof(hand_clut));
-        snprintf(hand_bank_path, sizeof(hand_bank_path), "%s", path);
-        if (hand_png_w > 0 && hand_png_h > 0) {
-            TexturePack_BankSpritesUseOwner(TEXTURE_BANK_OWNER_LAYOUT_FRAME);
-            TexturePack_AddBankSprite(FRAME_BANK, HAND_PAGE_X, HAND_PAGE_Y & ~255, 1, HAND_CLUT_X, HAND_CLUT_Y, 0,
-                                      HAND_V, HAND_W, HAND_H, path);
-        }
-    }
-    *tpage = LAYOUT_TPAGE(HAND_PAGE_X, HAND_PAGE_Y);
-    *u = 0;
-    *v = HAND_V;
-    *clut = (HAND_CLUT_Y << 6) | (HAND_CLUT_X / 16);
-    *w = HAND_W;
-    *h = HAND_H;
-    return 1;
-}
-
-/* Bank 13's lower half is shared by the small layout assets.  Their pages
- * are intentionally not assigned by a bare slot number: an 8bpp CLUT is 256
- * words wide while a page is only 128, so a palette occupies two slots.  The
- * coordinates below are a non-overlapping map; keep it in sync with the
- * table just above CardLayoutArt_StatLabelCell. */
-#define FIELD_W 52
-#define FIELD_H 60
-#define FIELD_PAGE_X 768
-#define FIELD_PAGE_Y 300
-#define FIELD_TPAGE_Y (FIELD_PAGE_Y & ~255)
-#define FIELD_U (FIELD_PAGE_X & 63)
-#define FIELD_V (FIELD_PAGE_Y & 255)
-/* Not under the image: row 361 from x=640 is the field back's palette. */
-#define FIELD_CLUT_X 256
-#define FIELD_CLUT_Y 255
-static char field_path[1024];
-static char field_bank_path[1024];
-static unsigned char *field_indices;
-static unsigned short field_clut[256];
-static int field_png_w, field_png_h;
-
-static void field_build(const char *path)
-{
-    char why[128];
-
-    if (!strcmp(field_path, path)) return;
-    free(field_indices);
-    field_indices = NULL;
-    field_png_w = field_png_h = 0;
-    field_bank_path[0] = 0;
-    snprintf(field_path, sizeof(field_path), "%s", path);
-    CardArt_ImageSize(path, &field_png_w, &field_png_h);
-    field_indices = malloc(FIELD_W * FIELD_H);
-    if (field_indices && !CardArt_IndexedImage(path, FIELD_W, FIELD_H, field_indices, field_clut, why, sizeof(why))) {
-        LOG(LOG_CARD_LAYOUT, "field frame: %s: %s", path, why);
-        free(field_indices);
-        field_indices = NULL;
-    }
-    if (field_indices && field_png_w > 0) TexturePack_BankImagePreload(path);
+    return small_cell(&hand_kind, CardLayout_HandFramePath(card_id), tpage, u, v, clut, w, h);
 }
 
 int CardLayoutArt_FieldFrameCell(int card_id, int *tpage, int *u, int *v, int *clut, int *w, int *h)
 {
-    const char *path = CardLayout_FieldFramePath(card_id);
-    uint16_t *bank;
-    int x, y;
-
-    if (!path || !*path || !(bank = SoftGpu_Bank(FRAME_BANK))) return 0;
-    field_build(path);
-    if (!field_indices) return 0;
-    if (strcmp(field_bank_path, path)) {
-        for (y = 0; y < FIELD_H; y++) {
-            for (x = 0; x < FIELD_W; x += 2) {
-                bank[(FIELD_PAGE_Y + y) * SOFT_GPU_WIDTH + FIELD_PAGE_X + x / 2] =
-                    (uint16_t)(field_indices[y * FIELD_W + x] | (field_indices[y * FIELD_W + x + 1] << 8));
-            }
-        }
-        bank_pad_edge(bank, FIELD_PAGE_X, FIELD_PAGE_Y, FIELD_W, FIELD_H);
-        memcpy(&bank[FIELD_CLUT_Y * SOFT_GPU_WIDTH + FIELD_CLUT_X], field_clut, sizeof(field_clut));
-        snprintf(field_bank_path, sizeof(field_bank_path), "%s", path);
-        if (field_png_w > 0 && field_png_h > 0) {
-            TexturePack_BankSpritesUseOwner(TEXTURE_BANK_OWNER_LAYOUT_FRAME);
-            TexturePack_AddBankSprite(FRAME_BANK, FIELD_PAGE_X - FIELD_U, FIELD_TPAGE_Y, 1,
-                                      FIELD_CLUT_X, FIELD_CLUT_Y, FIELD_U, FIELD_V, FIELD_W, FIELD_H, path);
-        }
-    }
-    *tpage = LAYOUT_TPAGE(FIELD_PAGE_X, FIELD_PAGE_Y);
-    *u = FIELD_U;
-    *v = FIELD_V;
-    *clut = (FIELD_CLUT_Y << 6) | (FIELD_CLUT_X / 16);
-    *w = FIELD_W;
-    *h = FIELD_H;
-    return 1;
-}
-
-#define FIELD_BACK_W 52
-#define FIELD_BACK_H 60
-#define FIELD_BACK_PAGE_X 640
-#define FIELD_BACK_PAGE_Y 300
-#define FIELD_BACK_TPAGE_Y (FIELD_BACK_PAGE_Y & ~255)
-#define FIELD_BACK_U (FIELD_BACK_PAGE_X & 63)
-#define FIELD_BACK_V (FIELD_BACK_PAGE_Y & 255)
-#define FIELD_BACK_CLUT_Y (FIELD_BACK_PAGE_Y + FIELD_BACK_H + 1)  /* +1: row FIELD_BACK_PAGE_Y + FIELD_BACK_H is the padded bottom edge */
-static char field_back_path[1024];
-static char field_back_bank_path[1024];
-static unsigned char *field_back_indices;
-static unsigned short field_back_clut[256];
-static int field_back_png_w, field_back_png_h;
-
-static void field_back_build(const char *path)
-{
-    char why[128];
-
-    if (!strcmp(field_back_path, path)) return;
-    free(field_back_indices);
-    field_back_indices = NULL;
-    field_back_png_w = field_back_png_h = 0;
-    field_back_bank_path[0] = 0;
-    snprintf(field_back_path, sizeof(field_back_path), "%s", path);
-    CardArt_ImageSize(path, &field_back_png_w, &field_back_png_h);
-    field_back_indices = malloc(FIELD_BACK_W * FIELD_BACK_H);
-    if (field_back_indices &&
-        !CardArt_IndexedImage(path, FIELD_BACK_W, FIELD_BACK_H, field_back_indices, field_back_clut, why,
-                              sizeof(why))) {
-        LOG(LOG_CARD_LAYOUT, "field back: %s: %s", path, why);
-        free(field_back_indices);
-        field_back_indices = NULL;
-    }
-    if (field_back_indices && field_back_png_w > 0) TexturePack_BankImagePreload(path);
+    return small_cell(&field_kind, CardLayout_FieldFramePath(card_id), tpage, u, v, clut, w, h);
 }
 
 int CardLayoutArt_FieldBackCell(int card_id, int *tpage, int *u, int *v, int *clut, int *w, int *h)
 {
-    const char *path = CardLayout_FieldBackPath(card_id);
-    uint16_t *bank;
-    int x, y;
-
-    if (!path || !*path || !(bank = SoftGpu_Bank(FRAME_BANK))) return 0;
-    field_back_build(path);
-    if (!field_back_indices) return 0;
-    if (strcmp(field_back_bank_path, path)) {
-        for (y = 0; y < FIELD_BACK_H; y++) {
-            for (x = 0; x < FIELD_BACK_W; x += 2) {
-                bank[(FIELD_BACK_PAGE_Y + y) * SOFT_GPU_WIDTH + FIELD_BACK_PAGE_X + x / 2] =
-                    (uint16_t)(field_back_indices[y * FIELD_BACK_W + x] |
-                               (field_back_indices[y * FIELD_BACK_W + x + 1] << 8));
-            }
-        }
-        bank_pad_edge(bank, FIELD_BACK_PAGE_X, FIELD_BACK_PAGE_Y, FIELD_BACK_W, FIELD_BACK_H);
-        memcpy(&bank[FIELD_BACK_CLUT_Y * SOFT_GPU_WIDTH + FIELD_BACK_PAGE_X], field_back_clut,
-               sizeof(field_back_clut));
-        snprintf(field_back_bank_path, sizeof(field_back_bank_path), "%s", path);
-        if (field_back_png_w > 0 && field_back_png_h > 0) {
-            TexturePack_BankSpritesUseOwner(TEXTURE_BANK_OWNER_LAYOUT_FRAME);
-            TexturePack_AddBankSprite(FRAME_BANK, FIELD_BACK_PAGE_X - FIELD_BACK_U, FIELD_BACK_TPAGE_Y, 1,
-                                      FIELD_BACK_PAGE_X, FIELD_BACK_CLUT_Y, FIELD_BACK_U, FIELD_BACK_V,
-                                      FIELD_BACK_W, FIELD_BACK_H, path);
-        }
-    }
-    *tpage = LAYOUT_TPAGE(FIELD_BACK_PAGE_X, FIELD_BACK_PAGE_Y);
-    *u = FIELD_BACK_U;
-    *v = FIELD_BACK_V;
-    *clut = (FIELD_BACK_CLUT_Y << 6) | (FIELD_BACK_PAGE_X / 16);
-    *w = FIELD_BACK_W;
-    *h = FIELD_BACK_H;
-    return 1;
+    return small_cell(&field_back_kind, CardLayout_FieldBackPath(card_id), tpage, u, v, clut, w, h);
 }
 
 /* Unlike every other cell here,
@@ -415,101 +339,9 @@ int CardLayoutArt_BackCell(int card_id, int *tpage, int *u, int *v, int *clut, i
     return 1;
 }
 
-#define LIBRARY_W 12
-#define LIBRARY_H 14
-#define LIBRARY_PAGE_X 640
-#define LIBRARY_PAGE_Y 280
-#define LIBRARY_TPAGE_X (LIBRARY_PAGE_X & ~63)
-#define LIBRARY_TPAGE_Y (LIBRARY_PAGE_Y & ~255)
-#define LIBRARY_U (LIBRARY_PAGE_X & 63)
-#define LIBRARY_V (LIBRARY_PAGE_Y & 255)
-#define LIBRARY_X_WORD LIBRARY_PAGE_X
-#define LIBRARY_Y LIBRARY_PAGE_Y
-#define LIBRARY_CLUT_Y (LIBRARY_Y + LIBRARY_H + 1)  /* +1: row LIBRARY_Y + LIBRARY_H is the padded bottom edge */
-static char library_path[1024];
-static char library_bank_path[1024];
-/* Keep the useful card-001 Library diagnostic to one line per launch.  The
- * grid is rebuilt every frame, so an ordinary trace here would be noisy. */
-static int library_card_one_noted;
-static unsigned char *library_indices;
-static unsigned short library_clut[256];
-static int library_png_w, library_png_h;
-
-static void library_build(const char *path)
-{
-    char why[128];
-
-    if (!strcmp(library_path, path)) return;
-    free(library_indices);
-    library_indices = NULL;
-    library_png_w = library_png_h = 0;
-    library_bank_path[0] = 0;
-    snprintf(library_path, sizeof(library_path), "%s", path);
-    CardArt_ImageSize(path, &library_png_w, &library_png_h);
-    library_indices = malloc(LIBRARY_W * LIBRARY_H);
-    if (library_indices && !CardArt_IndexedImage(path, LIBRARY_W, LIBRARY_H, library_indices, library_clut, why, sizeof(why))) {
-        LOG(LOG_CARD_LAYOUT, "library icon: %s: %s", path, why);
-        free(library_indices);
-        library_indices = NULL;
-    }
-    if (library_indices && library_png_w > 0) TexturePack_BankImagePreload(path);
-}
-
 int CardLayoutArt_LibraryIconCell(int card_id, int *tpage, int *u, int *v, int *clut, int *w, int *h)
 {
-    const char *path = CardLayout_LibraryIconPath(card_id);
-    uint16_t *bank;
-    int x, y;
-
-    if (card_id == 1 && !library_card_one_noted) {
-        LOG(LOG_CARD_LAYOUT, "library icon card 001: %s", path && *path ? path : "no style/image resolved");
-        library_card_one_noted = 1;
-    }
-    if (!path || !*path || !(bank = SoftGpu_Bank(FRAME_BANK))) return 0;
-    library_build(path);
-    if (!library_indices) return 0;
-    if (strcmp(library_bank_path, path)) {
-        int opaque = 0, k;
-        for (k = 0; k < LIBRARY_W * LIBRARY_H; k++) if (library_indices[k]) opaque++;
-        for (y = 0; y < LIBRARY_H; y++) {
-            for (x = 0; x < LIBRARY_W; x += 2) {
-                bank[(LIBRARY_Y + y) * SOFT_GPU_WIDTH + LIBRARY_X_WORD + x / 2] =
-                    (uint16_t)(library_indices[y * LIBRARY_W + x] | (library_indices[y * LIBRARY_W + x + 1] << 8));
-            }
-        }
-        bank_pad_edge(bank, LIBRARY_X_WORD, LIBRARY_Y, LIBRARY_W, LIBRARY_H);
-        memcpy(&bank[LIBRARY_CLUT_Y * SOFT_GPU_WIDTH + LIBRARY_PAGE_X], library_clut, sizeof(library_clut));
-        snprintf(library_bank_path, sizeof(library_bank_path), "%s", path);
-        if (card_id == 1) {
-            uint16_t stored_word = bank[LIBRARY_Y * SOFT_GPU_WIDTH + LIBRARY_X_WORD];
-            uint16_t stored_clut0 = bank[LIBRARY_CLUT_Y * SOFT_GPU_WIDTH + LIBRARY_PAGE_X];
-            LOG(LOG_CARD_LAYOUT, "library icon card 001: stored %s, %d/%d opaque, png=%dx%d, "
-                "row0word0=0x%04x (indices %d,%d) clut[0]=0x%04x bank=%p",
-                path, opaque, LIBRARY_W * LIBRARY_H, library_png_w, library_png_h, stored_word,
-                library_indices[0], library_indices[1], stored_clut0, (void *)bank);
-        }
-        if (library_png_w > 0 && library_png_h > 0) {
-            TexturePack_BankSpritesUseOwner(TEXTURE_BANK_OWNER_LAYOUT_FRAME);
-            TexturePack_AddBankSprite(FRAME_BANK, LIBRARY_TPAGE_X, LIBRARY_TPAGE_Y, 1,
-                                      LIBRARY_PAGE_X, LIBRARY_CLUT_Y, LIBRARY_U, LIBRARY_V,
-                                      LIBRARY_W, LIBRARY_H, path);
-        }
-    }
-    *tpage = LAYOUT_TPAGE(LIBRARY_PAGE_X, LIBRARY_PAGE_Y);
-    *u = LIBRARY_U;
-    *v = LIBRARY_V;
-    *clut = (LIBRARY_CLUT_Y << 6) | (LIBRARY_PAGE_X / 16);
-    *w = LIBRARY_W;
-    *h = LIBRARY_H;
-    if (card_id == 1) {
-        static int logged_cell;
-        if (!logged_cell) {
-            LOG(LOG_CARD_LAYOUT, "library icon card 001: cell tpage=0x%04x u=%d v=%d clut=0x%04x w=%d h=%d",
-                *tpage, *u, *v, *clut, *w, *h);
-            logged_cell = 1;
-        }
-    }
-    return 1;
+    return small_cell(&library_kind, CardLayout_LibraryIconPath(card_id), tpage, u, v, clut, w, h);
 }
 
 /* Each frame image's built texels (FRAME_W x FRAME_H palette indices and its
@@ -733,197 +565,66 @@ int CardLayoutArt_DigitCell(int digit, int dim, int *tpage, int *u, int *v, int 
 /* Bank 13 allocation besides the frames (all coordinates are halfwords).
  * The frame slots take x=0..1023, y0..253 and x=0..511, y256..509, their
  * palettes x=0..767, y254; the digit strip x=512..611, y256..447, its
- * palette x=512..767, y448. The rest:
+ * palette x=512..767, y448. The rest (the small cells' tables are above
+ * small_cell):
  *
- *   title      pixels 640..687, y256..269; CLUT 640..895, y270
- *   library    pixels 640..645, y280..294; CLUT 640..895, y295
- *   field      pixels 768..794, y300..360; CLUT 256..511, y255
- *   field back pixels 640..665, y300..360; CLUT 640..895, y361
- *   hand       pixels 832..858, y300..360; CLUT 0..255, y255
- *   ATK label  pixels 768..831, y370..433; CLUT 512..767, y255
- *   DFD label  pixels 640..703, y370..433; CLUT 640..895, y434
- *   magic type label  pixels 768..799, y436..467; CLUT 768..1023, y255
- *   trap type label   pixels 832..863, y436..467; CLUT 0..255, y510
- *   ritual type label pixels 768..799, y469..500; CLUT 256..511, y510
- *   equip type label  pixels 640..671, y469..500; CLUT 640..895, y501
+ *   type labels  8 x 32x32: x=640..895, y256..287
+ *   stat labels  8 x 32x32: x=640..895, y288..319
+ *   titles       3 x 48x14: x=640..783, y320..333
+ *   library      8 x 7x15:  x=784..839, y320..334
+ *   hand, field  27x61:     x=640..882, y335..395; x=768..875, y396..456;
+ *   field back              x=612..638, y256..438
+ *   their palettes          x=512..767, y449..491, one row each
  *   card back  pixels 896..1023, y256..510; CLUT 768..1023, y511
  *
  * Full 256-entry CLUT widths are called out because treating them as one
  * 128-word page was the source of prior menu/label corruption. */
-#define STAT_LABEL_W 128
-#define STAT_LABEL_H 64
-#define STAT_LABEL_ATK_X 768
-#define STAT_LABEL_DFD_X 640
-#define STAT_LABEL_Y 370
-static const int stat_label_clut_x[2] = {512, STAT_LABEL_DFD_X};
-static const int stat_label_clut_y[2] = {255, STAT_LABEL_Y + STAT_LABEL_H};
-typedef struct {
-    char path[1024], bank_path[1024];
-    unsigned char *indices;
-    unsigned short clut[256];
-    int png_w, png_h;
-} StatLabelImage;
-static StatLabelImage stat_labels[2];
-
 int CardLayoutArt_StatLabelCell(int dfd, int *tpage, int *u, int *v, int *clut, int *w, int *h)
 {
-    char path[1024], why[128];
-    uint16_t *bank, *page;
-    StatLabelImage *image;
-    int page_x = dfd ? STAT_LABEL_DFD_X : STAT_LABEL_ATK_X, page_y = STAT_LABEL_Y;
-    int tpage_x = page_x & ~63, tpage_y = page_y & ~255;
-    int tex_u = page_x & 63, tex_v = page_y & 255;
-    int clut_x = stat_label_clut_x[dfd != 0], clut_y = stat_label_clut_y[dfd != 0], x, y;
+    char path[1024];
+    int x, y, draw_w, draw_h;
 
-    if (!CardLayout_StatLabel(dfd, path, sizeof(path), &x, &y, w, h) || !(bank = SoftGpu_Bank(FRAME_BANK))) return 0;
-    image = &stat_labels[dfd != 0];
-    if (strcmp(image->path, path)) {
-        free(image->indices);
-        memset(image, 0, sizeof(*image));
-        snprintf(image->path, sizeof(image->path), "%s", path);
-        CardArt_ImageSize(path, &image->png_w, &image->png_h);
-        image->indices = malloc(STAT_LABEL_W * STAT_LABEL_H);
-        if (image->indices && !CardArt_IndexedImage(path, STAT_LABEL_W, STAT_LABEL_H, image->indices, image->clut, why, sizeof(why))) {
-            LOG(LOG_CARD_LAYOUT, "stat label: %s: %s", path, why);
-            free(image->indices);
-            image->indices = NULL;
-        }
-        if (image->indices && image->png_w > 0) TexturePack_BankImagePreload(path);
-    }
-    if (!image->indices) return 0;
-    if (strcmp(image->bank_path, path)) {
-        page = bank + page_y * SOFT_GPU_WIDTH + page_x;
-        for (y = 0; y < STAT_LABEL_H; y++)
-            for (x = 0; x < STAT_LABEL_W; x += 2)
-                page[y * SOFT_GPU_WIDTH + x / 2] = (uint16_t)(image->indices[y * STAT_LABEL_W + x] |
-                                                               (image->indices[y * STAT_LABEL_W + x + 1] << 8));
-        memcpy(&bank[clut_y * SOFT_GPU_WIDTH + clut_x], image->clut, sizeof(image->clut));
-        snprintf(image->bank_path, sizeof(image->bank_path), "%s", path);
-        if (image->png_w > 0 && image->png_h > 0) {
-            TexturePack_BankSpritesUseOwner(TEXTURE_BANK_OWNER_LAYOUT_FRAME);
-            TexturePack_AddBankSprite(FRAME_BANK, tpage_x, tpage_y, 1, clut_x, clut_y,
-                                      tex_u, tex_v, STAT_LABEL_W, STAT_LABEL_H, path);
-        }
-    }
-    *tpage = LAYOUT_TPAGE(page_x, page_y);
-    *u = tex_u;
-    *v = tex_v;
-    *clut = (clut_y << 6) | (clut_x / 16);
-    /* The caller's earlier CardLayout_StatLabel call has the on-card draw
-     * dimensions. These outputs describe the full source cell for its UVs;
-     * returning the manifest's 18x8 here crops the transparent top-left of
-     * a centred label image and makes the text disappear. */
-    *w = STAT_LABEL_W;
-    *h = STAT_LABEL_H;
-    return 1;
+    /* *w/*h describe the whole source cell for its UVs (the caller has the
+     * on-card draw size from CardLayout_StatLabel): the manifest's 18x8 here
+     * would crop the transparent top-left of a centred label image. */
+    if (!CardLayout_StatLabel(dfd, path, sizeof(path), &x, &y, &draw_w, &draw_h)) return 0;
+    return small_cell(&stat_label_kind, path, tpage, u, v, clut, w, h);
 }
 
 /* The "[Trap Card]"-style caption retail draws for every non-monster card:
- * one slot a kind (CARD_TYPE_MAGIC..CARD_TYPE_EQUIP, card_constants.h's four
- * consecutive values), each its own small canvas and CLUT rather than one
- * shared sheet -- a style replaces any one kind's art without the others
- * sharing its palette. 64x32 is generous for a caption this size (retail's
- * own is 56x16 texels) without the 128x64 budget every STAT_LABEL_* cell
- * uses; four of those would not fit the bank's remaining room. */
-#define TYPE_LABEL_W 64
-#define TYPE_LABEL_H 32
-#define TYPE_LABEL_MAGIC_X 768
-#define TYPE_LABEL_MAGIC_Y 436
-#define TYPE_LABEL_TRAP_X 832
-#define TYPE_LABEL_TRAP_Y 436
-#define TYPE_LABEL_RITUAL_X 768
-#define TYPE_LABEL_RITUAL_Y 469
-#define TYPE_LABEL_EQUIP_X 640
-#define TYPE_LABEL_EQUIP_Y 469
-static const int type_label_page_x[CARD_NON_MONSTER_TYPE_COUNT] = {
-    TYPE_LABEL_MAGIC_X, TYPE_LABEL_TRAP_X, TYPE_LABEL_RITUAL_X, TYPE_LABEL_EQUIP_X};
-static const int type_label_page_y[CARD_NON_MONSTER_TYPE_COUNT] = {
-    TYPE_LABEL_MAGIC_Y, TYPE_LABEL_TRAP_Y, TYPE_LABEL_RITUAL_Y, TYPE_LABEL_EQUIP_Y};
-/* The palettes (see the map above): only the equip label's fits under it. */
-static const int type_label_clut_x[CARD_NON_MONSTER_TYPE_COUNT] = {768, 0, 256, TYPE_LABEL_EQUIP_X};
-static const int type_label_clut_y[CARD_NON_MONSTER_TYPE_COUNT] = {255, 510, 510, TYPE_LABEL_EQUIP_Y + TYPE_LABEL_H};
-typedef struct {
-    char path[1024], bank_path[1024];
-    unsigned char *indices;
-    unsigned short clut[256];
-    int png_w, png_h;
-} TypeLabelImage;
-static TypeLabelImage type_label_images[CARD_NON_MONSTER_TYPE_COUNT];
-
+ * a picture a kind (CARD_TYPE_MAGIC..CARD_TYPE_EQUIP), each its own palette,
+ * so a style replaces any one kind's art without the others sharing it. 64x32
+ * is generous for a caption this size (retail's own is 56x16 texels). */
 int CardLayoutArt_TypeLabelCell(int kind, int *tpage, int *u, int *v, int *clut, int *w, int *h)
 {
-    char path[1024], why[128];
-    uint16_t *bank, *page;
-    TypeLabelImage *image;
-    int idx = kind - CARD_TYPE_MAGIC;
-    int page_x, page_y, tpage_x, tpage_y, tex_u, tex_v, clut_x, clut_y, x, y;
+    char path[1024];
     int label_x, label_y, label_w, label_h, label_visible;
 
-    if (idx < 0 || idx >= CARD_NON_MONSTER_TYPE_COUNT ||
-        !CardLayout_TypeLabel(kind, path, sizeof(path), &label_x, &label_y, &label_w, &label_h, &label_visible) ||
-        !(bank = SoftGpu_Bank(FRAME_BANK)))
+    if (kind < CARD_TYPE_MAGIC || kind >= CARD_TYPE_MAGIC + CARD_NON_MONSTER_TYPE_COUNT ||
+        !CardLayout_TypeLabel(kind, path, sizeof(path), &label_x, &label_y, &label_w, &label_h, &label_visible))
         return 0;
-    page_x = type_label_page_x[idx];
-    page_y = type_label_page_y[idx];
-    tpage_x = page_x & ~63;
-    tpage_y = page_y & ~255;
-    tex_u = page_x & 63;
-    tex_v = page_y & 255;
-    clut_x = type_label_clut_x[idx];
-    clut_y = type_label_clut_y[idx];
-
-    image = &type_label_images[idx];
-    if (strcmp(image->path, path)) {
-        free(image->indices);
-        memset(image, 0, sizeof(*image));
-        snprintf(image->path, sizeof(image->path), "%s", path);
-        CardArt_ImageSize(path, &image->png_w, &image->png_h);
-        image->indices = malloc(TYPE_LABEL_W * TYPE_LABEL_H);
-        if (image->indices &&
-            !CardArt_IndexedImage(path, TYPE_LABEL_W, TYPE_LABEL_H, image->indices, image->clut, why, sizeof(why))) {
-            LOG(LOG_CARD_LAYOUT, "type label: %s: %s", path, why);
-            free(image->indices);
-            image->indices = NULL;
-        }
-        if (image->indices && image->png_w > 0) TexturePack_BankImagePreload(path);
-    }
-    if (!image->indices) return 0;
-    if (strcmp(image->bank_path, path)) {
-        page = bank + page_y * SOFT_GPU_WIDTH + page_x;
-        for (y = 0; y < TYPE_LABEL_H; y++)
-            for (x = 0; x < TYPE_LABEL_W; x += 2)
-                page[y * SOFT_GPU_WIDTH + x / 2] = (uint16_t)(image->indices[y * TYPE_LABEL_W + x] |
-                                                               (image->indices[y * TYPE_LABEL_W + x + 1] << 8));
-        memcpy(&bank[clut_y * SOFT_GPU_WIDTH + clut_x], image->clut, sizeof(image->clut));
-        snprintf(image->bank_path, sizeof(image->bank_path), "%s", path);
-        if (image->png_w > 0 && image->png_h > 0) {
-            TexturePack_BankSpritesUseOwner(TEXTURE_BANK_OWNER_LAYOUT_FRAME);
-            TexturePack_AddBankSprite(FRAME_BANK, tpage_x, tpage_y, 1, clut_x, clut_y, tex_u, tex_v,
-                                      TYPE_LABEL_W, TYPE_LABEL_H, path);
-        }
-    }
-    *tpage = LAYOUT_TPAGE(page_x, page_y);
-    *u = tex_u;
-    *v = tex_v;
-    *clut = (clut_y << 6) | (clut_x / 16);
-    *w = TYPE_LABEL_W;
-    *h = TYPE_LABEL_H;
-    return 1;
+    return small_cell(&type_label_kind, path, tpage, u, v, clut, w, h);
 }
-
 /* The retail name is a black indexed sprite. Copy its non-transparent texels
  * as a one-colour 8bpp mask so vertex RGB can colour it (multiplying the
  * original black pixels could never make them white). */
 #define TITLE_W 96
 #define TITLE_H 14
-#define TITLE_PAGE_X 640
-#define TITLE_PAGE_Y 256
+/* An attack shows two cards at once: a mask each, in its own slot (see the
+ * map above CardLayoutArt_StatLabelCell), the one asked for longest ago
+ * replaced. */
+#define TITLE_SLOTS 3
+#define TITLE_PAGE_X(slot) (640 + (slot) * TITLE_W / 2)
+#define TITLE_PAGE_Y 320
+#define TITLE_CLUT_Y(slot) (465 + (slot))
 typedef struct {
     int source_tpage, source_u, source_v;
     unsigned int hash;
     int valid;
+    unsigned long long used;
 } TitleMaskCache;
-static TitleMaskCache title_mask_cache;
+static TitleMaskCache title_masks[TITLE_SLOTS];
+static unsigned long long title_clock;
 static int title_unavailable_reported;
 static int title_unavailable_tpage, title_unavailable_u, title_unavailable_v;
 
@@ -961,11 +662,12 @@ static int title_source_fits(int src_x, int src_y, int depth, int source_u, int 
            src_y + source_v + TITLE_H <= SOFT_GPU_HEIGHT;
 }
 
-static void title_mask_output(int *tpage, int *u, int *v, int *clut, int *w, int *h)
+static void title_mask_output(int slot, int *tpage, int *u, int *v, int *clut, int *w, int *h)
 {
-    *tpage = LAYOUT_TPAGE(TITLE_PAGE_X, TITLE_PAGE_Y);
-    *u = *v = 0;
-    *clut = ((TITLE_PAGE_Y + TITLE_H) << 6) | (TITLE_PAGE_X / 16);
+    *tpage = LAYOUT_TPAGE(TITLE_PAGE_X(slot), TITLE_PAGE_Y);
+    *u = (TITLE_PAGE_X(slot) & 63) * 2;
+    *v = TITLE_PAGE_Y & 255;
+    *clut = (TITLE_CLUT_Y(slot) << 6) | (SMALL_CLUT_X / 16);
     *w = TITLE_W;
     *h = TITLE_H;
 }
@@ -975,8 +677,8 @@ int CardLayoutArt_TitleCell(int source_tpage, int source_u, int source_v, int so
 {
     uint16_t *bank = SoftGpu_Bank(FRAME_BANK);
     const uint16_t *vram = SoftGpu_Vram();
-    int page_x = TITLE_PAGE_X, page_y = TITLE_PAGE_Y;
-    int clut_y = page_y + TITLE_H, depth = (source_tpage >> 7) & 3;
+    int page_x, page_y = TITLE_PAGE_Y, slot;
+    int depth = (source_tpage >> 7) & 3;
     int src_x = (source_tpage & 0xF) * 64, src_y = ((source_tpage >> 4) & 1) * 256;
     unsigned int hash;
     int x, y;
@@ -996,12 +698,20 @@ int CardLayoutArt_TitleCell(int source_tpage, int source_u, int source_v, int so
     }
     title_unavailable_reported = 0;
     hash = title_source_hash(vram, src_x, src_y, depth, source_u, source_v);
-    if (title_mask_cache.valid && title_mask_cache.source_tpage == source_tpage &&
-        title_mask_cache.source_u == source_u && title_mask_cache.source_v == source_v &&
-        title_mask_cache.hash == hash) {
-        title_mask_output(tpage, u, v, clut, w, h);
-        return 1;
+    for (slot = 0; slot < TITLE_SLOTS; slot++) {
+        TitleMaskCache *mask = &title_masks[slot];
+        if (mask->valid && mask->source_tpage == source_tpage && mask->source_u == source_u &&
+            mask->source_v == source_v && mask->hash == hash) {
+            mask->used = ++title_clock;
+            title_mask_output(slot, tpage, u, v, clut, w, h);
+            return 1;
+        }
     }
+    slot = 0;
+    for (x = 1; x < TITLE_SLOTS; x++) {
+        if (title_masks[x].used < title_masks[slot].used) slot = x;
+    }
+    page_x = TITLE_PAGE_X(slot);
     for (y = 0; y < TITLE_H; y++) {
         for (x = 0; x < TITLE_W; x += 2) {
             int j, bits[2] = {0, 0};
@@ -1019,14 +729,15 @@ int CardLayoutArt_TitleCell(int source_tpage, int source_u, int source_v, int so
             bank[(page_y + y) * SOFT_GPU_WIDTH + page_x + x / 2] = (uint16_t)(bits[0] | bits[1] << 8);
         }
     }
-    memset(&bank[clut_y * SOFT_GPU_WIDTH + page_x], 0, 256 * sizeof(uint16_t));
-    bank[clut_y * SOFT_GPU_WIDTH + page_x + 1] = 0x7FFF;
-    title_mask_cache.source_tpage = source_tpage;
-    title_mask_cache.source_u = source_u;
-    title_mask_cache.source_v = source_v;
-    title_mask_cache.hash = hash;
-    title_mask_cache.valid = 1;
-    title_mask_output(tpage, u, v, clut, w, h);
+    memset(&bank[TITLE_CLUT_Y(slot) * SOFT_GPU_WIDTH + SMALL_CLUT_X], 0, 256 * sizeof(uint16_t));
+    bank[TITLE_CLUT_Y(slot) * SOFT_GPU_WIDTH + SMALL_CLUT_X + 1] = 0x7FFF;
+    title_masks[slot].source_tpage = source_tpage;
+    title_masks[slot].source_u = source_u;
+    title_masks[slot].source_v = source_v;
+    title_masks[slot].hash = hash;
+    title_masks[slot].valid = 1;
+    title_masks[slot].used = ++title_clock;
+    title_mask_output(slot, tpage, u, v, clut, w, h);
     LOG(LOG_CARD_LAYOUT, "title mask: bank=%d tpage=0x%x clut=0x%x from tpage=0x%x depth=%d uv=%d,%d",
         FRAME_BANK, *tpage, *clut, source_tpage, depth, source_u, source_v);
     return 1;
@@ -1039,18 +750,14 @@ int CardLayoutArt_TitleCell(int source_tpage, int source_u, int source_v, int so
  * software texture. */
 static void layout_bank_registrations_lost(void)
 {
-    int i;
+    int i, j;
 
-    hand_bank_path[0] = 0;
-    field_bank_path[0] = 0;
-    field_back_bank_path[0] = 0;
     back_bank_path[0] = 0;
-    library_bank_path[0] = 0;
     digits_bank_path[0] = 0;
-    stat_labels[0].bank_path[0] = 0;
-    stat_labels[1].bank_path[0] = 0;
-    for (i = 0; i < CARD_NON_MONSTER_TYPE_COUNT; i++) type_label_images[i].bank_path[0] = 0;
-    title_mask_cache.valid = 0;
+    for (i = 0; i < (int)(sizeof(small_kinds) / sizeof(small_kinds[0])); i++) {
+        for (j = 0; j < small_kinds[i]->count; j++) small_kinds[i]->slots[j].stored = 0;
+    }
+    for (i = 0; i < TITLE_SLOTS; i++) title_masks[i].valid = 0;
 }
 
 void CardLayoutArt_Prewarm(void)

@@ -965,8 +965,10 @@ campaign too**. Off by default, because it changes the campaign:
   what happens -- are the campaign's;
 - a tower's stories show the bust wherever they show that character, and
   naming the duelist with no expression is the bust's default;
-- two duelists replacing the same character: the later in load order has it
-  (noted).
+- two duelists replacing the same character (Seto and Seto 3rd, say, from two
+  mods): the later mod in the load order has it, whichever duelist's id is
+  the higher -- within one mod, the later entry -- as with any other
+  replacement; the Mods window tells both mods which bust the campaign shows.
 
 Without `replace_bust` the campaign is the game's frame for frame (the
 end-to-end test compares the campaign's first scene with a master build's and
@@ -1464,8 +1466,8 @@ the sheet is its picture texel for texel, its blink and talking frames drawn
 over it are those pictures, the variants the game may ask for are all there
 and stop where they must, an expression without frames has no eyes or mouth,
 a picture too big for a record with another goes on in the next, and a disc
-duelist's `replace_bust` takes over its character (the later of two having
-it). `tests/pc/tower/busts_e2e.py` plays it in the game: a mod's duelist with
+duelist's `replace_bust` takes over its character (the later of two in load
+order having it, both orders tried). `tests/pc/tower/busts_e2e.py` plays it in the game: a mod's duelist with
 three expressions talking, blinking and changing face in place in a tower
 story, the old forms beside it, and the campaign's first scene with Simon
 Muran's bust kept (frames hashed against a master build and the same mod's

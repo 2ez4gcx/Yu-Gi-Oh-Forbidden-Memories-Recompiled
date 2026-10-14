@@ -80,6 +80,7 @@ typedef struct {
     int order[BUST_EXPRESSIONS];     /* the default, then the list's */
     int made;                        /* 1 made (or tried) */
     int character;                   /* the campaign character it replaces, 0 none */
+    int duelist;                     /* the disc duelist it replaces that for, 0 none */
     int first;                       /* its first record, -1 none */
 } Bust;
 
@@ -807,38 +808,48 @@ static void make(Bust *one)
 
 void Busts_Make(void)
 {
-    int duelist, count = Duelists_Count();
+    int duelist, bust, count = Duelists_Count();
     for (duelist = 1; duelist < count; duelist++) {
-        int bust = Duelists_Bust(duelist);
+        bust = Duelists_Bust(duelist);
         if (bust >= 0 && bust < bust_count && !busts[bust].made) make(&busts[bust]);
     }
     /* The campaign's characters a disc duelist's "replace_bust" takes over:
      * the character its own dialogue brings in (Tower_DuelistCharacter),
      * whose record the bust's first is from then on, wherever the campaign
-     * or a story shows it. */
-    for (duelist = 1; duelist < DUELISTS_RETAIL_COUNT; duelist++) {
-        int bust = Duelists_Bust(duelist), character;
-        Bust *one;
-        if (!Duelists_ReplacesBust(duelist) || bust < 0 || bust >= bust_count) continue;
-        one = &busts[bust];
+     * or a story shows it. The busts go in the order they were read -- the
+     * mods' load order, then each mod's list -- so of two replacing one
+     * character (Seto and Seto 3rd are both character 4) the later mod's
+     * has it, as a later mod's replacement of anything does. */
+    for (bust = 0; bust < bust_count; bust++) {
+        Bust *one = &busts[bust];
+        const char *name;
+        int character, k;
+        for (duelist = 1; duelist < DUELISTS_RETAIL_COUNT &&
+                          !(Duelists_Bust(duelist) == bust && Duelists_ReplacesBust(duelist)); duelist++) {}
+        if (duelist == DUELISTS_RETAIL_COUNT) continue;
+        name = Duelists_Name(duelist) ? Duelists_Name(duelist) : "the duelist";
         character = Tower_DuelistCharacter(duelist);
         if (!character) {
             Mods_Note(one->mod, "%s: replace_bust: the campaign shows %s as no character, so nothing changes there",
-                      one->where, Duelists_Name(duelist) ? Duelists_Name(duelist) : "the duelist");
+                      one->where, name);
             continue;
         }
         if (one->first < 0) continue;
-        if (replacing[character]) {
-            int k;
-            for (k = 0; k < bust_count; k++) {
-                if (busts[k].character == character) busts[k].character = 0;
-            }
-            Mods_Note(one->mod, "%s: replace_bust: character %d is replaced already; %s's bust has it instead",
-                      one->where, character, Duelists_Name(duelist) ? Duelists_Name(duelist) : "this duelist");
+        for (k = 0; k < bust; k++) {
+            Bust *other = &busts[k];
+            const char *loser;
+            if (other->character != character) continue;
+            loser = Duelists_Name(other->duelist) ? Duelists_Name(other->duelist) : "a duelist";
+            Mods_Note(other->mod, "%s: replace_bust: campaign character %d is %s's bust from mod %s instead (later "
+                      "in load order); %s's bust here is not shown in the campaign", other->where, character, name,
+                      one->mod, loser);
+            Mods_Note(one->mod, "%s: replace_bust: campaign character %d was %s's bust from mod %s (earlier in load "
+                      "order); %s's bust here has it instead", one->where, character, loser, other->mod, name);
+            other->character = 0;
         }
         replacing[character] = one->first + 1;
         one->character = character;
-        LOG(LOG_MODS, "busts: campaign character %d is %s's bust (record %d)", character,
-            Duelists_Name(duelist) ? Duelists_Name(duelist) : "?", one->first);
+        one->duelist = duelist;
+        LOG(LOG_MODS, "busts: campaign character %d is %s's bust (record %d)", character, name, one->first);
     }
 }

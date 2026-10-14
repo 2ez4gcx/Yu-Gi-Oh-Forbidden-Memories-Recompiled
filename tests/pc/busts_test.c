@@ -50,12 +50,16 @@ static int replaces[64];
 int Duelists_Count(void) { return 42; }
 int Duelists_Bust(int duelist) { return duelist >= 0 && duelist < 64 ? owner[duelist] : -1; }
 int Duelists_ReplacesBust(int duelist) { return duelist >= 0 && duelist < 64 && replaces[duelist]; }
-const char *Duelists_Name(int duelist) { return duelist == 2 ? "Teana" : duelist == 20 ? "Teana 2nd" : "a duelist"; }
-/* Teana and Teana 2nd are both the campaign's character 3; Simon Muran
- * (1) is 1; a villager (4) none. */
+const char *Duelists_Name(int duelist)
+{
+    return duelist == 2 ? "Teana" : duelist == 20 ? "Teana 2nd" : duelist == 7 ? "Seto" : duelist == 36 ? "Seto 3rd" :
+           "a duelist";
+}
+/* Teana and Teana 2nd are both the campaign's character 3, Seto and Seto
+ * 3rd both 4; Simon Muran (1) is 1; a villager (4) none. */
 int Tower_DuelistCharacter(int duelist)
 {
-    return duelist == 2 || duelist == 20 ? 3 : duelist == 1 ? 1 : 0;
+    return duelist == 2 || duelist == 20 ? 3 : duelist == 7 || duelist == 36 ? 4 : duelist == 1 ? 1 : 0;
 }
 
 /* The pictures, by their names: "<w>x<h>" sizes them (96 x 128 without),
@@ -185,15 +189,16 @@ static void body_is(int expression, const unsigned char *wanted, int w, int h)
 static JsonDocument *documents[32];
 static int document_count;
 
-static int read_bust(const char *text)
+static int read_bust_of(const char *mod, const char *text)
 {
     char error[256];
     JsonDocument *document = Json_Parse(text, error, sizeof(error));
     if (!document) fprintf(stderr, "%s\n", error);
     CHECK(document && document_count < 32);
     documents[document_count++] = document;
-    return Busts_Read("m", "folder", Json_Root(document), "duelists[0]");
+    return Busts_Read(mod, "folder", Json_Root(document), "duelists[0]");
 }
+static int read_bust(const char *text) { return read_bust_of("m", text); }
 
 static void reading(void)
 {
@@ -393,17 +398,64 @@ static void making(void)
     /* Teana's picture (100 x 120) is the default's size; the other is
      * stretched to it, and said so. */
     CHECK(heard("t/e6.png is 96 x 128, the default expression's picture 100 x 120; it is stretched to it"));
-    /* Character 3 is Teana 2nd's bust, the later; Teana's is told. */
+    /* Character 3 is Teana 2nd's bust, the later; both are told. */
     CHECK(Busts_Replacing(3) == busts[2].first && Busts_Character(2) == 3 && Busts_Character(1) == 0);
-    CHECK(heard("replace_bust: character 3 is replaced already; Teana 2nd's bust has it instead"));
+    CHECK(heard("replace_bust: campaign character 3 is Teana 2nd's bust from mod m instead (later in load order); "
+                "Teana's bust here is not shown in the campaign"));
+    CHECK(heard("replace_bust: campaign character 3 was Teana's bust from mod m (earlier in load order); Teana 2nd's "
+                "bust here has it instead"));
     CHECK(Busts_Replacing(1) == -1 && Busts_Replacing(0) == -1 && Busts_Replacing(0x41) == -1);
     /* The villager: shrunk to fit the page (600 x 400 to 256 x 170), but
      * no character to replace. */
     CHECK(heard("replace_bust: the campaign shows a duelist as no character, so nothing changes there"));
     CHECK(Busts_Place(3, 0, &record, &slot) && Busts_Character(3) == 0);
-    CHECK(made_bank[0] && notes == 3);
+    CHECK(made_bank[0] && notes == 4);
     Busts_Clear();
     CHECK(Busts_Replacing(3) == -1 && Busts_Count(0) == 0 && record_count == 0);
+}
+
+/* Two mods' disc duelists replacing one campaign character -- Seto (7)
+ * and Seto 3rd (36) are both character 4 -- in both load orders: the later
+ * mod's bust has it whichever duelist's id is the higher (the bug: the
+ * higher id won, Seto 3rd's, whatever the order), and the loser's mod is
+ * told who has it. A bust's number is the order it was read in, which is
+ * the mods' load order (duelists.c reads them so). */
+static void load_order(void)
+{
+    int order;
+    for (order = 0; order < 2; order++) {
+        int seto, seto3;
+        Busts_Clear();
+        forget();
+        memset(owner, -1, sizeof(owner));
+        memset(replaces, 0, sizeof(replaces));
+        if (!order) {
+            seto = read_bust_of("a", "\"s/e1.png\"");
+            seto3 = read_bust_of("b", "\"s/e2.png\"");
+        } else {
+            seto3 = read_bust_of("b", "\"s/e2.png\"");
+            seto = read_bust_of("a", "\"s/e1.png\"");
+        }
+        owner[7] = seto;
+        owner[36] = seto3;
+        replaces[7] = replaces[36] = 1;
+        Busts_Make();
+        if (!order) {
+            /* a, then b: Seto 3rd's, the later. */
+            CHECK(Busts_Replacing(4) == busts[seto3].first && Busts_Character(seto3) == 4 && !Busts_Character(seto));
+            CHECK(heard("[a] duelists[0]: replace_bust: campaign character 4 is Seto 3rd's bust from mod b instead "
+                        "(later in load order); Seto's bust here is not shown in the campaign"));
+            CHECK(heard("[b] duelists[0]: replace_bust: campaign character 4 was Seto's bust from mod a (earlier in "
+                        "load order); Seto 3rd's bust here has it instead"));
+        } else {
+            /* b, then a: Seto's, though its id is the lower. */
+            CHECK(Busts_Replacing(4) == busts[seto].first && Busts_Character(seto) == 4 && !Busts_Character(seto3));
+            CHECK(heard("[b] duelists[0]: replace_bust: campaign character 4 is Seto's bust from mod a instead "
+                        "(later in load order); Seto 3rd's bust here is not shown in the campaign"));
+        }
+        CHECK(notes == 2);
+    }
+    Busts_Clear();
 }
 
 int main(void)
@@ -412,6 +464,7 @@ int main(void)
     reading();
     packing();
     making();
+    load_order();
     for (i = 0; i < document_count; i++) Json_Free(documents[i]);
     printf("busts: ok\n");
     return 0;

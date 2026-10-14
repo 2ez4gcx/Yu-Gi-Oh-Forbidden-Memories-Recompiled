@@ -117,6 +117,14 @@ void Android_OfferCrashReport(void);
  * it, 0 when no box could be shown (or a headless run): the caller then
  * shows `message` its own way. */
 int Android_OfferStartupReport(const char *title, const char *message, const char *details);
+/* android.c: SDL_ShowMessageBox in the system's own alert
+ * (src/pc/platform/android/MessageBox.java), whose message scrolls and
+ * whose buttons stay on the dialog: SDL's box stacks a tall message over
+ * its buttons and pushes them out of a landscape screen with a large font.
+ * Up to three buttons; SDL's box when that cannot be shown. Same result and
+ * `button` as SDL_ShowMessageBox. */
+struct SDL_MessageBoxData;
+int Android_ShowMessageBox(const struct SDL_MessageBoxData *data, int *button);
 #endif
 /* PS1 digital pad bits, active high (Select 0x0001 ... Square 0x8000).
  * Async-signal-safe: it only reads a word written by Platform_Present. */

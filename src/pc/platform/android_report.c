@@ -786,7 +786,7 @@ int Android_OfferStartupReport(const char *title, const char *message, const cha
                                         save ? with_save : share_only, NULL};
         Java call;
         button = 2;
-        if (!SDL_ShowMessageBox(&box, &button)) {
+        if (!Android_ShowMessageBox(&box, &button)) {
             fprintf(stderr, "memories-pc: start-up report: no message box (%s)\n", SDL_GetError());
             free(shown);
             return 0;
@@ -797,8 +797,8 @@ int Android_OfferStartupReport(const char *title, const char *message, const cha
         offer.saved_name[0] = '\0';
         Memories_OnHostStack(java_call, &call);
         /* What happened takes the place of the message's first paragraph
-         * (what to do), so the box keeps its height: its buttons sit under
-         * the text, and it does not scroll in landscape. */
+         * (what to do), so the box keeps its height and its buttons stay
+         * where they were (MessageBox.java scrolls a taller one). */
         if (call.bad)
             snprintf(shown, shown_size, "%s %s%s", call.share ? "Not shared:" : "Not saved:",
                      call.why[0] ? call.why : "something went wrong.", facts);

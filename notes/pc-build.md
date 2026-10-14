@@ -3869,6 +3869,20 @@ desktop. Only raw `.bin` images: `game_files.c` reads nothing else (no
 (the intent resolves to a stub that returns at once, and the welcome box
 comes back): there the image has to be put in place by other means.
 
+The game's message boxes on Android (this welcome, the error boxes of
+`Platform_ShowError` and the start-up report's) are the system's own alert,
+`MessageBox.java` through `Android_ShowMessageBox` (android.c), not SDL's.
+SDL's box (`SDLActivity.messageboxCreateAndShow`) puts the buttons under the
+message with nothing to scroll, so a message taller than the screen pushes
+them out of the dialog: in landscape with the system's font size turned up,
+the welcome showed its text and no button to press. The alert scrolls the
+message and keeps its buttons on a bar under it. The button the return key
+presses (with none, the first other one) goes on the right, the escape key's
+beside it, a third at the far left;
+a box with more than three buttons, or a build without the class, gets SDL's.
+`android_loader.c`'s box (the game library would not load) stays SDL's: it
+comes before this game's code is there.
+
 The external files folder has to be there before the game starts:
 `Memories_AndroidMain` makes it, asking again for up to 10 s while it
 cannot (while the shared storage is not mounted Java's `getExternalFilesDir`

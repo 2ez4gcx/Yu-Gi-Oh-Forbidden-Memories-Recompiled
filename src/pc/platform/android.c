@@ -279,7 +279,7 @@ int Platform_SelectDisc(char *path, size_t size, char *why, size_t why_size)
         SDL_IOStream *stream;
         FILE *file;
         memset(&pick, 0, sizeof(pick));
-        if (!SDL_ShowMessageBox(&welcome, &button)) {
+        if (!Android_ShowMessageBox(&welcome, &button)) {
             snprintf(why, why_size, "Could not open ROM setup: %s", SDL_GetError());
             result = -1;
             break;
@@ -611,6 +611,14 @@ static int java_failed(JNIEnv *env)
     return 1;
 }
 
+/* A JNI call's result, good when it is not NULL and no exception is
+ * pending: the exception is looked for even when the call gave NULL (a
+ * failed call does both), so none is left pending for the next call. */
+static int java_ok(JNIEnv *env, const void *value)
+{
+    return !java_failed(env) && value != NULL;
+}
+
 /* Starts Restart.java's activity (a process of its own) with this process's
  * id: 1 when the system took the request. */
 static int start_restart_activity(void)
@@ -630,7 +638,7 @@ static int start_restart_activity(void)
     }
     /* Each call is checked before the next: a JNI call with an exception
      * pending aborts the process under CheckJNI. */
-#define CHECKED(value) ((value) && !java_failed(env))
+#define CHECKED(value) java_ok(env, (const void *)(value))
     if (CHECKED(intent_class = (*env)->FindClass(env, "android/content/Intent")) &&
         CHECKED(make = (*env)->GetMethodID(env, intent_class, "<init>", "()V")) &&
         CHECKED(set_class = (*env)->GetMethodID(env, intent_class, "setClassName",
@@ -677,6 +685,102 @@ int Platform_RestartGame(void)
     int result = 0;
     Memories_OnHostStack(restart_on_host, &result); /* JNI: never from the game stack */
     return result;
+}
+
+/* --- message boxes, through MessageBox.java (platform.h) -------------- */
+
+typedef struct {
+    const SDL_MessageBoxData *data;
+    int button;
+    int shown;
+} JavaBox;
+
+/* The box in the system's alert (MessageBox.show): box->shown stays 0 when
+ * it could not be, and SDL's is shown instead. */
+static void java_box(void *argument)
+{
+    JavaBox *box = argument;
+    const SDL_MessageBoxData *data = box->data;
+    JNIEnv *env = (JNIEnv *)SDL_GetAndroidJNIEnv();
+    jobject activity = env ? (jobject)SDL_GetAndroidActivity() : NULL;
+    jclass activity_class = NULL, loader_class = NULL, string_class = NULL, found = NULL;
+    jmethodID get_loader = NULL, load = NULL, show = NULL;
+    jobject loader = NULL;
+    jstring name = NULL, title = NULL, message = NULL;
+    jobjectArray texts = NULL;
+    jintArray ids = NULL, flags = NULL;
+    jint id[3], flag[3];
+    int i, ok;
+    if (!activity) return;
+    if (data->numbuttons < 1 || data->numbuttons > 3 || (*env)->PushLocalFrame(env, 24) < 0) {
+        java_failed(env);
+        (*env)->DeleteLocalRef(env, activity);
+        return;
+    }
+    for (i = 0; i < data->numbuttons; i++) {
+        id[i] = data->buttons[i].buttonID;
+        flag[i] = (jint)data->buttons[i].flags;
+    }
+    /* MessageBox is the app's: a thread native code attached finds only the
+     * system's classes with FindClass, so it comes through the activity's
+     * class loader, as HdDownload does. */
+#define CHECKED(value) java_ok(env, (const void *)(value))
+    ok = CHECKED(activity_class = (*env)->GetObjectClass(env, activity)) &&
+         CHECKED(get_loader = (*env)->GetMethodID(env, activity_class, "getClassLoader", "()Ljava/lang/ClassLoader;")) &&
+         CHECKED(loader = (*env)->CallObjectMethod(env, activity, get_loader)) &&
+         CHECKED(loader_class = (*env)->GetObjectClass(env, loader)) &&
+         CHECKED(load = (*env)->GetMethodID(env, loader_class, "loadClass", "(Ljava/lang/String;)Ljava/lang/Class;")) &&
+         CHECKED(name = (*env)->NewStringUTF(env, "org.yfmredecomp.game.MessageBox")) &&
+         CHECKED(found = (jclass)(*env)->CallObjectMethod(env, loader, load, name)) &&
+         CHECKED(show = (*env)->GetStaticMethodID(env, found, "show",
+                                                  "(Landroid/app/Activity;Ljava/lang/String;Ljava/lang/String;"
+                                                  "[Ljava/lang/String;[I[I)I")) &&
+         CHECKED(string_class = (*env)->FindClass(env, "java/lang/String")) &&
+         CHECKED(title = (*env)->NewStringUTF(env, data->title ? data->title : "")) &&
+         CHECKED(message = (*env)->NewStringUTF(env, data->message ? data->message : "")) &&
+         CHECKED(texts = (*env)->NewObjectArray(env, data->numbuttons, string_class, NULL)) &&
+         CHECKED(ids = (*env)->NewIntArray(env, data->numbuttons)) &&
+         CHECKED(flags = (*env)->NewIntArray(env, data->numbuttons));
+    for (i = 0; ok && i < data->numbuttons; i++) {
+        jstring text = NULL;
+        ok = CHECKED(text = (*env)->NewStringUTF(env, data->buttons[i].text ? data->buttons[i].text : ""));
+        if (ok) {
+            (*env)->SetObjectArrayElement(env, texts, i, text);
+            ok = !java_failed(env);
+        }
+    }
+#undef CHECKED
+    if (ok) {
+        (*env)->SetIntArrayRegion(env, ids, 0, data->numbuttons, id);
+        (*env)->SetIntArrayRegion(env, flags, 0, data->numbuttons, flag);
+        ok = !java_failed(env);
+    }
+    if (ok) {
+        jint chosen = (*env)->CallStaticIntMethod(env, found, show, activity, title, message, texts, ids, flags);
+        if (!java_failed(env) && chosen != -2) {
+            box->button = (int)chosen;
+            box->shown = 1;
+        }
+    } else {
+        fprintf(stderr, "memories-pc: MessageBox.java could not show the box: SDL's instead\n");
+    }
+    (*env)->PopLocalFrame(env, NULL);
+    (*env)->DeleteLocalRef(env, activity);
+}
+
+int Android_ShowMessageBox(const SDL_MessageBoxData *data, int *button)
+{
+    JavaBox box;
+    box.data = data;
+    box.button = -1;
+    box.shown = 0;
+    Memories_OnHostStack(java_box, &box); /* JNI: never from the game stack */
+    if (!box.shown) return SDL_ShowMessageBox(data, button);
+    /* as SDL_ShowMessageBox does: a key held when the box came up is let
+     * go, not left down in SDL's state */
+    SDL_ResetKeyboard();
+    if (button) *button = box.button;
+    return 1;
 }
 
 /* --- the HD pack's download (hd_pack.h), through Java ------------------- */

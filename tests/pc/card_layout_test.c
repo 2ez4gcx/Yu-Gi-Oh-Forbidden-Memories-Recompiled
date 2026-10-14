@@ -166,46 +166,46 @@ static const char *frame_path(void)
 
 static void retail_defaults(void)
 {
-    CardLayoutPlacement p;
+    CardLayoutPart p;
     reset();
     CHECK(!CardLayout_FullBleed());
     CHECK(notes == 0);
-    CHECK(CardLayout_Get(CARD_LAYOUT_FRAME).visible);
-    CHECK(CardLayout_Get(CARD_LAYOUT_TITLE).visible);
-    CHECK(CardLayout_Get(CARD_LAYOUT_DESCRIPTION).visible);
-    p = CardLayout_Get(CARD_LAYOUT_ATK);
+    CHECK(CardLayout_Part(CARD_LAYOUT_FRAME).visible);
+    CHECK(CardLayout_Part(CARD_LAYOUT_TITLE).visible);
+    CHECK(CardLayout_Part(CARD_LAYOUT_DESCRIPTION).visible);
+    p = CardLayout_Part(CARD_LAYOUT_ATK);
     CHECK(p.x == 0x61 && p.y == 0x9D);
-    p = CardLayout_Get(CARD_LAYOUT_DEF);
+    p = CardLayout_Part(CARD_LAYOUT_DEF);
     CHECK(p.x == 0x61 && p.y == 0xAB);
-    p = CardLayout_Get(CARD_LAYOUT_LEVEL_STARS);
+    p = CardLayout_Part(CARD_LAYOUT_LEVEL_STARS);
     CHECK(p.x == 0x77 && p.y == 0x20);
-    p = CardLayout_Get(CARD_LAYOUT_ATTRIBUTE);
+    p = CardLayout_Part(CARD_LAYOUT_ATTRIBUTE);
     CHECK(p.x == 0x6E && p.y == 0xD && p.w == 0 && p.h == 0);
-    CHECK(CardLayout_Get(CARD_LAYOUT_ART).w == 0);
+    CHECK(CardLayout_Part(CARD_LAYOUT_ART).w == 0);
     CHECK(!*frame_path());
 }
 
 static void full_bleed_mod(void)
 {
-    CardLayoutPlacement p;
+    CardLayoutPart p;
     reset();
     add_mod("anime-card-frame", "/mods/anime-card-frame", FULL_MANIFEST, 1, "full_bleed", 1);
     CardLayout_SetCard(0);
     CHECK(CardLayout_FullBleed());
     CHECK(notes == 0);
-    p = CardLayout_Get(CARD_LAYOUT_FRAME);
+    p = CardLayout_Part(CARD_LAYOUT_FRAME);
     CHECK(!p.visible && p.w == 140 && p.h == 196);
-    CHECK(!CardLayout_Get(CARD_LAYOUT_TITLE).visible);
-    CHECK(CardLayout_Get(CARD_LAYOUT_DESCRIPTION).visible);
-    p = CardLayout_Get(CARD_LAYOUT_ART);
+    CHECK(!CardLayout_Part(CARD_LAYOUT_TITLE).visible);
+    CHECK(CardLayout_Part(CARD_LAYOUT_DESCRIPTION).visible);
+    p = CardLayout_Part(CARD_LAYOUT_ART);
     CHECK(p.x == 4 && p.y == 3 && p.w == 134 && p.h == 138);
-    p = CardLayout_Get(CARD_LAYOUT_ATTRIBUTE);
+    p = CardLayout_Part(CARD_LAYOUT_ATTRIBUTE);
     CHECK(p.x == 114 && p.y == 149 && p.w == 17 && p.h == 17);
-    p = CardLayout_Get(CARD_LAYOUT_ATK);
+    p = CardLayout_Part(CARD_LAYOUT_ATK);
     CHECK(p.x == 38 && p.y == 178);
-    p = CardLayout_Get(CARD_LAYOUT_DEF);
+    p = CardLayout_Part(CARD_LAYOUT_DEF);
     CHECK(p.x == 104 && p.y == 178);
-    p = CardLayout_Get(CARD_LAYOUT_LEVEL_STARS);
+    p = CardLayout_Part(CARD_LAYOUT_LEVEL_STARS);
     CHECK(p.x == 80 && p.y == 153);
     CHECK(!strcmp(frame_path(), "/mods/anime-card-frame/frame.png"));
     reset();
@@ -214,7 +214,7 @@ static void full_bleed_mod(void)
             " \"hand_color\": \"purple\", \"title\": {\"x\": 18, \"y\": 10}}}, \"default_style\": \"custom\"}}",
             1, "full_bleed", 1);
     CardLayout_SetCard(0);
-    p = CardLayout_Get(CARD_LAYOUT_TITLE);
+    p = CardLayout_Part(CARD_LAYOUT_TITLE);
     CHECK(p.visible && p.x == 18 && p.y == 10);
 }
 
@@ -225,19 +225,19 @@ static void full_bleed_mod(void)
  * (a style with no image) can still move parts while the setting is on. */
 static void setting_off(void)
 {
-    CardLayoutPlacement p;
+    CardLayoutPart p;
     reset();
     add_mod("anime-card-frame", "/mods/anime-card-frame", FULL_MANIFEST, 1, "full_bleed", 0);
     CHECK(!CardLayout_FullBleed());
-    CHECK(CardLayout_Get(CARD_LAYOUT_FRAME).visible);
-    CHECK(CardLayout_Get(CARD_LAYOUT_TITLE).visible);
-    p = CardLayout_Get(CARD_LAYOUT_ATK);
+    CHECK(CardLayout_Part(CARD_LAYOUT_FRAME).visible);
+    CHECK(CardLayout_Part(CARD_LAYOUT_TITLE).visible);
+    p = CardLayout_Part(CARD_LAYOUT_ATK);
     CHECK(p.x == 0x61 && p.y == 0x9D);
-    p = CardLayout_Get(CARD_LAYOUT_DEF);
+    p = CardLayout_Part(CARD_LAYOUT_DEF);
     CHECK(p.x == 0x61 && p.y == 0xAB);
-    p = CardLayout_Get(CARD_LAYOUT_LEVEL_STARS);
+    p = CardLayout_Part(CARD_LAYOUT_LEVEL_STARS);
     CHECK(p.x == 0x77 && p.y == 0x20);
-    p = CardLayout_Get(CARD_LAYOUT_ATTRIBUTE);
+    p = CardLayout_Part(CARD_LAYOUT_ATTRIBUTE);
     CHECK(p.x == 0x6E && p.y == 0xD && p.w == 0 && p.h == 0);
 }
 
@@ -253,7 +253,7 @@ static void setting_unset(void)
     reset();
     add_mod("anime-card-frame", "/mods/anime-card-frame", FULL_MANIFEST, 1, NULL, 0);
     CHECK(!CardLayout_FullBleed());
-    CHECK(CardLayout_Get(CARD_LAYOUT_FRAME).visible);
+    CHECK(CardLayout_Part(CARD_LAYOUT_FRAME).visible);
 }
 
 /* A manifest that only gives one element keeps retail's place for every
@@ -261,14 +261,14 @@ static void setting_unset(void)
  * error, each key stands on its own. */
 static void partial_manifest_falls_back(void)
 {
-    CardLayoutPlacement p;
+    CardLayoutPart p;
     reset();
     add_mod("x", "/mods/x", "{\"id\": \"x\", \"card_layout\": {\"stars\": {\"x\": 80, \"y\": 153}}}", 1,
             "full_bleed", 1);
     CardLayout_SetCard(0);
-    p = CardLayout_Get(CARD_LAYOUT_LEVEL_STARS);
+    p = CardLayout_Part(CARD_LAYOUT_LEVEL_STARS);
     CHECK(p.x == 80 && p.y == 153);
-    p = CardLayout_Get(CARD_LAYOUT_ATK);
+    p = CardLayout_Part(CARD_LAYOUT_ATK);
     CHECK(p.x == 0x61 && p.y == 0x9D);
     CHECK(!*frame_path());
     CHECK(notes == 0);
@@ -287,14 +287,14 @@ static void frame_outside_mod_refused(void)
  * same rule every other singular manifest key follows. */
 static void later_mod_wins(void)
 {
-    CardLayoutPlacement p;
+    CardLayoutPart p;
     reset();
     add_mod("a", "/mods/a", "{\"id\": \"a\", \"card_layout\": {\"stars\": {\"x\": 1, \"y\": 2}}}", 1,
             "full_bleed", 1);
     add_mod("b", "/mods/b", "{\"id\": \"b\", \"card_layout\": {\"stars\": {\"x\": 9, \"y\": 9}}}", 1,
             "full_bleed", 1);
     CardLayout_SetCard(0);
-    p = CardLayout_Get(CARD_LAYOUT_LEVEL_STARS);
+    p = CardLayout_Part(CARD_LAYOUT_LEVEL_STARS);
     CHECK(p.x == 9 && p.y == 9);
 }
 
@@ -306,7 +306,7 @@ static void inactive_mod_ignored(void)
     add_mod("x", "/mods/x", "{\"id\": \"x\", \"card_layout\": {\"stars\": {\"x\": 9, \"y\": 9}}}", 0,
             "full_bleed", 1);
     CHECK(!CardLayout_FullBleed());
-    CHECK(CardLayout_Get(CARD_LAYOUT_LEVEL_STARS).x == 0x77);
+    CHECK(CardLayout_Part(CARD_LAYOUT_LEVEL_STARS).x == 0x77);
 }
 
 /* A magic card: no elemental attribute or ATK/DEF to draw, so CARD_LAYOUT_ART
@@ -314,15 +314,15 @@ static void inactive_mod_ignored(void)
  * and the frame is "frame"."magic". */
 static void spell_frame_magic(void)
 {
-    CardLayoutPlacement p;
+    CardLayoutPart p;
     reset();
     add_mod("x", "/mods/x", FULL_MANIFEST, 1, "full_bleed", 1);
     fake_card_type[1] = CARD_TYPE_MAGIC;
     CardLayout_SetCard(1);
     CHECK(CardLayout_IsSpell());
-    p = CardLayout_Get(CARD_LAYOUT_ART);
+    p = CardLayout_Part(CARD_LAYOUT_ART);
     CHECK(p.x == 4 && p.y == 3 && p.w == 133 && p.h == 138);
-    p = CardLayout_Get(CARD_LAYOUT_ATTRIBUTE);
+    p = CardLayout_Part(CARD_LAYOUT_ATTRIBUTE);
     CHECK(p.x == 62 && p.y == 163 && p.w == 16 && p.h == 15);
     CHECK(!strcmp(CardLayout_FramePath(), "/mods/x/frame_magic.png"));
 }
@@ -379,7 +379,7 @@ static void frame_color_override_wins_over_type(void)
 }
 
 /* "frame_styles", "frame_for" and "default_style" (card_layout.h's
- * CardLayoutStyle): the names the whole feature is built on. */
+ * CardLayoutFrameStyle): the names the whole feature is built on. */
 static const char *const STYLES_MANIFEST =
     "{\"id\": \"x\", \"card_layout\": {"
     "\"frame_styles\": {"
@@ -408,8 +408,8 @@ static void add_styles_mod(int own_ritual_frame)
 
 static int style_of(int id, const char *want_path)
 {
-    CardLayoutStyle style;
-    CHECK(CardLayout_StyleOf(id, &style));
+    CardLayoutFrameStyle style;
+    CHECK(CardLayout_FrameStyleOf(id, &style));
     CardLayout_SetCard(id);
     CHECK(!strcmp(CardLayout_FramePath(), want_path));
     return style.color;
@@ -417,9 +417,9 @@ static int style_of(int id, const char *want_path)
 
 static void styles_by_class(void)
 {
-    CardLayoutStyle style;
+    CardLayoutFrameStyle style;
     reset();
-    CHECK(!CardLayout_StyleOf(1, &style));   /* no layout: retail */
+    CHECK(!CardLayout_FrameStyleOf(1, &style));   /* no layout: retail */
     add_styles_mod(0);
     CHECK(style_of(1, "/mods/x/gold.png") == CARD_FRAME_MONSTER);
     fake_effects[2] = 1;
@@ -444,7 +444,7 @@ static void styles_by_tag_and_size(void)
     fake_effects[1] = 1;   /* a god with effects: the tag rule comes first */
     CHECK(style_of(1, "/mods/x/god.png") == CARD_FRAME_PURPLE);
     CHECK(!CardLayout_IsSpell());
-    CHECK(CardLayout_Get(CARD_LAYOUT_FRAME).w == 140 && CardLayout_Get(CARD_LAYOUT_FRAME).h == 196);
+    CHECK(CardLayout_Part(CARD_LAYOUT_FRAME).w == 140 && CardLayout_Part(CARD_LAYOUT_FRAME).h == 196);
 }
 
 static void styles_rule_setting(void)
@@ -481,7 +481,7 @@ static void styles_card_named_frame(void)
     fake_frame_color[1] = CARD_FRAME_ORANGE;  /* the named style wins over it */
     CHECK(style_of(1, "/mods/x/god.png") == CARD_FRAME_PURPLE);
     snprintf(fake_frame_style[2], sizeof(fake_frame_style[2]), "%s", "missing");
-    CHECK(!CardLayout_StyleOf(2, &(CardLayoutStyle){0}) && notes == 1);
+    CHECK(!CardLayout_FrameStyleOf(2, &(CardLayoutFrameStyle){0}) && notes == 1);
 }
 
 /* `default_styles` supplies defaults only when a card did not name a style,
@@ -536,12 +536,12 @@ static void styles_can_preserve_retail_frame(void)
             1, "full_bleed", 1);
     CardLayout_SetCard(1);
     CHECK(!CardLayout_FullBleed());
-    CHECK(CardLayout_Get(CARD_LAYOUT_FRAME).visible);
+    CHECK(CardLayout_Part(CARD_LAYOUT_FRAME).visible);
     CHECK(!*CardLayout_FramePath());
     snprintf(fake_frame_style[2], sizeof(fake_frame_style[2]), "%s", "xyz");
     CardLayout_SetCard(2);
     CHECK(CardLayout_FullBleed());
-    CHECK(!CardLayout_Get(CARD_LAYOUT_FRAME).visible);
+    CHECK(!CardLayout_Part(CARD_LAYOUT_FRAME).visible);
     CHECK(!strcmp(CardLayout_FramePath(), "/mods/x/xyz.png"));
 }
 
@@ -573,45 +573,45 @@ static void styles_library_icon(void)
 
 static void styles_unusable_is_retail(void)
 {
-    CardLayoutStyle style;
+    CardLayoutFrameStyle style;
     reset();
     add_mod("x", "/mods/x",
             "{\"id\": \"x\", \"card_layout\": {\"frame_styles\": {\"gold\": {\"image\": \"g.png\", \"hand_color\": \"lilac\"}}}}",
             1, "full_bleed", 1);
-    CHECK(!CardLayout_StyleOf(1, &style) && notes == 1);   /* a "hand_color" the disc has no row for */
+    CHECK(!CardLayout_FrameStyleOf(1, &style) && notes == 1);   /* a "hand_color" the disc has no row for */
     reset();
     add_mod("x", "/mods/x",
             "{\"id\": \"x\", \"card_layout\": {\"frame_styles\": {\"gold\": {\"image\": \"g.png\"}}, \"default_style\": \"nothing\"}}",
             1, "full_bleed", 1);
-    CHECK(!CardLayout_StyleOf(1, &style) && notes == 1);   /* a style that is not there */
+    CHECK(!CardLayout_FrameStyleOf(1, &style) && notes == 1);   /* a style that is not there */
     reset();
     add_mod("x", "/mods/x", STYLES_MANIFEST, 1, "full_bleed", 0);
-    CHECK(!CardLayout_StyleOf(1, &style));                  /* anime frame off */
+    CHECK(!CardLayout_FrameStyleOf(1, &style));                  /* anime frame off */
 }
 
 /* "hand_colour", the key's first spelling, still names the color, and
  * "hand_color" wins over it when a style has both. */
 static void styles_hand_colour_alias(void)
 {
-    CardLayoutStyle style;
+    CardLayoutFrameStyle style;
     reset();
     add_mod("x", "/mods/x",
             "{\"id\": \"x\", \"card_layout\": {\"frame_styles\": {\"old\": {\"image\": \"o.png\", \"hand_colour\": \"pink\"}},"
             " \"default_style\": \"old\"}}",
             1, "full_bleed", 1);
-    CHECK(CardLayout_StyleOf(1, &style) && style.color == CARD_FRAME_TRAP && notes == 0);
+    CHECK(CardLayout_FrameStyleOf(1, &style) && style.color == CARD_FRAME_TRAP && notes == 0);
     reset();
     add_mod("x", "/mods/x",
             "{\"id\": \"x\", \"card_layout\": {\"frame_styles\": {\"both\": {\"image\": \"b.png\","
             " \"hand_colour\": \"pink\", \"hand_color\": \"orange\"}}, \"default_style\": \"both\"}}",
             1, "full_bleed", 1);
-    CHECK(CardLayout_StyleOf(1, &style) && style.color == CARD_FRAME_ORANGE && notes == 0);
+    CHECK(CardLayout_FrameStyleOf(1, &style) && style.color == CARD_FRAME_ORANGE && notes == 0);
     reset();
     add_mod("x", "/mods/x",
             "{\"id\": \"x\", \"card_layout\": {\"frame_styles\": {\"old\": {\"image\": \"o.png\", \"hand_colour\": \"lilac\"}},"
             " \"default_style\": \"old\"}}",
             1, "full_bleed", 1);
-    CHECK(!CardLayout_StyleOf(1, &style) && notes == 1);   /* checked as the new spelling is */
+    CHECK(!CardLayout_FrameStyleOf(1, &style) && notes == 1);   /* checked as the new spelling is */
 }
 
 static void legacy_ritual_wears_magic(void)
@@ -667,16 +667,16 @@ static void digits_from_mod(void)
     CHECK(!CardLayout_Digits(path, sizeof(path), &w, &h, &step) && notes == 1);   /* outside the mod */
 }
 
-/* "color" (CardLayoutPlacement's own r/g/b): 0x80 each, the GPU's own
+/* "color" (CardLayoutPart's own r/g/b): 0x80 each, the GPU's own
  * neutral multiply, with no mod or no "color" of an element's own; read
  * from the manifest the same whether full_bleed is on or off, like the
  * element's x/y. */
 static void color_tint(void)
 {
-    CardLayoutPlacement p;
+    CardLayoutPart p;
 
     reset();
-    p = CardLayout_Get(CARD_LAYOUT_ATK);           /* no mod at all */
+    p = CardLayout_Part(CARD_LAYOUT_ATK);           /* no mod at all */
     CHECK(p.r == 0x80 && p.g == 0x80 && p.b == 0x80);
 
     add_mod("x", "/mods/x",
@@ -687,13 +687,13 @@ static void color_tint(void)
             "\"attribute\": {\"color\": {\"g\": 50}}}}",
             1, "full_bleed", 1);
     CardLayout_SetCard(0);
-    p = CardLayout_Get(CARD_LAYOUT_ATK);
+    p = CardLayout_Part(CARD_LAYOUT_ATK);
     CHECK(p.x == 38 && p.y == 178 && p.r == 255 && p.g == 96 && p.b == 96);
-    p = CardLayout_Get(CARD_LAYOUT_DEF);
+    p = CardLayout_Part(CARD_LAYOUT_DEF);
     CHECK(p.r == 96 && p.g == 96 && p.b == 255);
-    p = CardLayout_Get(CARD_LAYOUT_LEVEL_STARS);
+    p = CardLayout_Part(CARD_LAYOUT_LEVEL_STARS);
     CHECK(p.r == 200 && p.g == 0x80 && p.b == 0x80);   /* unset channels stay neutral */
-    p = CardLayout_Get(CARD_LAYOUT_ATTRIBUTE);
+    p = CardLayout_Part(CARD_LAYOUT_ATTRIBUTE);
     CHECK(p.g == 50 && p.r == 0x80 && p.b == 0x80);
 
     /* full_bleed off: the layout is not in use, retail's own color (as
@@ -703,7 +703,7 @@ static void color_tint(void)
             "{\"id\": \"x\", \"card_layout\": {"
             "\"def\": {\"color\": {\"r\": 10, \"g\": 20, \"b\": 30}}}}",
             1, "full_bleed", 0);
-    p = CardLayout_Get(CARD_LAYOUT_DEF);
+    p = CardLayout_Part(CARD_LAYOUT_DEF);
     CHECK(p.r == 0x80 && p.g == 0x80 && p.b == 0x80);
 }
 
@@ -715,7 +715,7 @@ static void color_tint(void)
  * a style that gives "atk" an x does not inherit the layout's y for it. */
 static void per_style_layout(void)
 {
-    CardLayoutPlacement p;
+    CardLayoutPart p;
 
     reset();
     add_mod("x", "/mods/x",
@@ -733,19 +733,19 @@ static void per_style_layout(void)
     snprintf(fake_frame_style[1], sizeof(fake_frame_style[1]), "synchro");
 
     CardLayout_SetCard(0);
-    p = CardLayout_Get(CARD_LAYOUT_ATK);
+    p = CardLayout_Part(CARD_LAYOUT_ATK);
     CHECK(p.x == 85 && p.y == 172);                  /* xyz's own atk */
-    p = CardLayout_Get(CARD_LAYOUT_DEF);
+    p = CardLayout_Part(CARD_LAYOUT_DEF);
     CHECK(p.x == 113 && p.y == 172);                 /* xyz's own def */
-    p = CardLayout_Get(CARD_LAYOUT_LEVEL_STARS);
+    p = CardLayout_Part(CARD_LAYOUT_LEVEL_STARS);
     CHECK(p.x == 77 && p.y == 32);                   /* xyz has none: the layout's shared stars */
 
     CardLayout_SetCard(1);
-    p = CardLayout_Get(CARD_LAYOUT_ATK);
+    p = CardLayout_Part(CARD_LAYOUT_ATK);
     CHECK(p.x == 10 && p.y == 20);                   /* synchro's own atk, independent of xyz's */
-    p = CardLayout_Get(CARD_LAYOUT_DEF);
+    p = CardLayout_Part(CARD_LAYOUT_DEF);
     CHECK(p.x == 0x61 && p.y == 0xAB);                /* synchro has none, and neither does the layout: retail's */
-    p = CardLayout_Get(CARD_LAYOUT_LEVEL_STARS);
+    p = CardLayout_Part(CARD_LAYOUT_LEVEL_STARS);
     CHECK(p.x == 77 && p.y == 32);                   /* the layout's shared stars again */
 
     /* A style's "atk" naming only x does not pick up the layout's y for it
@@ -759,7 +759,7 @@ static void per_style_layout(void)
             1, "full_bleed", 1);
     snprintf(fake_frame_style[0], sizeof(fake_frame_style[0]), "xyz");
     CardLayout_SetCard(0);
-    p = CardLayout_Get(CARD_LAYOUT_ATK);
+    p = CardLayout_Part(CARD_LAYOUT_ATK);
     CHECK(p.x == 85 && p.y == 0x9D);                  /* x from the style, y retail's -- not the layout's 108 */
 }
 
@@ -768,7 +768,7 @@ static void per_style_layout(void)
  * information panel or the Library name bar. */
 static void frame_box_is_bounded(void)
 {
-    CardLayoutPlacement p;
+    CardLayoutPart p;
 
     reset();
     add_mod("x", "/mods/x",
@@ -778,11 +778,11 @@ static void frame_box_is_bounded(void)
             "\"default_style\": \"wide\"}}",
             1, "full_bleed", 1);
     CardLayout_SetCard(0);
-    p = CardLayout_Get(CARD_LAYOUT_FRAME);
+    p = CardLayout_Part(CARD_LAYOUT_FRAME);
     CHECK(p.w == 140 && p.h == 196);
     snprintf(fake_frame_style[0], sizeof(fake_frame_style[0]), "small");
     CardLayout_SetCard(0);
-    p = CardLayout_Get(CARD_LAYOUT_FRAME);
+    p = CardLayout_Part(CARD_LAYOUT_FRAME);
     CHECK(p.w == 80 && p.h == 100);
 
     reset();
@@ -791,7 +791,7 @@ static void frame_box_is_bounded(void)
             "\"width\": 999, \"height\": 999}}}}",
             1, "full_bleed", 1);
     CardLayout_SetCard(0);
-    p = CardLayout_Get(CARD_LAYOUT_FRAME);
+    p = CardLayout_Part(CARD_LAYOUT_FRAME);
     CHECK(p.w == 140 && p.h == 196);
 }
 
@@ -799,7 +799,7 @@ static void frame_box_is_bounded(void)
  * Style-local entries continue to win over the layout-wide fallback. */
 static void movable_parts_can_hide(void)
 {
-    CardLayoutPlacement p;
+    CardLayoutPart p;
 
     reset();
     add_mod("x", "/mods/x",
@@ -811,18 +811,18 @@ static void movable_parts_can_hide(void)
             "\"spell\": {\"icon\": {\"hide\": true}}}}",
             1, "full_bleed", 1);
     CardLayout_SetCard(0);
-    CHECK(!CardLayout_Get(CARD_LAYOUT_TITLE).visible);
-    CHECK(!CardLayout_Get(CARD_LAYOUT_ART).visible);
-    CHECK(!CardLayout_Get(CARD_LAYOUT_ATTRIBUTE).visible);
-    CHECK(!CardLayout_Get(CARD_LAYOUT_LEVEL_STARS).visible);
-    CHECK(!CardLayout_Get(CARD_LAYOUT_ATK).visible);
-    CHECK(!CardLayout_Get(CARD_LAYOUT_DEF).visible);
-    CHECK(!CardLayout_Get(CARD_LAYOUT_ATK_LABEL).visible);
-    CHECK(!CardLayout_Get(CARD_LAYOUT_DEF_LABEL).visible);
-    CHECK(CardLayout_Get(CARD_LAYOUT_DESCRIPTION).visible);
+    CHECK(!CardLayout_Part(CARD_LAYOUT_TITLE).visible);
+    CHECK(!CardLayout_Part(CARD_LAYOUT_ART).visible);
+    CHECK(!CardLayout_Part(CARD_LAYOUT_ATTRIBUTE).visible);
+    CHECK(!CardLayout_Part(CARD_LAYOUT_LEVEL_STARS).visible);
+    CHECK(!CardLayout_Part(CARD_LAYOUT_ATK).visible);
+    CHECK(!CardLayout_Part(CARD_LAYOUT_DEF).visible);
+    CHECK(!CardLayout_Part(CARD_LAYOUT_ATK_LABEL).visible);
+    CHECK(!CardLayout_Part(CARD_LAYOUT_DEF_LABEL).visible);
+    CHECK(CardLayout_Part(CARD_LAYOUT_DESCRIPTION).visible);
     fake_card_type[0] = CARD_TYPE_MAGIC;
     CardLayout_SetCard(0);
-    CHECK(!CardLayout_Get(CARD_LAYOUT_ATTRIBUTE).visible);
+    CHECK(!CardLayout_Part(CARD_LAYOUT_ATTRIBUTE).visible);
 
     reset();
     add_mod("x", "/mods/x",
@@ -831,7 +831,7 @@ static void movable_parts_can_hide(void)
             "\"atk\": {\"x\": 80}}}, \"default_style\": \"custom\"}}",
             1, "full_bleed", 1);
     CardLayout_SetCard(0);
-    p = CardLayout_Get(CARD_LAYOUT_ATK);
+    p = CardLayout_Part(CARD_LAYOUT_ATK);
     CHECK(p.visible && p.x == 80);                  /* style owns its whole part */
 }
 

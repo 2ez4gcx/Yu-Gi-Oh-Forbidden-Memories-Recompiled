@@ -858,7 +858,13 @@ void HdText_TitleUploaded(int card, int x, int y)
 }
 
 int HdText_Title(int page_x, int page_y, int u, int v, int wanted, int *atlas_u, int *atlas_v, int *title_u,
-                 int *title_v, int *card)
+                 int *title_v)
+{
+    return HdText_TitleCard(page_x, page_y, u, v, wanted, atlas_u, atlas_v, title_u, title_v, NULL);
+}
+
+int HdText_TitleCard(int page_x, int page_y, int u, int v, int wanted, int *atlas_u, int *atlas_v, int *title_u,
+                     int *title_v, int *card)
 {
     const uint16_t *words = SoftGpu_Vram();
     int vx = page_x + (u & 255) / 4, vy = page_y + (v & 255), i, place = -1, oldest = 0;

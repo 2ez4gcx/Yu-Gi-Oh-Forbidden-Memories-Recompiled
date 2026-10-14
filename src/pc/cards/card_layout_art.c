@@ -59,7 +59,7 @@ static void bank_pad_edge(uint16_t *bank, int bank_x_word, int bank_y, int w, in
 }
 /* A layout mod's own frame PNG is stretched to FRAME_W x FRAME_H texels
  * (CardArt_IndexedImage's own rule, as a "title" mod's image is), not the
- * on-screen draw size (card_layout.h's CardLayout_Get(CARD_LAYOUT_FRAME) w/h,
+ * on-screen draw size (card_layout.h's CardLayout_Part(CARD_LAYOUT_FRAME) w/h,
  * a mod's own choice) but the VRAM texture's own resolution.
  *
  * POLY_GT4's UVs are u8, so one quad can read at most 255 texels an axis.

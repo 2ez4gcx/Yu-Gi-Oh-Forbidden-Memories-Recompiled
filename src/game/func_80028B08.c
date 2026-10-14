@@ -299,7 +299,7 @@ static int CardLayout_DrawTitleMask(const SpritePrim *src, s32 x, s32 y, s32 ot,
     return 1;
 }
 
-/* `rgb`'s own three channels, each scaled by `r`/`g`/`b` (CardLayoutPlacement's
+/* `rgb`'s own three channels, each scaled by `r`/`g`/`b` (CardLayoutPart's
  * convention: 0x80 is 1x, so a mod with no "color" of its own leaves `rgb`
  * unchanged) and clamped to a byte -- a filter over whatever the card's own
  * fade tint (win->field_0C) already is, not a replacement for it, the same
@@ -357,15 +357,15 @@ void func_80028B08(DisplayObject *obj, s32 arg1) {
      * right card's frame (cards.h's CARD_FRAME_*), not the previous one
      * this object happened to draw. */
     CardLayout_SetCard((s32)(s16)D_800EA0E8[obj->field_67].field_30);
-    CardLayoutPlacement frame_layout = CardLayout_Get(CARD_LAYOUT_FRAME);
-    CardLayoutPlacement title_layout = CardLayout_Get(CARD_LAYOUT_TITLE);
-    CardLayoutPlacement atk_layout = CardLayout_Get(CARD_LAYOUT_ATK);
-    CardLayoutPlacement def_layout = CardLayout_Get(CARD_LAYOUT_DEF);
-    CardLayoutPlacement atk_label_layout = CardLayout_Get(CARD_LAYOUT_ATK_LABEL);
-    CardLayoutPlacement def_label_layout = CardLayout_Get(CARD_LAYOUT_DEF_LABEL);
-    CardLayoutPlacement star_layout = CardLayout_Get(CARD_LAYOUT_LEVEL_STARS);
-    CardLayoutPlacement attr_layout = CardLayout_Get(CARD_LAYOUT_ATTRIBUTE);
-    CardLayoutPlacement art_layout = CardLayout_Get(CARD_LAYOUT_ART);
+    CardLayoutPart frame_layout = CardLayout_Part(CARD_LAYOUT_FRAME);
+    CardLayoutPart title_layout = CardLayout_Part(CARD_LAYOUT_TITLE);
+    CardLayoutPart atk_layout = CardLayout_Part(CARD_LAYOUT_ATK);
+    CardLayoutPart def_layout = CardLayout_Part(CARD_LAYOUT_DEF);
+    CardLayoutPart atk_label_layout = CardLayout_Part(CARD_LAYOUT_ATK_LABEL);
+    CardLayoutPart def_label_layout = CardLayout_Part(CARD_LAYOUT_DEF_LABEL);
+    CardLayoutPart star_layout = CardLayout_Part(CARD_LAYOUT_LEVEL_STARS);
+    CardLayoutPart attr_layout = CardLayout_Part(CARD_LAYOUT_ATTRIBUTE);
+    CardLayoutPart art_layout = CardLayout_Part(CARD_LAYOUT_ART);
 #endif
 
     wrap = 0xFFFF;
@@ -588,7 +588,7 @@ void func_80028B08(DisplayObject *obj, s32 arg1) {
                                                     def_layout.x, def_layout.y, buf2, digits,
                                                     (rec->field_3C & 0x40) != 0, arg1, arg, win->field_0C, EXT);
 
-            /* A fallback style's own "color" (card_layout.h's CardLayoutPlacement):
+            /* A fallback style's own "color" (card_layout.h's CardLayoutPart):
              * a filter on the card's own fade tint, not a replacement for it,
              * so the box still dims/fades with the rest of the card. */
             if (!atk_custom && atk_layout.visible) {

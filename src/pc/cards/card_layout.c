@@ -9,7 +9,7 @@
 #include <string.h>
 
 static const char *const element_names[CARD_LAYOUT_ELEMENT_COUNT] = {
-    "frame", "title", "description", "level_stars", "attribute", "atk", "def", "atk_label", "dfd_label", "art"
+    "frame", "title", "description", "level_stars", "attribute", "atk", "def", "art", "atk_label", "dfd_label"
 };
 
 /* The viewer reserves exactly this retail card-plate footprint.  A custom
@@ -26,7 +26,7 @@ static const char *const frame_kind_names[CARD_FRAME_COUNT] = {
  * func_80028B08.c asks for atk/def/stars/attribute every frame a card
  * viewer is open, but a layout answer only actually changes when the
  * active mod's settings or manifest change. */
-static CardLayoutPlacement last[CARD_LAYOUT_ELEMENT_COUNT];
+static CardLayoutPart last[CARD_LAYOUT_ELEMENT_COUNT];
 static int last_set[CARD_LAYOUT_ELEMENT_COUNT];
 
 /* The card CardLayout_SetCard last named: its frame style (the layout's
@@ -34,7 +34,7 @@ static int last_set[CARD_LAYOUT_ELEMENT_COUNT];
  * styles, the "frame" of its kind) -- its color, the picture's path and
  * size, and whether it is laid out as a spell. A monster with no frame until
  * a call site sets a real card, as every call site that never draws one. */
-static CardLayoutStyle current;
+static CardLayoutFrameStyle current;
 
 typedef struct {
     int mod;                   /* -1: no applied mod declares "card_layout" */
@@ -154,7 +154,7 @@ static int frame_box_dimension(const JsonValue *frame, const char *key, int fall
 }
 
 /* `part` ("color": {"r": ..., "g": ..., "b": ...}), each 0x80 (no change)
- * absent -- CardLayoutPlacement's own tint convention. */
+ * absent -- CardLayoutPart's own tint convention. */
 static void tint(const JsonValue *part, int *r, int *g, int *b)
 {
     const JsonValue *color = Json_Member(part, "color");
@@ -358,7 +358,7 @@ static const char *default_style_for_type(const JsonValue *layout, int card)
 /* The frame style of `card`, into `out` (with its picture's path when
  * `want_image`); 0, nothing, when the layout's style is unusable (the card is
  * then drawn as retail does). */
-static int resolve_style(const LayoutSource *source, int card, CardLayoutStyle *out, int want_image)
+static int resolve_style(const LayoutSource *source, int card, CardLayoutFrameStyle *out, int want_image)
 {
     int cls = Cards_Class(card);
     const JsonValue *styles = Json_Member(source->layout, "frame_styles");
@@ -461,18 +461,33 @@ static int resolve_style(const LayoutSource *source, int card, CardLayoutStyle *
     return 1;
 }
 
-int CardLayout_StyleOf(int card_id, CardLayoutStyle *style)
+int CardLayout_FrameStyleOf(int card_id, CardLayoutFrameStyle *style)
 {
     LayoutSource source = find_source();
     if (!full_bleed_of(&source)) return 0;
     return resolve_style(&source, card_id, style, 0);
 }
 
+int CardLayout_StyleOf(int card_id, CardLayoutStyle *style)
+{
+    CardLayoutFrameStyle full;
+    int found = CardLayout_FrameStyleOf(card_id, &full);
+
+    memset(style, 0, sizeof(*style));
+    style->color = full.color;
+    style->spell_layout = full.spell_layout;
+    style->width = full.width;
+    style->height = full.height;
+    memcpy(style->name, full.name, sizeof(style->name));
+    memcpy(style->image, full.image, sizeof(style->image));
+    return found;
+}
+
 const char *CardLayout_HandFramePath(int card_id)
 {
     static char path[1024];
     LayoutSource source = find_source();
-    CardLayoutStyle style;
+    CardLayoutFrameStyle style;
 
     path[0] = 0;
     if (full_bleed_of(&source) && resolve_style(&source, card_id, &style, 1))
@@ -484,7 +499,7 @@ const char *CardLayout_FieldFramePath(int card_id)
 {
     static char path[1024];
     LayoutSource source = find_source();
-    CardLayoutStyle style;
+    CardLayoutFrameStyle style;
 
     path[0] = 0;
     if (full_bleed_of(&source) && resolve_style(&source, card_id, &style, 1))
@@ -496,7 +511,7 @@ const char *CardLayout_FieldBackPath(int card_id)
 {
     static char path[1024];
     LayoutSource source = find_source();
-    CardLayoutStyle style;
+    CardLayoutFrameStyle style;
 
     path[0] = 0;
     if (full_bleed_of(&source) && resolve_style(&source, card_id, &style, 1))
@@ -508,7 +523,7 @@ const char *CardLayout_BackImagePath(int card_id)
 {
     static char path[1024];
     LayoutSource source = find_source();
-    CardLayoutStyle style;
+    CardLayoutFrameStyle style;
 
     path[0] = 0;
     if (full_bleed_of(&source) && resolve_style(&source, card_id, &style, 1))
@@ -520,7 +535,7 @@ const char *CardLayout_LibraryIconPath(int card_id)
 {
     static char path[1024];
     LayoutSource source = find_source();
-    CardLayoutStyle style;
+    CardLayoutFrameStyle style;
 
     path[0] = 0;
     if (full_bleed_of(&source) && resolve_style(&source, card_id, &style, 1))
@@ -531,7 +546,7 @@ const char *CardLayout_LibraryIconPath(int card_id)
 void CardLayout_SetCard(int card_id)
 {
     LayoutSource source = find_source();
-    CardLayoutStyle style;
+    CardLayoutFrameStyle style;
     int cls = Cards_Class(card_id);
 
     memset(&current, 0, sizeof(current));
@@ -558,7 +573,7 @@ int CardLayout_Active(void)
 int CardLayout_TitleStyled(int card_id)
 {
     LayoutSource source = find_source();
-    CardLayoutStyle style;
+    CardLayoutFrameStyle style;
     const JsonValue *styles, *style_node;
 
     /* Only a full-bleed style, as the low-resolution title mask (func_80028B08.c) */
@@ -601,9 +616,9 @@ int CardLayout_FramePaths(char (*paths)[1024], int max)
     return count;
 }
 
-CardLayoutPlacement CardLayout_Get(CardLayoutElement element)
+CardLayoutPart CardLayout_Part(CardLayoutElement element)
 {
-    CardLayoutPlacement p = {1, 0, 0, 0, 0, 0x80, 0x80, 0x80};
+    CardLayoutPart p = {1, 0, 0, 0, 0, 0x80, 0x80, 0x80};
     LayoutSource source = find_source();
     int full_bleed = full_bleed_of(&source) && current.full_bleed;
     /* The setting off (a fresh install's default): every part where retail
@@ -712,5 +727,12 @@ CardLayoutPlacement CardLayout_Get(CardLayoutElement element)
         last[element] = p;
         last_set[element] = 1;
     }
+    return p;
+}
+
+CardLayoutPlacement CardLayout_Get(CardLayoutElement element)
+{
+    CardLayoutPart part = CardLayout_Part(element);
+    CardLayoutPlacement p = {part.visible, part.x, part.y, part.w, part.h};
     return p;
 }

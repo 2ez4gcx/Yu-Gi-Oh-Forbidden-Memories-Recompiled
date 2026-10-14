@@ -187,7 +187,7 @@ shared_tail:
          * that configures no frame image at all for this card's kind
          * (notes/modding.md's "art and stats floating with no backing at
          * all") hides it immediately, since nothing will ever cover it. */
-        !CardLayout_Get(CARD_LAYOUT_FRAME).visible && !*CardLayout_FramePath() ? 0 : 2
+        !CardLayout_Part(CARD_LAYOUT_FRAME).visible && !*CardLayout_FramePath() ? 0 : 2
 #else
         2
 #endif

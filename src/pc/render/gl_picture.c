@@ -1352,7 +1352,7 @@ static size_t polygon(const uint32_t *words, size_t count)
     } else if (!(flags & 16) && textured && hd_text && state.depth == 0 && !state.bank) {
         /* A card's title plate, whole or a piece of the turning card. */
         int atlas_u, atlas_v, title_u, title_v, title_card;
-        if (HdText_Title(state.page_x, state.page_y, v[0].u, v[0].v, scale, &atlas_u, &atlas_v, &title_u, &title_v,
+        if (HdText_TitleCard(state.page_x, state.page_y, v[0].u, v[0].v, scale, &atlas_u, &atlas_v, &title_u, &title_v,
                          &title_card)) {
             if (CardLayout_TitleStyled(title_card)) flags |= 128;
             for (i = 0; i < vertices_n; i++) {
@@ -1473,7 +1473,7 @@ static size_t rectangle(const uint32_t *words, size_t count)
     }
     if (w && h && textured && hd_text && state.depth == 0 && !state.bank) {
         int atlas_u, atlas_v, title_u, title_v, title_card;
-        if (HdText_Title(state.page_x, state.page_y, base.u, base.v, scale, &atlas_u, &atlas_v, &title_u, &title_v,
+        if (HdText_TitleCard(state.page_x, state.page_y, base.u, base.v, scale, &atlas_u, &atlas_v, &title_u, &title_v,
                          &title_card)) {
             if (CardLayout_TitleStyled(title_card)) flags |= 128;
             state.pack = 0;

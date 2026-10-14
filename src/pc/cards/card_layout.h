@@ -31,9 +31,10 @@ typedef enum {
     CARD_LAYOUT_ATTRIBUTE,
     CARD_LAYOUT_ATK,
     CARD_LAYOUT_DEF,
+    CARD_LAYOUT_ART,
+    /* After ART: earlier releases' mods know ART as 7. */
     CARD_LAYOUT_ATK_LABEL,
     CARD_LAYOUT_DEF_LABEL,
-    CARD_LAYOUT_ART,
     CARD_LAYOUT_ELEMENT_COUNT
 } CardLayoutElement;
 
@@ -53,8 +54,16 @@ typedef struct {
      * or a mod's element with no "color" of its own, leaves the retail/style
      * color exactly as it was -- not an independent paint, a filter on it. */
     int r, g, b;
-} CardLayoutPlacement;
+} CardLayoutPart;
 
+CardLayoutPart CardLayout_Part(CardLayoutElement element);
+/* CardLayout_Part without the tint: the placement earlier releases' mods
+ * know (its size is part of their ABI). */
+typedef struct {
+    int visible;
+    int x, y;
+    int w, h;
+} CardLayoutPlacement;
 CardLayoutPlacement CardLayout_Get(CardLayoutElement element);
 /* Whether `card_id`'s resolved full-bleed style explicitly has a `title`
  * entry. Unlike CardLayout_Get this is a pure lookup: render replay can ask
@@ -128,7 +137,7 @@ typedef struct {
     char field_back_image[1024];
     char back_image[1024];
     char library_icon[1024];
-} CardLayoutStyle;
+} CardLayoutFrameStyle;
 
 /* The style the layout gives `card_id`, into `style` (its `image` empty); 1,
  * or 0 when the anime frame is off or the layout has none to give (retail's
@@ -138,6 +147,16 @@ typedef struct {
  * card's own "frame" color takes the style named for it first. A layout
  * with a "frame" per kind and no "frame_styles" is read as before: the kind
  * of the card, and a ritual spell with no picture of its own wears magic's. */
+int CardLayout_FrameStyleOf(int card_id, CardLayoutFrameStyle *style);
+/* CardLayout_FrameStyleOf's first fields, as earlier releases' mods know
+ * the style (its size is part of their ABI). */
+typedef struct {
+    int color;
+    int spell_layout;
+    int width, height;
+    char name[32];
+    char image[1024];
+} CardLayoutStyle;
 int CardLayout_StyleOf(int card_id, CardLayoutStyle *style);
 /* A style's optional "hand_image", joined with the layout mod's directory
  * and reduced to the duel sprite's 52x60 texels. It replaces the duel's

@@ -220,6 +220,16 @@ static int CardLayout_DrawDigits(s32 base_x, s32 base_y, s32 cx, s32 cy, const u
         dw = dw * 4 / shown;
         step = step * 4 / shown;
     }
+    /* Resolve every digit's cell before drawing any of them: the strip
+     * itself is already known good (the probe call above), but a digit
+     * failing here too -- not reachable today, every failure path inside
+     * CardLayoutArt_DigitCell is state this function already validated for
+     * the whole strip, but cheap to guard against a future one that isn't --
+     * must not leave a mix of already-drawn custom glyphs and a retail
+     * fallback drawn on top of them by the caller. */
+    for (i = shown - 1; i >= 0; i--) {
+        if (!CardLayoutArt_DigitCell(buf[i], dim, &tpage, &u, &v, &clut, &cw, &ch)) return 0;
+    }
     x = base_x + cx - ((shown - 1) * step + dw) / 2;
     for (i = shown - 1; i >= 0; i--) {
         CardLayoutArt_DigitCell(buf[i], dim, &tpage, &u, &v, &clut, &cw, &ch);

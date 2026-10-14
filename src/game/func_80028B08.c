@@ -205,35 +205,49 @@ static int CardLayout_DrawFrame(s32 x, s32 y, s32 w, s32 h, s32 ot, s32 mode, u3
  * blank), at the mod's size, centred on (cx, cy) in the card's own units:
  * one to four digits always centred on the box.
  * 0, nothing drawn, when the strip is not there. */
+/* buf1/buf2 (func_80028B08's own locals) are each u8[5]: Text_EncodeDecimalDigits
+ * never gives this more than five digits, so five resolved cells is always enough. */
+#define CARD_LAYOUT_DRAW_DIGITS_MAX 5
 static int CardLayout_DrawDigits(s32 base_x, s32 base_y, s32 cx, s32 cy, const u8 *buf, s32 count, s32 dim,
                                  s32 ot, s32 mode, u32 rgb, Func80028B08Extra *EXT)
 {
     char path[1024];
     s32 dw, dh, step, tpage, u, v, clut, cw, ch, i, shown = 0, x;
+    s32 cell_tpage[CARD_LAYOUT_DRAW_DIGITS_MAX], cell_u[CARD_LAYOUT_DRAW_DIGITS_MAX];
+    s32 cell_v[CARD_LAYOUT_DRAW_DIGITS_MAX], cell_clut[CARD_LAYOUT_DRAW_DIGITS_MAX];
+    s32 cell_w[CARD_LAYOUT_DRAW_DIGITS_MAX], cell_h[CARD_LAYOUT_DRAW_DIGITS_MAX];
 
     if (!CardLayout_Digits(path, sizeof(path), &dw, &dh, &step)) return 0;
     if (!CardLayoutArt_DigitCell(0, dim, &tpage, &u, &v, &clut, &cw, &ch)) return 0;
     for (i = 0; i < count; i++) {
         if (buf[i] < 10) shown = i + 1;
     }
+    /* Text_EncodeDecimalDigits never blanks the ones place (text_encode_decimal_digits.c),
+     * so an actual stat value always has shown >= 1; this is a guard against a future
+     * caller that fills `buf` some other way, not a path reachable from ATK/DFD today. */
+    if (shown <= 0 || shown > CARD_LAYOUT_DRAW_DIGITS_MAX) return 0;
     if (shown > 4) {   /* a stat past 9999 (a mod's cap): squeezed to the width of four */
         dw = dw * 4 / shown;
         step = step * 4 / shown;
     }
-    /* Resolve every digit's cell before drawing any of them: the strip
+    /* Resolve every digit's cell before drawing any of them, into a local
+     * array rather than drawing straight off each resolution: the strip
      * itself is already known good (the probe call above), but a digit
      * failing here too -- not reachable today, every failure path inside
      * CardLayoutArt_DigitCell is state this function already validated for
      * the whole strip, but cheap to guard against a future one that isn't --
      * must not leave a mix of already-drawn custom glyphs and a retail
-     * fallback drawn on top of them by the caller. */
+     * fallback drawn on top of them by the caller. Resolving into an array
+     * also means a digit is read back exactly as resolved, not re-resolved
+     * (and so implicitly assumed stable) a second time to draw it. */
     for (i = shown - 1; i >= 0; i--) {
-        if (!CardLayoutArt_DigitCell(buf[i], dim, &tpage, &u, &v, &clut, &cw, &ch)) return 0;
+        if (!CardLayoutArt_DigitCell(buf[i], dim, &cell_tpage[i], &cell_u[i], &cell_v[i], &cell_clut[i],
+                                     &cell_w[i], &cell_h[i])) return 0;
     }
     x = base_x + cx - ((shown - 1) * step + dw) / 2;
     for (i = shown - 1; i >= 0; i--) {
-        CardLayoutArt_DigitCell(buf[i], dim, &tpage, &u, &v, &clut, &cw, &ch);
-        CardLayout_DrawCell(x, base_y + cy - dh / 2, dw, dh, tpage, u, v, clut, cw, ch, ot, mode, rgb, EXT);
+        CardLayout_DrawCell(x, base_y + cy - dh / 2, dw, dh, cell_tpage[i], cell_u[i], cell_v[i], cell_clut[i],
+                            cell_w[i], cell_h[i], ot, mode, rgb, EXT);
         x += step;
     }
     return 1;

@@ -871,6 +871,20 @@ if(BUILD_TESTING)
         endif()
         add_test(NAME pc_card_plate COMMAND memories_card_plate_test)
         set_tests_properties(pc_card_plate PROPERTIES SKIP_RETURN_CODE 77)
+        # What a duelist's bust costs the start (busts.c Busts_Make with the
+        # real art.c): the biggest bust and a typical one, drawn at runtime.
+        add_executable(memories_busts_make_test tests/pc/busts_make_test.c src/pc/cards/art.c src/pc/mods/json.c)
+        target_include_directories(memories_busts_make_test PRIVATE src ${MEMORIES_FREETYPE_INCLUDE})
+        target_compile_definitions(memories_busts_make_test PRIVATE MEMORIES_PC)
+        target_link_libraries(memories_busts_make_test PRIVATE ${MEMORIES_FREETYPE_LIBRARY} ${memories_plate_fonts}
+            PNG::PNG)
+        if(WIN32)
+            target_link_libraries(memories_busts_make_test PRIVATE memories_pc_fs)
+        endif()
+        if(NOT MSVC)
+            target_compile_options(memories_busts_make_test PRIVATE -Wall -Wextra -Werror)
+        endif()
+        add_test(NAME pc_busts_make COMMAND memories_busts_make_test "${CMAKE_CURRENT_BINARY_DIR}/busts-make-test")
     endif()
     # The update check's version order and release choice
     # (src/pc/platform/update.h, notes/updates.md); no network. The program's

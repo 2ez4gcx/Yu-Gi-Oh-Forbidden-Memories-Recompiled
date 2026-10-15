@@ -133,7 +133,19 @@ static void resample(const Rgb *source, int sw, int sh, Rgb *out, int w, int h)
 
 /* --- colors --------------------------------------------------------- */
 
-typedef struct { int first, count; } Box;
+/* A color and how many pixels have it. */
+typedef struct {
+    unsigned char r, g, b;
+    int count;
+} Weighted;
+
+/* A box of median cut: its colors, how many pixels in all, and its range on
+ * each channel. */
+typedef struct {
+    Weighted *colors;
+    int n, count;
+    int low[3], high[3];
+} Box;
 
 static unsigned short to555(int r, int g, int b)
 {
@@ -142,75 +154,248 @@ static unsigned short to555(int r, int g, int b)
 }
 
 static int channel(const Rgb *c, int axis) { return axis == 0 ? c->r : axis == 1 ? c->g : c->b; }
-static int sort_axis;
-/* By one channel, then the other two: a whole order, so every C library's
- * qsort sorts alike and a picture is made the same on Linux and Windows. */
-static int by_axis(const void *a, const void *b)
+static int weighted_channel(const Weighted *c, int axis) { return axis == 0 ? c->r : axis == 1 ? c->g : c->b; }
+
+static void measure(Box *box)
 {
-    int k, d = channel(a, sort_axis) - channel(b, sort_axis);
-    for (k = 0; !d && k < 3; k++) d = channel(a, k) - channel(b, k);
-    return d;
+    int a, k;
+    for (a = 0; a < 3; a++) {
+        box->low[a] = 255;
+        box->high[a] = 0;
+    }
+    for (k = 0; k < box->n; k++) {
+        for (a = 0; a < 3; a++) {
+            int v = weighted_channel(&box->colors[k], a);
+            if (v < box->low[a]) box->low[a] = v;
+            if (v > box->high[a]) box->high[a] = v;
+        }
+    }
+}
+
+/* The pixels in order by red, green, blue: three stable counting passes,
+ * the least of the keys first, through `spare`; the result in `spare`. */
+static void sort_pixels(Rgb *pixels, int count, Rgb *spare)
+{
+    int pass, k;
+    Rgb *from = pixels, *to = spare, *swap;
+    for (pass = 0; pass < 3; pass++) {
+        int at[256] = {0}, key = 2 - pass, sum = 0, v;
+        for (k = 0; k < count; k++) at[channel(&from[k], key)]++;
+        for (v = 0; v < 256; v++) {
+            int n = at[v];
+            at[v] = sum;
+            sum += n;
+        }
+        for (k = 0; k < count; k++) to[at[channel(&from[k], key)]++] = from[k];
+        swap = from;
+        from = to;
+        to = swap;
+    }
+    /* Three passes: the sorted pixels are in `spare`. */
+}
+
+/* A box's colors in order by channel `axis`, then red, green and blue (no
+ * color is there twice, so it is a whole order), through `spare`. */
+static void sort_colors(Weighted *colors, int n, int axis, Weighted *spare)
+{
+    static const int keys[3] = {2, 1, 0};     /* blue, green, red, then the axis */
+    int pass, k;
+    Weighted *from = colors, *to = spare, *swap;
+    for (pass = 0; pass < 4; pass++) {
+        int at[256] = {0}, key = pass < 3 ? keys[pass] : axis, sum = 0, v;
+        for (k = 0; k < n; k++) at[weighted_channel(&from[k], key)]++;
+        for (v = 0; v < 256; v++) {
+            int c = at[v];
+            at[v] = sum;
+            sum += c;
+        }
+        for (k = 0; k < n; k++) to[at[weighted_channel(&from[k], key)]++] = from[k];
+        swap = from;
+        from = to;
+        to = swap;
+    }
+    /* Four passes: back in `colors`. */
+}
+
+/* The palette entry nearest a color (the weights the eye gives red, green
+ * and blue), the lowest of those as near. `by_green` is the entries in
+ * order of green and `hint` an entry likely near (the last color's): the
+ * search starts from that one's distance and goes out from the entries of
+ * about the color's green no further than green alone puts an entry past
+ * the nearest found -- each entry as near as the hint or nearer is looked
+ * at, so the answer is the plain search's. */
+static int nearest(const Weighted *c, const Rgb *palette, const int *by_green, int entries, int hint)
+{
+    int lo = 0, hi = entries, best = hint, k, step;
+    long dr = palette[hint].r - c->r, dg = palette[hint].g - c->g, db = palette[hint].b - c->b;
+    long best_distance = dr * dr * 3 + dg * dg * 4 + db * db * 2;
+    while (lo < hi) {
+        int mid = (lo + hi) / 2;
+        if (palette[by_green[mid]].g < c->g) lo = mid + 1;
+        else hi = mid;
+    }
+    for (step = 0; step < 2; step++) {
+        for (k = step ? lo - 1 : lo; step ? k >= 0 : k < entries; k += step ? -1 : 1) {
+            const Rgb *p = &palette[by_green[k]];
+            long distance;
+            dr = p->r - c->r;
+            dg = p->g - c->g;
+            db = p->b - c->b;
+            if (dg * dg * 4 > best_distance) break;
+            distance = dr * dr * 3 + dg * dg * 4 + db * db * 2;
+            if (distance < best_distance || (distance == best_distance && by_green[k] < best)) {
+                best_distance = distance;
+                best = by_green[k];
+            }
+        }
+    }
+    return best;
 }
 
 /* Median cut of the pixels to `colors` entries, written to `clut` from
- * entry 1 on, and each pixel's entry to `indices`. */
+ * entry 1 on, and each pixel's entry to `indices`: the widest box (on one
+ * channel) split in two at its median pixel in order of that channel, then
+ * red, green and blue, until there are `colors` or none is worth it; an
+ * entry the average of its box, a pixel the entry nearest it.
+ *
+ * Worked on the colors and how many pixels have each, not pixel by pixel:
+ * a box holds the same pixels either way (a split may part one color's
+ * pixels between the two), so the palette and the entries are the plain
+ * way's, in a moment where that took seconds for a bust's hundred pictures
+ * (busts.c). */
 static void quantize(const Rgb *pixels, int count, int colors, unsigned short *clut, unsigned char *indices)
 {
-    Rgb *sorted = malloc((size_t)count * sizeof(*sorted)), palette[256];
+    Rgb *sorted = malloc((size_t)count * sizeof(*sorted)), *spare = malloc((size_t)count * sizeof(*spare)), palette[256];
+    Weighted *unique = NULL, *scratch = NULL;
+    unsigned char *entry = NULL, *table = NULL;
     Box boxes[256];
-    int box_count = 1, i, k;
-    if (!sorted) return;
+    int box_count = 1, i, k, n = 0, by_green[256];
+    boxes[0].colors = NULL;
+    if (!sorted || !spare || count < 1) goto done;
+    /* The colors, in order, and how many of each. */
     memcpy(sorted, pixels, (size_t)count * sizeof(*sorted));
-    boxes[0].first = 0;
+    sort_pixels(sorted, count, spare);
+    free(sorted);
+    sorted = NULL;
+    for (k = 0; k < count; k++) {
+        if (!k || spare[k].r != spare[k - 1].r || spare[k].g != spare[k - 1].g || spare[k].b != spare[k - 1].b) n++;
+    }
+    unique = malloc((size_t)n * sizeof(*unique));
+    scratch = malloc((size_t)n * sizeof(*scratch));
+    if (!unique || !scratch) goto done;
+    for (k = 0, n = 0; k < count; k++) {
+        const Rgb *c = &spare[k];
+        if (n && unique[n - 1].r == c->r && unique[n - 1].g == c->g && unique[n - 1].b == c->b) {
+            unique[n - 1].count++;
+            continue;
+        }
+        unique[n].r = c->r;
+        unique[n].g = c->g;
+        unique[n].b = c->b;
+        unique[n].count = 1;
+        n++;
+    }
+    free(spare);
+    spare = NULL;
+    boxes[0].colors = malloc((size_t)n * sizeof(Weighted));
+    if (!boxes[0].colors) goto done;
+    memcpy(boxes[0].colors, unique, (size_t)n * sizeof(Weighted));
+    boxes[0].n = n;
     boxes[0].count = count;
+    measure(&boxes[0]);
     while (box_count < colors) {
-        int best = -1, best_range = 0, axis = 0;
+        int best = -1, best_range = 0, axis = 0, a, half, before, j, part;
+        Box *box, *next;
         for (i = 0; i < box_count; i++) {
-            int a, low[3] = {255, 255, 255}, high[3] = {0, 0, 0};
             if (boxes[i].count < 2) continue;
-            for (k = boxes[i].first; k < boxes[i].first + boxes[i].count; k++) {
-                for (a = 0; a < 3; a++) {
-                    int v = channel(&sorted[k], a);
-                    if (v < low[a]) low[a] = v;
-                    if (v > high[a]) high[a] = v;
-                }
-            }
             for (a = 0; a < 3; a++) {
-                if (high[a] - low[a] > best_range) { best_range = high[a] - low[a]; best = i; axis = a; }
+                if (boxes[i].high[a] - boxes[i].low[a] > best_range) {
+                    best_range = boxes[i].high[a] - boxes[i].low[a];
+                    best = i;
+                    axis = a;
+                }
             }
         }
         if (best < 0 || best_range < 4) break;   /* no box worth splitting */
-        sort_axis = axis;
-        qsort(sorted + boxes[best].first, (size_t)boxes[best].count, sizeof(*sorted), by_axis);
-        boxes[box_count].first = boxes[best].first + boxes[best].count / 2;
-        boxes[box_count].count = boxes[best].count - boxes[best].count / 2;
-        boxes[best].count /= 2;
+        box = &boxes[best];
+        next = &boxes[box_count];
+        sort_colors(box->colors, box->n, axis, scratch);
+        /* Its first count / 2 pixels in that order stay; the rest are the
+         * new box, a color across the line parted between the two. */
+        half = box->count / 2;
+        for (j = 0, before = 0; j < box->n && before + box->colors[j].count <= half; j++) before += box->colors[j].count;
+        part = half - before;                 /* color j's pixels in the first */
+        next->n = box->n - j;
+        next->count = box->count - half;
+        next->colors = malloc((size_t)next->n * sizeof(Weighted));
+        if (!next->colors) break;
+        memcpy(next->colors, box->colors + j, (size_t)next->n * sizeof(Weighted));
+        if (part) {
+            next->colors[0].count -= part;
+            box->colors[j].count = part;
+            box->n = j + 1;
+        } else {
+            box->n = j;
+        }
+        box->count = half;
+        measure(box);
+        measure(next);
         box_count++;
     }
     for (i = 0; i < box_count; i++) {
-        unsigned long r = 0, g = 0, b = 0, n = (unsigned long)boxes[i].count;
-        for (k = boxes[i].first; k < boxes[i].first + boxes[i].count; k++) {
-            r += sorted[k].r; g += sorted[k].g; b += sorted[k].b;
+        unsigned long r = 0, g = 0, b = 0, w = (unsigned long)boxes[i].count;
+        for (k = 0; k < boxes[i].n; k++) {
+            const Weighted *c = &boxes[i].colors[k];
+            r += (unsigned long)c->r * (unsigned long)c->count;
+            g += (unsigned long)c->g * (unsigned long)c->count;
+            b += (unsigned long)c->b * (unsigned long)c->count;
         }
-        if (!n) n = 1;
-        palette[i].r = (unsigned char)(r / n);
-        palette[i].g = (unsigned char)(g / n);
-        palette[i].b = (unsigned char)(b / n);
+        if (!w) w = 1;
+        palette[i].r = (unsigned char)(r / w);
+        palette[i].g = (unsigned char)(g / w);
+        palette[i].b = (unsigned char)(b / w);
         clut[i + 1] = to555(palette[i].r, palette[i].g, palette[i].b);
     }
     for (; i < colors; i++) clut[i + 1] = 0x8000;
     clut[0] = 0x8000;
-    for (k = 0; k < count; k++) {
-        int best = 0;
-        long best_distance = -1;
-        for (i = 0; i < box_count; i++) {
-            long dr = pixels[k].r - palette[i].r, dg = pixels[k].g - palette[i].g, db = pixels[k].b - palette[i].b;
-            long distance = dr * dr * 3 + dg * dg * 4 + db * db * 2;
-            if (best_distance < 0 || distance < best_distance) { best_distance = distance; best = i; }
-        }
-        indices[k] = (unsigned char)(best + 1);
+    /* Each color's entry once (in order, the last one's a good start for
+     * the next), then each pixel's by its color: through a table of every
+     * color when there are many, else found among them in order. */
+    for (i = 0; i < box_count; i++) {
+        int v = i;
+        for (k = i; k > 0 && palette[by_green[k - 1]].g > palette[v].g; k--) by_green[k] = by_green[k - 1];
+        by_green[k] = v;
     }
+    entry = malloc((size_t)n);
+    if (!entry) goto done;
+    for (k = 0; k < n; k++)
+        entry[k] = (unsigned char)(nearest(&unique[k], palette, by_green, box_count, k ? entry[k - 1] - 1 : 0) + 1);
+    if (n > 0x4000) table = malloc((size_t)1 << 24);
+    if (table) {
+        for (k = 0; k < n; k++) table[(size_t)unique[k].r << 16 | (size_t)unique[k].g << 8 | unique[k].b] = entry[k];
+        for (k = 0; k < count; k++)
+            indices[k] = table[(size_t)pixels[k].r << 16 | (size_t)pixels[k].g << 8 | pixels[k].b];
+    } else {
+        for (k = 0; k < count; k++) {
+            unsigned key = (unsigned)pixels[k].r << 16 | (unsigned)pixels[k].g << 8 | pixels[k].b;
+            int lo = 0, hi = n - 1;
+            while (lo < hi) {
+                int mid = (lo + hi) / 2;
+                unsigned at = (unsigned)unique[mid].r << 16 | (unsigned)unique[mid].g << 8 | unique[mid].b;
+                if (at < key) lo = mid + 1;
+                else hi = mid;
+            }
+            indices[k] = entry[lo];
+        }
+    }
+done:
+    for (i = 0; i < box_count; i++) free(boxes[i].colors);
     free(sorted);
+    free(spare);
+    free(unique);
+    free(scratch);
+    free(entry);
+    free(table);
 }
 
 static void put_clut(unsigned char *out, const unsigned short *clut, int entries)

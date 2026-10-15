@@ -1472,3 +1472,16 @@ three expressions talking, blinking and changing face in place in a tower
 story, the old forms beside it, and the campaign's first scene with Simon
 Muran's bust kept (frames hashed against a master build and the same mod's
 without the bust) and replaced.
+
+**What a bust costs the start.** The busts are made once, when the mods are
+read (`MEMORIES_TRACE=mods` logs `busts: N made into R records in T ms`). The
+cost is the pictures' colors: every picture of a bust goes through one
+palette (median cut, `art.c`), which once worked pixel by pixel -- 9 s for
+the most a bust can be (sixteen expressions of six frames at 256 x 256) and
+half a second for a typical one (three expressions of four frames at 160 x
+224) on a desktop's 32-bit build. It now works on the colors and how many
+pixels have each, sorts by counting and finds each color's entry once: the
+same palette and entries, byte for byte, in about 480 and 45 ms. What is
+left of the most is mostly reading its ninety-six PNGs. `pc_busts_make`
+(`tests/pc/busts_make_test.c`) draws both busts, makes them with the real
+`art.c` and prints the times.

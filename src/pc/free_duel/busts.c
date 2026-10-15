@@ -51,6 +51,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #define CHARACTERS 0x41              /* the campaign's large characters, 1-0x40 */
 /* The side's anchor (func_80039F44: y 0xB2, just under the box's top): a
@@ -808,11 +809,19 @@ static void make(Bust *one)
 
 void Busts_Make(void)
 {
-    int duelist, bust, count = Duelists_Count();
+    int duelist, bust, count = Duelists_Count(), made = 0;
+    clock_t start = clock();
     for (duelist = 1; duelist < count; duelist++) {
         bust = Duelists_Bust(duelist);
-        if (bust >= 0 && bust < bust_count && !busts[bust].made) make(&busts[bust]);
+        if (bust >= 0 && bust < bust_count && !busts[bust].made) {
+            make(&busts[bust]);
+            made++;
+        }
     }
+    /* What it cost the start (MEMORIES_TRACE=mods). */
+    if (made)
+        LOG(LOG_MODS, "busts: %d made into %d records in %ld ms", made, record_count,
+            (long)((clock() - start) * 1000 / CLOCKS_PER_SEC));
     /* The campaign's characters a disc duelist's "replace_bust" takes over:
      * the character its own dialogue brings in (Tower_DuelistCharacter),
      * whose record the bust's first is from then on, wherever the campaign

@@ -834,12 +834,16 @@ class FramesPage(ttk.Frame):
                 for key, value in values.items():
                     if value == name:
                         references.append((f"{label}: {key}", values, key))
+        def card_label(cid):
+            card = self.project.cards.get(cid)
+            return card.name if card is not None else str(cid)
+
         for cid, entry in self.project.card_extra.items():
             if entry.get("frame_style") == name:
-                references.append((f"Card: {self.project.cards[cid].name}", entry, "frame_style"))
+                references.append((f"Card: {card_label(cid)}", entry, "frame_style"))
         for cid, added in self.project.added.items():
             if added.extra.get("frame_style") == name:
-                references.append((f"Card: {self.project.cards[cid].name}", added.extra, "frame_style"))
+                references.append((f"Card: {card_label(cid)}", added.extra, "frame_style"))
         return references
 
     def delete_style(self):

@@ -188,13 +188,21 @@ static long made_in(const char *folder, const char *name, int count, int talks, 
 int main(int argc, char **argv)
 {
     const char *folder = argc > 1 ? argv[1] : "busts-make-test";
+    long typical, most;
     int i;
     make_folder(folder);
     /* About 45 and 480 ms on a desktop's 32-bit build; 500 and 9000 before
-     * art.c's quantizer worked on colors rather than pixels. The bounds are
-     * loose, for a slow machine, and catch that coming back. */
-    CHECK(made_in(folder, "typical", 3, 2, 160, 224) < 1000);
-    CHECK(made_in(folder, "most", BUST_EXPRESSIONS, BUST_TALK_FRAMES, BUST_SIDE, BUST_SIDE) < 4000);
+     * art.c's quantizer worked on colors rather than pixels. In an
+     * optimized build the bounds, loose for a slow machine, catch that
+     * coming back; a debug or sanitized one only prints the times. */
+    typical = made_in(folder, "typical", 3, 2, 160, 224);
+    most = made_in(folder, "most", BUST_EXPRESSIONS, BUST_TALK_FRAMES, BUST_SIDE, BUST_SIDE);
+#ifdef __OPTIMIZE__
+    CHECK(typical < 1000 && most < 4000);
+#else
+    (void)typical;
+    (void)most;
+#endif
     Busts_Clear();
     for (i = 0; i < document_count; i++) Json_Free(documents[i]);
     printf("busts make: ok\n");

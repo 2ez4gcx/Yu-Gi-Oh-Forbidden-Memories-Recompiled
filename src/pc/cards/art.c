@@ -337,6 +337,11 @@ static void quantize(const Rgb *pixels, int count, int colors, unsigned short *c
         } else {
             box->n = j;
         }
+        {   /* The first keeps only its own colors: what the boxes hold stays
+             * about the colors' count, however deep the splits. */
+            Weighted *kept = box->n ? realloc(box->colors, (size_t)box->n * sizeof(Weighted)) : NULL;
+            if (kept) box->colors = kept;
+        }
         box->count = half;
         measure(box);
         measure(next);

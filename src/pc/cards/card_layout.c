@@ -17,6 +17,14 @@ static const char *const element_names[CARD_LAYOUT_ELEMENT_COUNT] = {
 #define CARD_LAYOUT_FRAME_MAX_W 140
 #define CARD_LAYOUT_FRAME_MAX_H 196
 
+/* Hand overlays live on a 52x60 sprite.  Keep user values in a modest,
+ * deliberately generous range so their additions to a screen position and
+ * five-digit rows cannot wrap the PS1 short geometry fields. */
+#define CARD_LAYOUT_HAND_COORD_MIN (-128)
+#define CARD_LAYOUT_HAND_COORD_MAX 128
+#define CARD_LAYOUT_HAND_MAX_W 128
+#define CARD_LAYOUT_HAND_MAX_H 128
+
 /* cards.h's CARD_FRAME_* order, named as "frame"'s own sub-keys. */
 static const char *const frame_kind_names[CARD_FRAME_COUNT] = {
     "monster", "magic", "trap", "ritual", "purple", "orange"
@@ -139,6 +147,15 @@ static void rect(const JsonValue *part, int *x, int *y, int *w, int *h, int dx, 
     *y = (int)Json_Number(Json_Member(part, "y"), dy);
     *w = (int)Json_Number(Json_Member(part, "width"), dw);
     *h = (int)Json_Number(Json_Member(part, "height"), dh);
+}
+
+static int bounded_coordinate(const JsonValue *part, const char *key, int fallback, int minimum, int maximum)
+{
+    long value = Json_Number(Json_Member(part, key), fallback);
+
+    if (value < minimum) return minimum;
+    if (value > maximum) return maximum;
+    return (int)value;
 }
 
 static int frame_box_dimension(const JsonValue *frame, const char *key, int fallback, int maximum)
@@ -388,14 +405,14 @@ static int resolve_style(const LayoutSource *source, int card, CardLayoutFrameSt
         return 1;
     }
     /* Resolve every presentation consistently: an explicit card assignment,
-     * then its printed type, broad kind, global default, and finally retail.
-     * Do not silently choose a color-named style or a frame_for rule here:
-     * either would make a card bypass the documented fallback chain. */
+     * then its printed type, broad kind, global default, the legacy
+     * color-named style, and finally retail.  frame_for rules deliberately
+     * do not participate in this newer style-selection chain. */
     if (card_style && *card_style) name = card_style;
-    if (!name && override >= 0 && Json_Member(styles, color_names[override])) name = color_names[override];
     if (!name) name = default_style_for_type(source->layout, card);
     if (!name) name = default_style_for_kind(source->layout, cls);
     if (!name) name = Json_String(Json_Member(source->layout, "default_style"), NULL);
+    if (!name && override >= 0 && Json_Member(styles, color_names[override])) name = color_names[override];
     if (!name || !*name) return 0;
     style = Json_Member(styles, name);
     if (!style) {
@@ -503,8 +520,12 @@ CardLayoutPlacement CardLayout_HandGet(int card_id, CardLayoutHandElement elemen
 
     if (element < CARD_LAYOUT_HAND_ART || element > CARD_LAYOUT_HAND_DEF_LABEL) return p;
     part = hand_part_for(card_id, names[element]);
-    rect(part, &p.x, &p.y, &p.w, &p.h,
-         defaults[element][0], defaults[element][1], defaults[element][2], defaults[element][3]);
+    p.x = bounded_coordinate(part, "x", defaults[element][0],
+                             CARD_LAYOUT_HAND_COORD_MIN, CARD_LAYOUT_HAND_COORD_MAX);
+    p.y = bounded_coordinate(part, "y", defaults[element][1],
+                             CARD_LAYOUT_HAND_COORD_MIN, CARD_LAYOUT_HAND_COORD_MAX);
+    p.w = frame_box_dimension(part, "width", defaults[element][2], CARD_LAYOUT_HAND_MAX_W);
+    p.h = frame_box_dimension(part, "height", defaults[element][3], CARD_LAYOUT_HAND_MAX_H);
     p.visible = part_visible(part, 1);
     return p;
 }

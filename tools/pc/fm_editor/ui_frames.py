@@ -20,6 +20,8 @@ from .widgets import CardField, px
 from .gamedata import TYPE_NAMES
 
 CARD_W, CARD_H = 140, 196
+HAND_COORD_LIMIT = 128
+HAND_SIZE_LIMIT = 128
 
 # id, user-facing label, manifest path, default rectangle, can hide, can resize.
 PARTS = (
@@ -723,7 +725,12 @@ class FramesPage(ttk.Frame):
         if key not in MOVABLE: return
         part = self.part(key, True)
         x, y, _, _ = self.rect(key)
-        set_member(part, "x", x + dx, SPECS[key][3][0]); set_member(part, "y", y + dy, SPECS[key][3][1])
+        if key.startswith("hand_"):
+            x = max(-HAND_COORD_LIMIT, min(HAND_COORD_LIMIT, x + dx))
+            y = max(-HAND_COORD_LIMIT, min(HAND_COORD_LIMIT, y + dy))
+        else:
+            x, y = x + dx, y + dy
+        set_member(part, "x", x, SPECS[key][3][0]); set_member(part, "y", y, SPECS[key][3][1])
         self.done()
 
     def dragging(self, key, dx, dy):
@@ -734,8 +741,10 @@ class FramesPage(ttk.Frame):
         if key not in SPECS or not SPECS[key][5]: return
         part = self.size_part(key, True)
         _, _, w, h = self.rect(key); default = SPECS[key][3]
-        set_member(part, "width", max(1, min(140, w + step * 4)), default[2])
-        set_member(part, "height", max(1, min(196, h + step * 4)), default[3]); self.done()
+        width_max = HAND_SIZE_LIMIT if key.startswith("hand_") else 140
+        height_max = HAND_SIZE_LIMIT if key.startswith("hand_") else 196
+        set_member(part, "width", max(1, min(width_max, w + step * 4)), default[2])
+        set_member(part, "height", max(1, min(height_max, h + step * 4)), default[3]); self.done()
 
     def fill_form(self):
         if self.project is None: return
@@ -743,7 +752,9 @@ class FramesPage(ttk.Frame):
         shared = " ATK and DEF share this digit-strip glyph size." if key in ("atk", "def") else ""
         label = DISPLAY_SPEC.get(self.list_chosen, (None, None, None, spec[1]))[3]
         self.heading.configure(text=label)
-        self.what.configure(text="Drag on the preview or use the fields. Wheel resizes elements that have a size." + shared)
+        hand_note = (" Five-digit values use five cells; keep X + 5 × Width within the 52px hand card."
+                     if key in ("hand_atk", "hand_def") else "")
+        self.what.configure(text="Drag on the preview or use the fields. Wheel resizes elements that have a size." + shared + hand_note)
         for name, value in (("x", x), ("y", y), ("width", w), ("height", h)): self.vars[name].set(str(value))
         for name in ("x", "y", "width", "height"):
             visible = (name in ("x", "y") and key in MOVABLE) or (name in ("width", "height") and spec[5])
@@ -769,8 +780,13 @@ class FramesPage(ttk.Frame):
         part = self.size_part(key, True) if name in ("width", "height") else \
             (self.style(True) if key in ("frame", "back") else self.part(key, True))
         default = {"x": spec[3][0], "y": spec[3][1], "width": spec[3][2], "height": spec[3][3]}[name]
-        limit = 140 if name == "width" else 196 if name == "height" else 320
-        set_member(part, name, max(-320, min(limit, value)), default); self.done()
+        if key.startswith("hand_"):
+            minimum = -HAND_COORD_LIMIT if name in ("x", "y") else 1
+            limit = HAND_COORD_LIMIT if name in ("x", "y") else HAND_SIZE_LIMIT
+        else:
+            minimum = -320
+            limit = 140 if name == "width" else 196 if name == "height" else 320
+        set_member(part, name, max(minimum, min(limit, value)), default); self.done()
 
     def choose_image(self):
         if self.chosen not in DIRECT_ASSETS | IMAGE_PARTS: return

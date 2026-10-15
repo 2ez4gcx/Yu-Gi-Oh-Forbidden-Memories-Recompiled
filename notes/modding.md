@@ -1107,7 +1107,10 @@ disagree. Three keys say it:
   Its optional `hand` object independently places the overlays on that same
   52x60 card: `art`, `atk`, `def`, `atk_label` and `dfd_label`. Each accepts
   `x`, `y`, `width`, `height` and `hide` just like the larger card-viewer
-  elements. `atk_label` and `dfd_label` are the hand's sword and shield
+  elements. Coordinates are kept within -128 to 128 and dimensions within
+  1 to 128, so malformed JSON cannot wrap the duel renderer's geometry.
+  Five-digit values draw five cells across; keep `x + 5 * width` inside the
+  52-pixel card when the row must not extend past its edge. `atk_label` and `dfd_label` are the hand's sword and shield
   markers, not the literal `ATK`/`DFD` text used by the big card. Leave the
   whole object out to keep the retail hand draw path exactly as it is.
 
@@ -1125,10 +1128,11 @@ disagree. Three keys say it:
   `full_bleed` defaults on for a style with an `image`; set it to `false`
   for a palette-only fallback style, so cards that do not select a custom
   image keep the retail full-card frame.
-- A card entry's `"frame_style"` may name any style directly. It wins over
-  its six-color `"frame"`, then the defaults below; this lets a cards mod opt
-  into a new frame without using a tag as an implementation detail. `null`
-  clears an inherited named style.
+- A card entry's `"frame_style"` may name any style directly. It is the
+  strongest choice; the full order is explicit card style, printed type,
+  kind, `default_style`, a style named for the card's six-color `"frame"`,
+  then retail. This lets a cards mod opt into a new frame without using a tag
+  as an implementation detail. `null` clears an inherited named style.
 - `default_styles`: defaults for cards that have no explicit card style. Its optional
   `kinds` object assigns a style to `monster`, `effect_monster`, `magic`
   (also accepted as `spell`), `equip`, `ritual` (also `ritual_spell`) or
@@ -1175,6 +1179,10 @@ was, which is a deliberate, supported look (a mod may want the art and stats
 floating with no backing). The PNG is stretched to the texture's own
 resolution regardless of its native size, the same rule a `title` mod's
 `image` follows.
+
+`frame_for` rules are not a selector for `frame_styles`. Use an explicit
+card `frame_style` or the `default_styles` tiers above instead; this keeps one
+documented resolution order across the viewer, hand, field and Library.
 
 Whatever size the source art is, it lands on a fixed 177x254 texture
 (`src/pc/cards/card_layout_art.c`'s `FRAME_W`/`FRAME_H`, the largest size

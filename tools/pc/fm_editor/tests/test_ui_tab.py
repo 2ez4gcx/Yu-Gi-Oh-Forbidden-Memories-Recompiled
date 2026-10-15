@@ -13,10 +13,19 @@ from pathlib import Path
 from unittest import mock
 
 from fm_editor import manifest, pngio, ui_assets, ui_rules, validate
-from fm_editor import ui_tab
 from fm_editor.model import Project
 from fm_editor.tests.test_data import fixture
 from fm_editor.tests.test_gui import GuiCase, tk
+
+# CI's lightweight Python deliberately has no Tk package.  The non-widget
+# checks below can still run there; the checks that inspect UiTab itself need
+# its tkinter import and are skipped, just like the GUI cases.
+try:
+    from fm_editor import ui_tab
+except ModuleNotFoundError as problem:
+    if problem.name != "tkinter":
+        raise
+    ui_tab = None
 
 
 def project(other=None) -> Project:
@@ -104,6 +113,7 @@ class SceneTest(unittest.TestCase):
         self.assertEqual(fit(400, 112, 256, 64, guess_h=32), (100, 28))  # an item drawn at 4x
 
 
+@unittest.skipIf(ui_tab is None, "ui_tab needs Tk")
 class RulesTest(unittest.TestCase):
     def test_frames_page_is_a_card_layout_page(self):
         """The UI tab owns the new editor page, including its revert scope

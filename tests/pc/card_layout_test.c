@@ -457,9 +457,10 @@ static void styles_card_frame_and_default(void)
 {
     reset();
     add_styles_mod(0);
-    fake_frame_color[1] = CARD_FRAME_ORANGE;   /* a cards mod's "frame": Orange, on a plain monster */
-    CHECK(style_of(1, "/mods/x/orange.png") == CARD_FRAME_ORANGE);
-    fake_frame_color[2] = CARD_FRAME_PURPLE;   /* no "purple" style: the rules, then the default */
+    /* A color-named style is lower priority than the global default. */
+    fake_frame_color[1] = CARD_FRAME_ORANGE;
+    CHECK(style_of(1, "/mods/x/gold.png") == CARD_FRAME_MONSTER);
+    fake_frame_color[2] = CARD_FRAME_PURPLE;   /* no "purple" style: global default */
     CHECK(style_of(2, "/mods/x/gold.png") == CARD_FRAME_MONSTER);
     CHECK(notes == 0);
 }
@@ -493,12 +494,15 @@ static void styles_by_default_kind_and_type(void)
             "\"dragon\": {\"image\": \"dragon.png\", \"hand_color\": \"purple\"},"
             "\"zombie\": {\"image\": \"zombie.png\", \"hand_color\": \"orange\"},"
             "\"type_equip\": {\"image\": \"type_equip.png\", \"hand_color\": \"orange\"},"
+            "\"purple\": {\"image\": \"purple.png\", \"hand_color\": \"purple\"},"
             "\"specific\": {\"image\": \"specific.png\", \"hand_color\": \"pink\"}},"
             "\"default_styles\": {\"kinds\": {\"monster\": \"kind_monster\", \"magic\": \"kind_magic\","
             "\"ritual\": \"kind_ritual\", \"equip\": \"kind_equip\", \"trap\": \"kind_trap\"},"
             "\"types\": {\"Dragon\": \"dragon\", \"Zombie\": \"zombie\", \"Equip\": \"type_equip\"}},"
             "\"default_style\": \"global\"}}",
             1, "full_bleed", 1);
+    /* A color-named style is a legacy fallback, not stronger than a type. */
+    fake_frame_color[1] = CARD_FRAME_PURPLE;
     CHECK(style_of(1, "/mods/x/dragon.png") == CARD_FRAME_PURPLE);
     fake_card_type[2] = CARD_TYPE_ZOMBIE;
     CHECK(style_of(2, "/mods/x/zombie.png") == CARD_FRAME_ORANGE);
@@ -521,6 +525,25 @@ static void styles_by_default_kind_and_type(void)
             "\"hand_color\": \"gold\"}}}}",
             1, "full_bleed", 1);
     CHECK(!CardLayout_StyleOf(1, &(CardLayoutStyle){0}));
+
+    /* The color-named style remains available only after every configured
+     * default tier is absent. A global default is stronger than it. */
+    reset();
+    add_mod("x", "/mods/x",
+            "{\"id\": \"x\", \"card_layout\": {\"frame_styles\": {"
+            "\"global\": {\"image\": \"global.png\", \"hand_color\": \"gold\"},"
+            "\"purple\": {\"image\": \"purple.png\", \"hand_color\": \"purple\"}},"
+            "\"default_style\": \"global\"}}",
+            1, "full_bleed", 1);
+    fake_frame_color[1] = CARD_FRAME_PURPLE;
+    CHECK(style_of(1, "/mods/x/global.png") == CARD_FRAME_MONSTER);
+    reset();
+    add_mod("x", "/mods/x",
+            "{\"id\": \"x\", \"card_layout\": {\"frame_styles\": {"
+            "\"purple\": {\"image\": \"purple.png\", \"hand_color\": \"purple\"}}}}",
+            1, "full_bleed", 1);
+    fake_frame_color[1] = CARD_FRAME_PURPLE;
+    CHECK(style_of(1, "/mods/x/purple.png") == CARD_FRAME_PURPLE);
 }
 
 /* A layout can provide palette-only fallback styles.  They keep the normal
@@ -591,7 +614,9 @@ static void styles_hand_elements(void)
             "{\"id\": \"x\", \"card_layout\": {\"frame_styles\": {\"gold\": {\"image\": \"g.png\","
             "\"hand_color\": \"gold\", \"hand\": {\"art\": {\"x\": 3, \"y\": 4, \"width\": 30,"
             "\"height\": 25}, \"atk\": {\"x\": 18, \"hide\": true},"
-            "\"dfd_label\": {\"y\": 51, \"width\": 10}}}}, \"default_style\": \"gold\"}}",
+            "\"dfd_label\": {\"y\": 51, \"width\": 10},"
+            "\"def\": {\"x\": 999999, \"y\": -999999, \"width\": 999999, \"height\": 0}}}},"
+            "\"default_style\": \"gold\"}}",
             1, "full_bleed", 1);
     CHECK(CardLayout_HandStyled(1));
     p = CardLayout_HandGet(1, CARD_LAYOUT_HAND_ART);
@@ -600,6 +625,8 @@ static void styles_hand_elements(void)
     CHECK(!p.visible && p.x == 18 && p.y == 40 && p.w == 8 && p.h == 8);
     p = CardLayout_HandGet(1, CARD_LAYOUT_HAND_DEF_LABEL);
     CHECK(p.visible && p.x == 5 && p.y == 51 && p.w == 10 && p.h == 8);
+    p = CardLayout_HandGet(1, CARD_LAYOUT_HAND_DEF);
+    CHECK(p.visible && p.x == 128 && p.y == -128 && p.w == 128 && p.h == 8);
     reset();
     CHECK(!CardLayout_HandStyled(1));
     p = CardLayout_HandGet(1, CARD_LAYOUT_HAND_ART);

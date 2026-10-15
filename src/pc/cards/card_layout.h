@@ -163,8 +163,9 @@ typedef struct {
  * or 0 when the anime frame is off or the layout has none to give (retail's
  * frame colors then). A layout says it in "frame_styles" (name -> {"image",
  * "hand_color", "width", "height", "full_bleed"}), `default_styles` and
- * "default_style". A card's own named "frame_style" (or its color's same-
- * named style) wins, followed by printed type, kind, and global default. A layout
+ * "default_style". A card's own named "frame_style" wins, followed by
+ * printed type, kind, global default, and then a style named for the card's
+ * frame color. A layout
  * with a "frame" per kind and no "frame_styles" is read as before: the kind
  * of the card, and a ritual spell with no picture of its own wears magic's. */
 int CardLayout_FrameStyleOf(int card_id, CardLayoutFrameStyle *style);

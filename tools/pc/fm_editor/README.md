@@ -39,8 +39,10 @@ where the pictures and links below work.
 
 1. **Get the editor.** Each release from
    [Releases](https://github.com/Unchiga/Yu-Gi-Oh-Forbidden-Memories-Recompiled/releases)
-   carries it as `fm-editor-<version>-windows.zip` and
-   `fm-editor-<version>-linux.tar.gz`. Unpack it where you unpacked the game:
+   carries it as `fm-editor-<version>-windows.zip`,
+   `fm-editor-<version>-linux.tar.gz` and `fm-editor-<version>-macos-arm64.zip`.
+   On Apple Silicon, unpack and open `fm-editor.app`; Python and Tk are included.
+   Unpack it where you unpacked the game:
    `fm-editor.exe` (with `fm-editor.pkg` and `fm-editor-files/`, which stay
    together) or `fm-editor` lands beside `memories-pc.exe` or `memories-pc`.
    From the source, run `python tools/pc/fm_editor`
@@ -1647,13 +1649,16 @@ with `--print` shows the `mod.json` the editor would write for it.
 
 builds the editor with no Python needed to run it. On Windows that is
 `tmp/pc/fm-editor/fm-editor/`: `fm-editor.exe`, `fm-editor.pkg` and the
-`fm-editor-files/` folder, which stay together. Elsewhere it is one file,
+`fm-editor-files/` folder, which stay together. On macOS it is
+`tmp/pc/fm-editor/fm-editor.app` (ARM64); on Linux it is one file,
 `tmp/pc/fm-editor/fm-editor`. Put them beside `memories-pc.exe` and the
 editor finds the game's `game/` folder there. Build outputs never go in git.
 Windows gets no one-file build because virus scanners took it for a dropper.
+The Mac bundle uses PyInstaller's ad-hoc signature and is not notarized.
 
-Each release carries it as `fm-editor-<version>-windows.zip` and
-`fm-editor-<version>-linux.tar.gz` (`.github/workflows/pc-release.yml`):
+Each release carries it as `fm-editor-<version>-windows.zip`,
+`fm-editor-<version>-linux.tar.gz` and `fm-editor-<version>-macos-arm64.zip`
+(`.github/workflows/pc-release.yml`):
 unpack it where the game's archive was unpacked, and `fm-editor.exe` with
 its files (or `fm-editor`) lands beside the game's program. The Linux one is built on
 Debian 11, like the game, and brings its own Python and Tk. Running it from
@@ -1669,7 +1674,7 @@ This runs the packaged editor's `self-test --output <report.json>`: synthetic
 game files, every tab and UI page, a card and art edit, export and reopen.
 It requires a working display and fails on Tk callback errors; it needs no ROM.
 Windows writes its result to JSON because the windowed executable has no console.
-Both release platforms run this before uploading their archives; Linux's normal
+All release platforms run this before uploading their archives; Linux's normal
 CI runs the editor suite with Xvfb so GUI tests execute too.
 
 These checks verify the editor and its packaging. The live-game checks below

@@ -532,7 +532,7 @@ A tower needs mod API 14 (`"min_api": 14`, [Which game a mod
 needs](modding.md#which-game-a-mod-needs)): `tower`, a duelist's `tower_only`
 or `unlock` `tower`, a menu item's action `tower`. An older game would play the
 mod without its tower. A duelist's `bust` and `replace_bust`, and a story's
-`"expression"` by name, need 17; a game of 16 would show the duelists as the
+bust `"expression"` (by name, or a number past 3), need 17; a game of 16 would show the duelists as the
 campaign's characters.
 
 ## How it is built

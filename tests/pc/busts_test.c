@@ -75,6 +75,7 @@ static void size_of(const char *path, int *w, int *h)
     if (strstr(at, "huge")) { *w = 600; *h = 400; }
     if (strstr(at, "wide")) { *w = 100; *h = 120; }
     if (strstr(at, "full")) { *w = 256; *h = 256; }
+    if (strstr(at, "tall")) { *w = 240; *h = 256; }
 }
 int CardArt_ImageSize(const char *path, int *width, int *height)
 {
@@ -89,7 +90,9 @@ static void draw(const char *path, int w, int h, unsigned char *out)
     for (y = 0; y < h; y++) {
         for (x = 0; x < w; x++) {
             int dx = x - w / 2, dy = y - h / 3, value = 0;
-            if (strstr(path, "noise") || strstr(path, "full")) value = 1 + (x * 7 + y * 13 + face * 31) % 250;
+            if (strstr(path, "noise") || strstr(path, "full") || strstr(path, "tall"))
+                value = 1 + (x * 7 + y * 13 + face * 31) % 250;
+            if (strstr(path, "spread") && y >= h / 2 && y < h / 2 + 64) value = 1 + (x * 11 + y * 5 + 97) % 250;   /* much changed */
             else if (dx * dx + dy * dy < (w / 5) * (w / 5)) value = 10 + face;               /* the head */
             else if (y > h / 2 && dx > -w / 3 && dx < w / 3) value = 40;                        /* the body */
             if (strstr(path, "talk") && dx > -6 && dx < 6 && dy > 6 && dy < 12) value = strstr(path, "talk2") ? 61 : 60;
@@ -414,6 +417,47 @@ static void making(void)
     CHECK(Busts_Replacing(3) == -1 && Busts_Count(0) == 0 && record_count == 0);
 }
 
+/* A picture of 240 x 256 leaves the page a strip of 16 columns, 64 of its
+ * 8 x 8 squares: a talking frame that changes little fits there, a blink
+ * and a second talking frame that change much do not. The note says
+ * exactly what was left out and what the expression then does (the bug:
+ * "no blink" whatever went), and the record has just that. */
+static void dropping(void)
+{
+    const unsigned short *clut;
+    const unsigned char *made_bank;
+    int record, slot;
+    Busts_Clear();
+    forget();
+    memset(owner, -1, sizeof(owner));
+    memset(replaces, 0, sizeof(replaces));
+    CHECK(read_bust("{\"default\": \"a\", \"expressions\": [{\"name\": \"a\", \"image\": \"d/e0-tall.png\","
+                    " \"talk\": [\"d/e0-tall-talk.png\", \"d/e0-tall-talk2-spread.png\"],"
+                    " \"blink\": \"d/e0-tall-blink-spread.png\"}]}") == 0);
+    owner[41] = 0;
+    Busts_Make();
+    if (notes != 1) fputs(said, stderr);
+    CHECK(notes == 1);
+    CHECK(heard("expression \"a\" has too much to change to fit the game's record: it is made without its blink "
+                "frame and talking frame 2, so it never blinks and talks with 1 frame (its 240 x 256 picture leaves "
+                "64 of the page's 1024 8 x 8 squares for its frames' changes)"));
+    CHECK(Busts_Place(0, 0, &record, &slot) && slot == 0);
+    CHECK(Busts_Record(record, &clut, &made_bank) != NULL);
+    CHECK(stream_of(made_bank, 0, 1, 0) == 0 && stream_of(made_bank, 0, 2, 1) != 0);
+    /* Talking frames only, and none fits: all of them, and it never talks. */
+    Busts_Clear();
+    forget();
+    CHECK(read_bust("\"d/e0-full.png\"") == 0);
+    Busts_Clear();
+    CHECK(read_bust("{\"default\": \"b\", \"expressions\": [{\"name\": \"b\", \"image\": \"d/e1-full.png\","
+                    " \"talk\": [\"d/e1-full-talk.png\", \"d/e1-full-talk2.png\"]}]}") == 0);
+    Busts_Make();
+    CHECK(heard("expression \"b\" has too much to change to fit the game's record: it is made without all 2 talking "
+                "frames, so it never talks (its 256 x 256 picture leaves 0 of the page's 1024 8 x 8 squares for its "
+                "frames' changes)"));
+    Busts_Clear();
+}
+
 /* Two mods' disc duelists replacing one campaign character -- Seto (7)
  * and Seto 3rd (36) are both character 4 -- in both load orders: the later
  * mod's bust has it whichever duelist's id is the higher (the bug: the
@@ -464,6 +508,7 @@ int main(void)
     reading();
     packing();
     making();
+    dropping();
     load_order();
     for (i = 0; i < document_count; i++) Json_Free(documents[i]);
     printf("busts: ok\n");

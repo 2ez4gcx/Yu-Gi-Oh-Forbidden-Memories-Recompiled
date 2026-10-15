@@ -354,6 +354,130 @@ def picture(png):
         return None
 
 
+CELL = 8                          # the parts' squares (busts.c: 8 x 8 texels at the least)
+PAGE_CELLS = (SIDE // CELL) ** 2  # the page's: 1024
+
+
+def fit_size(w: int, h: int) -> tuple:
+    """A picture's size as busts.c makes it: shrunk to fit SIDE."""
+    if w > SIDE or h > SIDE:
+        if w >= h:
+            w, h = SIDE, max(1, h * SIDE // w)
+        else:
+            w, h = max(1, w * SIDE // h), SIDE
+    return w, h
+
+
+def room(size) -> tuple:
+    """(cw, ch, free): the picture of `size` on the record's page, rounded up
+    to 8 as busts.c places it, and the page's 8 x 8 squares it leaves for its
+    expression's frames' changes."""
+    w, h = fit_size(*size)
+    cw, ch = (w + 7) & ~7, (h + 7) & ~7
+    return cw, ch, PAGE_CELLS - (cw // CELL) * (ch // CELL)
+
+
+_texels_cache = {}
+
+
+def _texels(png: bytes, w: int, h: int):
+    """The picture at w x h as the game samples it, a texel clear (all 0)
+    under half covered; padded to the 8s with clear. None unreadable."""
+    key = (png, w, h)
+    if key in _texels_cache:
+        return _texels_cache[key]
+    image = picture(png)
+    out = None
+    if image is not None:
+        if image.size != (w, h):
+            image = pngio.resample(image, w, h)
+        cw, ch = (w + 7) & ~7, (h + 7) & ~7
+        rows = bytearray(cw * ch * 4)
+        for y in range(h):
+            for x in range(w):
+                at = (y * w + x) * 4
+                if image.rgba[at + 3] * 2 >= 255:
+                    o = (y * cw + x) * 4
+                    rows[o:o + 3] = image.rgba[at:at + 3]
+                    rows[o + 3] = 255
+        out = bytes(rows)
+    if len(_texels_cache) > 256:
+        _texels_cache.clear()
+    _texels_cache[key] = out
+    return out
+
+
+def changed_cells(base: bytes, frame: bytes, w: int, h: int) -> set:
+    """The 8 x 8 squares of `frame` that busts.c cuts for it over `base`
+    (one not clear and not the same as the picture's), by their texels:
+    squares alike are cut once."""
+    a, b = _texels(base, w, h), _texels(frame, w, h)
+    if a is None or b is None:
+        return set()
+    cw, ch = (w + 7) & ~7, (h + 7) & ~7
+    out = set()
+    pitch = cw * 4
+    for cy in range(0, ch, CELL):
+        for cx in range(0, cw, CELL):
+            rows = [b[(cy + y) * pitch + cx * 4:(cy + y) * pitch + (cx + CELL) * 4] for y in range(CELL)]
+            if not any(any(row[3::4]) for row in rows):
+                continue
+            if all(row == a[(cy + y) * pitch + cx * 4:(cy + y) * pitch + (cx + CELL) * 4] for y, row in enumerate(rows)):
+                continue
+            out.add(b"".join(rows))
+    return out
+
+
+def dropped(bust: Bust, e: Expression):
+    """What busts.c leaves out of `e` to fit it in a record alone, when its
+    frames' changes need more of the page than its picture leaves: (blink
+    dropped, talking frames kept, cells needed, free); None when they fit.
+    About: the editor compares colors where the game compares the colors
+    the palette makes of them."""
+    first = find(bust, bust.default) or (bust.expressions[0] if bust.expressions else None)
+    size = size_of(first.image) if first is not None else None
+    if size is None or picture(e.image) is None:
+        return None
+    w, h = fit_size(*size)
+    _, _, free = room(size)
+    talks = [changed_cells(e.image, t, w, h) for t in e.talk[:TALK_FRAMES]]
+    blink = changed_cells(e.image, e.blink, w, h) if e.blink is not None else None
+
+    def need(k, with_blink):
+        cells = set().union(*talks[:k]) if k else set()
+        return len(cells | (blink if with_blink and blink else set()))
+    full = need(len(talks), blink is not None)
+    if full <= free:
+        return None
+    keep_blink, keep = blink is not None, len(talks)
+    while keep_blink or keep:
+        if keep_blink:
+            keep_blink = False
+        else:
+            keep -= 1
+        if need(keep, keep_blink) <= free:
+            break
+    return (e.blink is not None and not keep_blink, keep, full, free)
+
+
+def dropped_text(e: Expression, result) -> str:
+    """The warning for dropped(): what goes and what the expression then
+    does, as the game's note says."""
+    lost_blink, keep, full, free = result
+    had = min(len(e.talk), TALK_FRAMES)
+    lost, does = [], []
+    if lost_blink:
+        lost.append("its blink frame")
+        does.append("never blinks")
+    if keep < had:
+        lost.append("its talking frame" if had == 1 else f"all {had} talking frames" if not keep else
+                    f"talking frame {had}" if keep == had - 1 else f"talking frames {keep + 1}-{had}")
+        does.append("never talks" if not keep else f"talks with {keep} frame{'s' if keep != 1 else ''}")
+    return (f"expression \"{e.name}\": its frames change about {full} of the 8 x 8 squares, and its picture leaves "
+            f"{free} of the game's 256 x 256 page free for them: the game makes it without {' and '.join(lost)}, so "
+            f"it {' and '.join(does)} (a smaller picture leaves more room: see the page's hint)")
+
+
 def check(bust: Bust, replacing, add_issue):
     """What busts.c would note or do otherwise than meant: add_issue(level,
     message). `replacing`: the entry's "replace_bust" (None for an added
@@ -390,6 +514,9 @@ def check(bust: Bust, replacing, add_issue):
         if len(e.talk) > TALK_FRAMES:
             add_issue("warning", f"expression \"{e.name}\": at most {TALK_FRAMES} talking frames; the rest are "
                                  "left out")
+        lost = dropped(bust, e)
+        if lost is not None:
+            add_issue("warning", dropped_text(e, lost))
     if len(bust.expressions) > IN_PLACE:
         add_issue("warning", f"{len(bust.expressions)} expressions: the game changes {IN_PLACE} of one record "
                              "in place; the fifth on come in as another character, sliding")

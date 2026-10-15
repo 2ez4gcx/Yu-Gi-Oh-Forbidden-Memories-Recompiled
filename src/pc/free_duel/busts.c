@@ -696,6 +696,36 @@ static int keep_record(const unsigned char *sheet, const unsigned char *bank, co
     return record_count++;
 }
 
+/* What an expression lost to fit a record alone: said exactly, with the
+ * room its picture leaves (notes/more-duelists.md, the picture's size). */
+static void note_dropped(const Bust *one, const Expression *x, int talks, int blink, int cw, int ch)
+{
+    char lost[96], does[64];
+    int had_blink = x->blink[0] != 0, cut_talks = x->talk_count - talks, free_cells = CELLS * CELLS - cw / 8 * (ch / 8);
+    lost[0] = does[0] = 0;
+    if (had_blink && !blink) snprintf(lost, sizeof(lost), "its blink frame");
+    if (cut_talks == 1 && x->talk_count == 1)
+        snprintf(lost + strlen(lost), sizeof(lost) - strlen(lost), "%sits talking frame", lost[0] ? " and " : "");
+    else if (cut_talks && !talks)
+        snprintf(lost + strlen(lost), sizeof(lost) - strlen(lost), "%sall %d talking frames", lost[0] ? " and " : "",
+                 x->talk_count);
+    else if (cut_talks == 1)
+        snprintf(lost + strlen(lost), sizeof(lost) - strlen(lost), "%stalking frame %d", lost[0] ? " and " : "",
+                 x->talk_count);
+    else if (cut_talks)
+        snprintf(lost + strlen(lost), sizeof(lost) - strlen(lost), "%stalking frames %d-%d", lost[0] ? " and " : "",
+                 talks + 1, x->talk_count);
+    if (had_blink && !blink) snprintf(does, sizeof(does), "never blinks");
+    if (x->talk_count && !talks)
+        snprintf(does + strlen(does), sizeof(does) - strlen(does), "%snever talks", does[0] ? " and " : "");
+    else if (cut_talks)
+        snprintf(does + strlen(does), sizeof(does) - strlen(does), "%stalks with %d frame%s", does[0] ? " and " : "",
+                 talks, talks == 1 ? "" : "s");
+    Mods_Note(one->mod, "%s: expression \"%s\" has too much to change to fit the game's record: it is made without "
+              "%s, so it %s (its %d x %d picture leaves %d of the page's %d 8 x 8 squares for its frames' changes)",
+              one->where, x->name, lost, does, cw, ch, free_cells, CELLS * CELLS);
+}
+
 static void make(Bust *one)
 {
     static unsigned char sheet[BUST_SHEET_W * BUST_SHEET_H], bank[BUST_BANK], best_sheet[BUST_SHEET_W * BUST_SHEET_H],
@@ -767,19 +797,22 @@ static void make(Bust *one)
             memcpy(best_bank, bank, sizeof(bank));
             fitted++;
         }
-        while (!fitted && (blink || talks)) {
-            /* Alone it does not fit: without its blink, then fewer
-             * talking frames. */
-            if (blink) blink = 0;
-            else talks--;
-            group[0] = frames_of(one, one->order[done], pictures, first, talks, blink);
-            if (Busts_Pack(cw, ch, group, 1, sheet, bank)) {
-                memcpy(best_sheet, sheet, sizeof(sheet));
-                memcpy(best_bank, bank, sizeof(bank));
-                fitted = 1;
-                Mods_Note(one->mod, "%s: expression \"%s\" has too much to change to fit the game's record; "
-                          "it is made with %s", one->where, one->expressions[one->order[done]].name,
-                          talks ? "no blink" : "no blink and no talking frame");
+        if (!fitted) {
+            /* Alone it does not fit: without its blink, then with fewer
+             * talking frames, the last first. */
+            const Expression *x = &one->expressions[one->order[done]];
+            blink = x->blink[0] != 0;
+            talks = x->talk_count;
+            while (!fitted && (blink || talks)) {
+                if (blink) blink = 0;
+                else talks--;
+                group[0] = frames_of(one, one->order[done], pictures, first, talks, blink);
+                if (Busts_Pack(cw, ch, group, 1, sheet, bank)) {
+                    memcpy(best_sheet, sheet, sizeof(sheet));
+                    memcpy(best_bank, bank, sizeof(bank));
+                    fitted = 1;
+                    note_dropped(one, x, talks, blink, cw, ch);
+                }
             }
         }
         if (!fitted) {

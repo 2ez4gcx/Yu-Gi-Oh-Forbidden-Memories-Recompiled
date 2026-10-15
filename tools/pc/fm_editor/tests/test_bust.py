@@ -212,6 +212,32 @@ class BustTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             bustm.add(b, "sad", figure(SAD))
 
+    def test_room_for_the_frames(self):
+        """A picture that fills the game's page leaves no room for its
+        frames' changes: Conflicts says what the game leaves out and what
+        the expression then does, as busts.c's note does; a smaller one is
+        quiet, and the room is busts.c's (the page less the picture rounded
+        up to 8)."""
+        self.assertEqual(bustm.room((256, 256)), (256, 256, 0))
+        self.assertEqual(bustm.room((240, 256)), (240, 256, 64))
+        self.assertEqual(bustm.room((100, 120)), (104, 120, 1024 - 13 * 15))
+        self.assertEqual(bustm.room((600, 400)), (256, 176, 1024 - 32 * 22))     # shrunk to 256 x 170 first
+        p = self.p
+        ghost = roster.add_copy(p, 1, "Ghost")
+        found = lambda: [m for lv, m in ((i.level, i.message) for i in validate.validate(p))  # noqa: E731
+                         if "squares" in m]
+        big = lambda **k: figure(CALM, w=256, h=256, **k)  # noqa: E731
+        ghost.bust = bustm.short(big(), "calm")
+        e = ghost.bust.expressions[0]
+        e.talk, e.talk_paths, e.blink = [big(mouth=True)], [None], big(shut=True)
+        # The mouth two squares, the eyes four of which two alike: five.
+        self.assertEqual(found(), ["expression \"calm\": its frames change about 5 of the 8 x 8 squares, and its "
+                                   "picture leaves 0 of the game's 256 x 256 page free for them: the game makes it "
+                                   "without its blink frame and its talking frame, so it never blinks and never "
+                                   "talks (a smaller picture leaves more room: see the page's hint)"])
+        ghost.bust = three()
+        self.assertEqual(found(), [])
+
     def test_numbers_and_characters(self):
         """The game numbers the default 0, then the list's order; the disc
         duelists' campaign characters are tower_config.c's."""

@@ -930,8 +930,31 @@ share a body and change their faces keeps four to a record easily (the tests'
 one record). What does not fit, and a fifth expression on, goes in the bust's
 next record: changing to it brings it in as another character -- the old one
 slides out and the new one in. An expression too big to fit a record even alone
-is made without its blink, then with fewer talking frames (noted). The mods'
-busts have 127 records in all.
+is made without its blink, then with fewer talking frames, the last first; the
+note says exactly which went and what it then does ("never blinks and talks
+with 1 frame"). The mods' busts have 127 records in all.
+
+**The picture's size: room to talk and blink.** The sheet's page is 256 x 256
+texels, 1024 squares of 8 x 8. A record's first expression takes the
+picture's rectangle (shrunk to fit, then rounded up to 8 each way) whole, and
+everything else -- the other expressions' differences and every talking and
+blink frame's -- goes in the squares it leaves, a square alike cut once. So:
+
+| picture | squares left for the frames |
+|---|---|
+| 256 x 256 (or larger, square) | none: it never talks or blinks |
+| 240 x 256 | 64 (a strip of 16 columns) |
+| 192 x 256, 256 x 192 | 256 |
+| 160 x 224 | 464 |
+| 128 x 192 | 640 |
+
+A mouth or eyes changed in a 32 x 16 area is about 8 squares a frame (more
+when it does not sit on the 8-texel grid). Keep a bust's picture to what the
+figure needs -- a bust shown from the waist up is taller than wide -- and its
+clear border small. The FM Editor's Conflicts warns when an expression's
+frames need more than its picture leaves, saying what the game will leave out
+(it compares colors where the game compares the palette's, so "about"), and
+the Bust page shows the room under the preview.
 
 ### A disc duelist's bust
 

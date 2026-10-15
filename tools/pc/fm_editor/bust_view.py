@@ -99,7 +99,9 @@ class BustView:
         self.warning.pack(anchor="w", fill="x")
         self.hint = ttk.Label(right, style="Hint.TLabel", justify="left", wraplength=width, text=(
             "Talking and blink frames are the picture with the mouth open or the eyes shut: the game draws "
-            "them over it where they differ. The game numbers the expressions as listed: 0 the default."))
+            "them over it where they differ, in 8 x 8 squares kept in what the picture leaves of its 256 x 256 "
+            "page. A 256 x 256 picture leaves none, so it never talks or blinks; 192 x 256 leaves 256 squares, "
+            "128 x 192 leaves 640. The game numbers the expressions as listed: 0 the default."))
         self.hint.pack(anchor="w", fill="x", pady=(6, 0))
 
     # --- what is shown ------------------------------------------------------------------
@@ -195,9 +197,13 @@ class BustView:
             self.caption.configure(text="")
         else:
             fit = bustm.fitted(image)
+            first = bustm.order(b)[0] if b is not None and b.expressions else e
+            size = bustm.size_of(first.image) or image.size
+            free = bustm.room(size)[2]
             self.caption.configure(text=f"{image.width}×{image.height}"
                                         + ("" if fit.size == image.size else f", shrunk to {fit.width}×{fit.height}")
-                                        + ", at the console's 320×240")
+                                        + ", at the console's 320×240; room for its frames' changes: "
+                                        + f"{free} of the page's {bustm.PAGE_CELLS} squares")
         # A bust a picture of which could not be read is written back as it
         # was, pictures and all: an edit would not be saved, so none is made.
         kept = b is not None and b.unread

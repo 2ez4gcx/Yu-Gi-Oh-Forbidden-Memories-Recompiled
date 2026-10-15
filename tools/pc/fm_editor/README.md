@@ -632,7 +632,9 @@ middle, the screen at the console's 320 x 240 with the chosen expression
 standing where the game stands it (its middle over the **left** or **right**
 side's place, its bottom on the box, a picture over 256 x 256 shrunk to fit),
 as its **Picture**, **Talk 1**, **Talk 2** or **Blink**: a talking or blink
-frame drawn over the picture, as the game draws it. On the right,
+frame drawn over the picture, as the game draws it; under it, the room the
+picture leaves its frames' changes (a 256 x 256 one leaves none: it cannot
+talk or blink; [the size rule](../../../notes/more-duelists.md#bust--the-large-character)). On the right,
 **Picture...** changes it, **Talking...** adds a frame of the mouth open (up
 to four), **No talk** takes the last away, **Blink...** and **No blink** the
 eyes shut, **No bust** the whole bust. An expression without a talking frame
@@ -655,6 +657,8 @@ the mod, but not one something else shows too (a tower story's picture, say).
 Conflicts says what the game would read otherwise (a
 frame of another size than the default's, which it stretches; a default that
 is none of them; a fifth expression on, which comes in as another character;
+frames that change more than the picture leaves room for, and what the game
+then leaves out;
 `replace_bust` on a duelist the campaign shows as nobody). A bust needs mod
 API 17.
 

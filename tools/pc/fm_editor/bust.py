@@ -478,10 +478,9 @@ def dropped_text(e: Expression, result) -> str:
             f"it {' and '.join(does)} (a smaller picture leaves more room: see the page's hint)")
 
 
-def check(bust: Bust, replacing, add_issue):
+def check(bust: Bust, add_issue):
     """What busts.c would note or do otherwise than meant: add_issue(level,
-    message). `replacing`: the entry's "replace_bust" (None for an added
-    duelist, which has no campaign character to replace)."""
+    message). (What "replace_bust" does is roster.check's.)"""
     if bust.unread:
         add_issue("warning", "a picture of its bust could not be read; the bust is kept as written")
         return

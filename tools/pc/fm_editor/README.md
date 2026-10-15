@@ -638,7 +638,11 @@ talk or blink; [the size rule](../../../notes/more-duelists.md#bust--the-large-c
 **Picture...** changes it, **Talking...** adds a frame of the mouth open (up
 to four), **No talk** takes the last away, **Blink...** and **No blink** the
 eyes shut, **No bust** the whole bust. An expression without a talking frame
-does not speak, without a blink frame does not blink.
+does not speak, without a blink frame does not blink. The Tower tab's stories follow
+the page: renaming an expression renames it where a story names it (the
+floor's `opponent` too), removing one turns those to the default (said under
+the page), and an order or default that changes what a story's number shows
+is said, since a number follows the order and a name does not.
 
 For one of the disc's duelists the bust is written on its replacement and
 only **adds** expressions a tower's stories may name; the campaign keeps its
@@ -1156,8 +1160,9 @@ the options below says what each does.
 
 The line above the form lists what the game would leave out or read
 otherwise (the same as Conflicts' **Tower** area), an expression a duelist's
-bust does not have among them. A tower needs mod API 14 (17 with a story's
-expression by name), which Mod info then shows and the save writes as `min_api`. What the form
+bust does not have among them (the floor's `opponent` checked against that
+floor's duelist), a number past the bust's, and a name too long. A tower needs mod API 14 (17 with a story's
+bust expression: by name, or a number past 3), which Mod info then shows and the save writes as `min_api`. What the form
 cannot show (a key of a later game) is kept as written.
 
 ### Mod info

@@ -284,6 +284,15 @@ class BustTest(unittest.TestCase):
             "left": {"duelist": "g", "expression": "angry"}}, "lines": ["Hi."]}}]}}), 17)
         self.assertEqual(needs({"tower": {"floors": [{"duelist": 1, "before": {"characters": {
             "left": {"duelist": "g", "expression": 2}}, "lines": ["Hi."]}}]}}), 14)
+        # A number past 3 is a bust's too; the forms the game turns down need
+        # nothing newer (validate says they are left out).
+        side = lambda cast: {"tower": {"floors": [{"duelist": 1, "before": {"characters": {  # noqa: E731
+            "left": cast}, "lines": ["Hi."]}}]}}
+        self.assertEqual(needs(side({"duelist": "g", "expression": 7})), 17)
+        self.assertEqual(needs(side({"character": 4, "expression": "angry"})), 14)
+        self.assertEqual(needs(side({"duelist": "g", "image": "a.png", "expression": "angry"})), 14)
+        self.assertEqual(needs(side({"duelist": "g", "expression": "x" * 32})), 14)
+        self.assertEqual(needs(side({"duelist": "g", "expression": 3})), 14)
         p = self.p
         roster.add_copy(p, 1, "Ghost").bust = three()
         self.assertEqual(needs(manifest.build(p), p), 17)
@@ -308,11 +317,80 @@ class BustTest(unittest.TestCase):
         self.assertIn(("warning", "tower.intro.characters.left.expression",
                        "Ghost's bust has no expression \"glad\"; its default, \"calm\", is shown instead"), found)
         self.assertIn(("warning", "tower.intro.characters.right.expression",
-                       "Seto has no bust of its own (the Duelists tab's Bust); left out, and the campaign's "
+                       "Seto has no bust of its own (the Duelists tab's Bust); \"calm\" is left out, and the campaign's "
                        "character is shown as it first comes in (expression 0)"), found)
         story["characters"] = {"left": {"duelist": "Ghost", "expression": "angry"}}
         self.assertEqual(tower.check({"intro": story, "floors": [{"duelist": 1}]}, lambda n: roster.named(p, n),
                                      lambda n: p.resolve(n), lambda n: roster.bust_of(p, roster.named(p, n))), [])
+
+    def test_tower_expression_checks(self):
+        """As tower_config.c reads them: numbers 0-15 for a duelist (its
+        bust's, or 0-3 a disc duelist's campaign character's), the floor's
+        opponent against that duelist's bust, a long name, and the forms the
+        game turns down."""
+        p = self.p
+        ghost = roster.add_copy(p, 1, "Ghost")
+        ghost.bust = three()
+        roster.give_bust(p, 7, figure(SAD), "smug")
+
+        def found(story, floor="Ghost"):
+            return [(w, m) for _, w, m in tower.check(
+                {"intro": story, "floors": [{"duelist": floor, "before": story}]}, lambda n: roster.named(p, n),
+                lambda n: p.resolve(n), lambda n: roster.bust_of(p, roster.named(p, n)),
+                lambda n: roster.shows_bust(p, roster.named(p, n)))]
+        story = lambda **sides: {"characters": sides, "lines": ["Hi."]}  # noqa: E731
+        at = "tower.intro.characters.left.expression"
+        self.assertEqual(found(story(left={"duelist": "Ghost", "expression": 2},
+                                     right={"duelist": "Seto", "expression": 3})), [])
+        self.assertIn((at, "Ghost's bust has 3 expressions (0-2); for 7 its default, \"calm\", is shown instead"),
+                      found(story(left={"duelist": "Ghost", "expression": 7})))
+        self.assertIn((at, "Seto's bust has 1 expression (0-0); for 4 its default, \"smug\", is shown instead"),
+                      found(story(left={"duelist": "Seto", "expression": 4})))
+        self.assertIn((at, "Simon Muran has no bust of its own (the Duelists tab's Bust); 5 (past the campaign's 0 "
+                           "to 3) is left out, and the campaign's character is shown as it first comes in "
+                           "(expression 0)"),
+                      found(story(left={"duelist": "Simon Muran", "expression": 5})))
+        self.assertIn((at, "is the name of one of the duelist's bust's, or a number: 0 to 3 (the campaign "
+                           "character's, or the bust's), 4 to 15 (the bust's)"),
+                      found(story(left={"duelist": "Ghost", "expression": 16})))
+        self.assertIn((at, "is 0 to 3"), found(story(left={"character": 4, "expression": 5})))
+        self.assertIn((at, "by name is a duelist's bust's ({\"duelist\": ..., \"expression\": ...}); a campaign "
+                           "character's is 0 to 3; left out"),
+                      found(story(left={"character": 4, "expression": "calm"})))
+        self.assertIn((at, "\"aaaaaaaaaaaaaaaaaaaaaaaa...\" is longer than a bust's expression's name can be (31 "
+                           "bytes at most); left out"),
+                      found(story(left={"duelist": "Ghost", "expression": "a" * 32})))
+        # The floor's opponent: checked against its duelist's bust, in the floor's story only.
+        result = found(story(right={"duelist": "opponent", "expression": "glad"}))
+        self.assertIn(("tower.floors[0].before.characters.right.expression", "the opponent (Ghost)'s bust has no "
+                       "expression \"glad\"; its default, \"calm\", is shown instead"), result)
+        self.assertFalse(any(w == "tower.intro.characters.right.expression" for w, _ in result))
+        self.assertIn(("tower.floors[0].before.characters.right.expression", "the opponent (Simon Muran) has no "
+                       "bust of its own (the Duelists tab's Bust); \"calm\" is left out, and the campaign's "
+                       "character is shown as it first comes in (expression 0)"),
+                      found(story(right={"duelist": "opponent", "expression": "calm"}), floor="Simon Muran"))
+        self.assertNotIn("floors", " ".join(w for w, _ in found(story(right={"duelist": "opponent",
+                                                                            "expression": "sad"}))))
+
+    def test_stories_follow_the_bust(self):
+        """A tower's sides naming a duelist's expression (by its name, or as
+        the floor's opponent) are found and renamed; numbers are counted,
+        0-3 only where the bust is shown unasked."""
+        data = {"intro": {"characters": {"left": {"duelist": "Ghost", "expression": "Calm"},
+                                         "right": {"duelist": "Seto", "expression": "calm"}},
+                          "lines": ["Hi.", {"text": "Two.", "characters": {"left": {"duelist": "Ghost",
+                                                                                     "expression": 2}}}]},
+                "floors": [{"duelist": "Ghost", "after": [{"text": "Bye.", "characters": {
+                    "right": {"duelist": "opponent", "expression": "calm"},
+                    "left": {"duelist": "Ghost", "expression": 5}}}]}]}
+        is_ghost = lambda who: str(who) == "Ghost"  # noqa: E731
+        self.assertEqual(len(tower.bust_casts(data, is_ghost)), 4)
+        self.assertEqual(tower.rename_expression(data, is_ghost, "calm", "quiet"), 2)
+        self.assertEqual(data["intro"]["characters"]["left"]["expression"], "quiet")
+        self.assertEqual(data["intro"]["characters"]["right"]["expression"], "calm")      # Seto's, not Ghost's
+        self.assertEqual(data["floors"][0]["after"][0]["characters"]["right"]["expression"], "quiet")
+        self.assertEqual(tower.numbered_expressions(data, is_ghost, True), 2)
+        self.assertEqual(tower.numbered_expressions(data, is_ghost, False), 1)
 
 
 class BustTabTest(GuiCase):
@@ -381,8 +459,29 @@ class BustTabTest(GuiCase):
         towers.last_story = "intro"
         towers._bust()
         self.assertIn("[left: Seto expression quiet]", towers.texts["intro"].get("1.0", "end"))
-        # Gone: the replacement with it.
+        # The stories follow the page: a rename, a removal (to the default),
+        # and an order that changes what a number shows, said.
         app.notebook.select(tab)
         tab.goto((7, None))
+        app.update()
+        p.other["tower"]["intro"] = {"characters": {"left": {"duelist": "Seto", "expression": "quiet"},
+                                                    "right": {"duelist": "Seto", "expression": "angry"}},
+                                     "lines": ["Hi.", {"text": "Two.", "characters": {
+                                         "left": {"duelist": "Seto", "expression": 5}}}]}
+        view.list.selection_set(str(id(bustm.find(b, "quiet"))))
+        view.rename("calm")
+        self.assertEqual(p.other["tower"]["intro"]["characters"]["left"]["expression"], "calm")
+        self.assertIn("now names \"calm\"", view.story_note.cget("text"))
+        self.assertIn("[left: Seto expression calm]", towers.texts["intro"].get("1.0", "end"))
+        view.list.selection_set(str(id(bustm.find(b, "calm"))))
+        view.move(1)
+        view.list.selection_set(str(id(bustm.find(b, "angry"))))
+        view.make_default()
+        self.assertIn("1 story side of the Tower tab asks for this bust by number", view.story_note.cget("text"))
+        view.list.selection_set(str(id(bustm.find(b, "calm"))))
+        view.remove()
+        self.assertEqual(p.other["tower"]["intro"]["characters"]["left"]["expression"], "angry")
+        self.assertIn("now name the default, \"angry\"", view.story_note.cget("text"))
+        # Gone: the replacement with it.
         view.drop(ask=False)
         self.assertIsNone(roster.replacement(p, 7))

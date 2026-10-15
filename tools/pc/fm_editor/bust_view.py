@@ -15,7 +15,7 @@ import tkinter as tk
 from pathlib import Path
 from tkinter import messagebox, ttk
 
-from . import bust as bustm, file_dialogs, pngio, roster
+from . import bust as bustm, file_dialogs, pngio, roster, tower
 from .gamedata import DUELIST_NAMES
 from .widgets import FormDialog, px, ui_font
 
@@ -103,6 +103,9 @@ class BustView:
             "page. A 256 x 256 picture leaves none, so it never talks or blinks; 192 x 256 leaves 256 squares, "
             "128 x 192 leaves 640. The game numbers the expressions as listed: 0 the default."))
         self.hint.pack(anchor="w", fill="x", pady=(6, 0))
+        # What an edit did to the tower's stories that name the bust.
+        self.story_note = ttk.Label(right, style="Hint.TLabel", justify="left", wraplength=width)
+        self.story_note.pack(anchor="w", fill="x", pady=(6, 0))
 
     # --- what is shown ------------------------------------------------------------------
 
@@ -221,6 +224,33 @@ class BustView:
 
     # --- edits ----------------------------------------------------------------------------
 
+    def _is_subject(self, who) -> bool:
+        s = roster.named(self.project, who)
+        return s is not None and (s == self.subject() if isinstance(s, int) else s is self.subject())
+
+    def _stories(self):
+        return self.project.other.get("tower") if self.project is not None else None
+
+    def _stories_changed(self, count, text):
+        """The tower's stories edited to follow the bust: the Tower tab shows
+        them again, and the page says so."""
+        self.story_note.configure(text=text if count else "")
+        if count:
+            towers = getattr(self.tab.app, "tower", None)
+            if towers is not None:
+                towers.refresh()
+        return count
+
+    def _numbers_note(self, what):
+        """A tower's stories asking for the bust by number: after the order
+        changed, they show other expressions."""
+        count = tower.numbered_expressions(self._stories(), self._is_subject,
+                                           roster.shows_bust(self.project, self.subject()))
+        self.story_note.configure(text=f"{what}: {count} story side{'s' if count != 1 else ''} of the Tower tab "
+                                       f"ask{'' if count != 1 else 's'} for this bust by number, which follows the "
+                                       "order: name the expression instead (expression angry)." if count else "")
+        return count
+
     def changed(self, chosen=None):
         self.tab.changed(self.subject())
         b = self.bust()
@@ -295,8 +325,12 @@ class BustView:
             problem = bustm.check_name(b, text, but=e)
             if problem:
                 return problem
+            old = e.name
             bustm.rename(b, e, text)
+            count = tower.rename_expression(self._stories(), self._is_subject, old, e.name)
             self.changed(e)
+            self._stories_changed(count, f"{count} story side{'s' if count != 1 else ''} of the Tower tab naming "
+                                         f"\"{old}\" now name{'' if count != 1 else 's'} \"{e.name}\".")
             return None
         if name is not None:
             return named(name)
@@ -310,13 +344,19 @@ class BustView:
             self.drop()
             return
         bustm.remove(b, e)
+        default = bustm.order(b)[0].name
+        count = tower.rename_expression(self._stories(), self._is_subject, e.name, default)
         self.changed()
+        self._stories_changed(count, f"{count} story side{'s' if count != 1 else ''} of the Tower tab named "
+                                     f"\"{e.name}\", which is gone: {'they' if count != 1 else 'it'} now name the "
+                                     f"default, \"{default}\" -- check them.")
 
     def make_default(self):
         b, e = self.bust(), self.chosen()
-        if e is not None:
+        if e is not None and b.default != e.name:
             b.default = e.name
             self.changed(e)
+            self._numbers_note(f"\"{e.name}\" is the default, 0")
 
     def move(self, by):
         b, e = self.bust(), self.chosen()
@@ -332,6 +372,7 @@ class BustView:
         first = bustm.order(b)[0]
         b.expressions = [first] + rest
         self.changed(e)
+        self._numbers_note(f"\"{e.name}\" is {bustm.number(b, e)} now")
 
     def choose_picture(self, path=None):
         e = self.chosen()

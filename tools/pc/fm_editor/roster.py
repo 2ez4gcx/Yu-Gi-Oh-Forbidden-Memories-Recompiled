@@ -391,6 +391,17 @@ def bust_of(project, s):
     return e.bust if e is not None else None
 
 
+def shows_bust(project, s) -> bool:
+    """Whether a story naming the duelist shows its bust unasked: an added
+    duelist with one, or a disc duelist whose bust has replace_bust
+    (tower_config.c read_cast); otherwise only a name of its bust's, or a
+    number past 3, asks for it."""
+    e = replacement(project, s) if isinstance(s, int) else s
+    if e is None or e.bust is None:
+        return False
+    return not isinstance(s, int) or bool(e.replace_bust)
+
+
 def give_bust(project, s, png: bytes, name: str = "default"):
     """A bust of one expression, for a duelist without one; a disc
     duelist's goes on its replacement."""
@@ -871,7 +882,7 @@ def check(project, out: list):
         if e.portrait is not None and picture(e.portrait) is None:
             add("error", "its portrait is not a PNG the game can read")
         if e.bust is not None:
-            bustm.check(e.bust, e.replace_bust if e.replace else None, add)
+            bustm.check(e.bust, add)
         if e.replace_bust and not e.replace:
             add("error", "replace_bust is for a duelist of the disc's (a replacement); the game leaves it out")
         elif e.replace_bust and e.bust is None:

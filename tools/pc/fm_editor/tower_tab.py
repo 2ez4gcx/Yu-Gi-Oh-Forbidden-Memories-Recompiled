@@ -916,7 +916,8 @@ class TowerTab(Tab):
             return
         problems = tower.check(self.project.other.get("tower"), lambda name: roster.named(self.project, name),
                                lambda name: self.project.resolve(name),
-                               lambda name: roster.bust_of(self.project, roster.named(self.project, name)))
+                               lambda name: roster.bust_of(self.project, roster.named(self.project, name)),
+                               lambda name: roster.shows_bust(self.project, roster.named(self.project, name)))
         self.status.configure(text="\n".join(f"{level}: {where}: {message}" for level, where, message in problems))
         for index, floor in enumerate(self.floors):
             if isinstance(floor, dict) and self.list.exists(str(index)):

@@ -227,7 +227,7 @@ def features(manifest: dict, project=None) -> list:
         if "replace_bust" in entry:
             add(17, "a disc duelist's bust in the campaign (\"replace_bust\")")
     if _named_expression(manifest.get("tower")):
-        add(17, "a story's character by its bust's expression (\"expression\": a name)")
+        add(17, "a story's character by its bust's expression (\"expression\": a name, or a number past 3)")
     return out
 
 
@@ -242,10 +242,17 @@ def _roster_files(project) -> list:
 
 
 def _named_expression(value) -> bool:
-    """Whether a tower's stories name a side's expression by a name (a
-    bust's) rather than a number."""
+    """Whether a tower's stories ask for a side's bust expression in a form
+    the game of API 17 takes (tower_config.c read_cast): {"duelist": ...,
+    "expression": a name of 1-31 bytes, or a number past 3 (to 15)}, without
+    "character" or "image". A form it turns down ({"character": n,
+    "expression": "x"}, a name with an image, one too long) needs nothing
+    newer: validate says it is left out."""
     if isinstance(value, dict):
-        if isinstance(value.get("expression"), str) and ("duelist" in value or "character" in value):
+        expression = value.get("expression")
+        if "duelist" in value and "character" not in value and "image" not in value and (
+                (isinstance(expression, str) and 0 < len(expression.encode("utf-8")) <= 31) or
+                (isinstance(expression, int) and not isinstance(expression, bool) and 4 <= expression <= 15)):
             return True
         return any(_named_expression(v) for v in value.values())
     if isinstance(value, list):

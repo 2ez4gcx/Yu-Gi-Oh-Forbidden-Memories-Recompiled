@@ -33,11 +33,9 @@
 
 /* --- what busts.c and art.c lean on ------------------------------------ */
 
-static int notes;
 void Mods_Note(const char *id, const char *format, ...)
 {
     va_list arguments;
-    notes++;
     fprintf(stderr, "[%s] ", id);
     va_start(arguments, format);
     vfprintf(stderr, format, arguments);

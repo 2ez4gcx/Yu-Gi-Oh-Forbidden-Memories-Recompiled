@@ -628,8 +628,8 @@ rule the game does not have).
 
 ### UI
 
-Four pages, picked at the top: **Title screen**, **Menus**, **Duel** and
-**Duel board**. The first three are the screen as the game draws it, from
+Five pages, picked at the top: **Title screen**, **Menus**, **Duel**,
+**Frames** and **Duel board**. The first three are the screen as the game draws it, from
 your own disc (the title's pictures are in `DATA/SU.MRG`, the duel's in
 `WA_MRG.MRG`; nothing of the game's art is kept with the editor), as big as
 the window leaves room for (a whole number of times the game's 320 x 240, so
@@ -640,15 +640,15 @@ moved by dragging it -- its place in the form follows as you drag -- or by
 the arrow keys once the picture has been clicked (Shift: 8 pixels); under
 the picture is where the mouse is, in the game's pixels. On the Duel page
 the mouse wheel sizes it. What the pages write is the mod's `"title"`,
-`"menu"` and `"ui"` ([the title screen](../../../notes/modding.md#the-title-screen),
+`"menu"`, `"ui"` and `"card_layout"` ([the title screen](../../../notes/modding.md#the-title-screen),
 [the title's menus](../../../notes/modding.md#the-titles-menus), [the duel's
-pictures](../../../notes/modding.md#the-duels-pictures)); a PNG you choose is
-put in the mod's `ui/` folder.
+pictures](../../../notes/modding.md#the-duels-pictures)); screen PNGs go in
+`ui/`, while frame PNGs go in `frames/`.
 
 **Hold: the game's** shows the page as the game has it while the button is
 held down: before and after. **Revert to retail...** puts the whole tab back
-(it takes out the mod's `"title"`, `"menu"` and `"ui"`, the duel board's
-textures and tints, and the PNGs in `ui/` nothing names any more), **Revert
+(it takes out the mod's `"title"`, `"menu"`, `"ui"` and `"card_layout"`, the duel board's
+textures and tints, and PNGs nothing names any more), **Revert
 page** one page; both say what is lost first, and **Edit > Undo** brings it
 back in one step. A thing's own **Back to the game's** puts that one back. A
 color that multiplies (every "Color" but a line of words' and the color
@@ -724,6 +724,26 @@ that the game leaves out).
   with the mod's board), the hand's five cards in their frames with ATK and
   DEF, and the card bar's name, stats and icons for the card the cursor is
   on.
+
+* **Frames**: creates and edits a `card_layout.frame_styles` style visually.
+  Choose a style, then an asset slot (front/back, hand, field, Library icon,
+  digits, stat captions or type captions) or a card-view element. The front
+  preview is a game-scale card viewer: drag title, art, stars, attribute,
+  values and captions; use the wheel or width/height fields where the game
+  permits a size; and hide any movable element. The **Hand** category has its
+  own 52x60 preview and independently edits the hand artwork, ATK/DEF digit
+  rows, and their sword/shield markers; field and Library images belong to
+  their respective game screens. The assignment panel can set a global,
+  card-kind, printed-type, or specific-card style. Its **Reset to retail**
+  buttons remove the selected assignment: a cleared card falls through to
+  type, a cleared type falls through to kind, then global, and a cleared global
+  default reaches retail. The printed-type
+  list contains every game type, including Beast-Warrior, Winged Beast, Sea
+  Serpent, and the Magic/Trap/Ritual/Equip types. Choosing a specific card
+  also changes the preview artwork to that card before assigning anything.
+  The first style becomes the
+  layout's default; enable its `full_bleed` setting in-game to see custom
+  frame art.
 
 Colors are the game's: a tint multiplies, so it can only darken what is
 there. The pictures are the console's size here; the game draws a PNG of

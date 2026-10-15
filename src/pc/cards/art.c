@@ -534,8 +534,8 @@ int CardArt_Crop(const char *path, int w, int h, int *x, int *y, int *cw, int *c
  * to `w` x `h`, each texel the average of the pixels under it, a texel under
  * half covered clear (entry 0, the PS1's transparent 0x0000) and the rest
  * reduced to 255 colors by median cut from entry 1. */
-int CardArt_IndexedImage(const char *path, int w, int h, unsigned char *indices, unsigned short *clut, char *why,
-                         size_t why_size)
+static int indexed_image(const char *path, int w, int h, int colors, unsigned char *indices, unsigned short *clut,
+                         char *why, size_t why_size)
 {
     png_image image;
     FILE *file;
@@ -598,8 +598,8 @@ int CardArt_IndexedImage(const char *path, int w, int h, unsigned char *indices,
         }
     }
     free(rgba);
-    memset(clut, 0, 256 * sizeof(*clut));
-    if (count) quantize(opaque, count, 255, clut, opaque_indices);
+    memset(clut, 0, (size_t)(colors + 1) * sizeof(*clut));
+    if (count) quantize(opaque, count, colors, clut, opaque_indices);
     clut[0] = 0x0000;
     for (k = 0, x = 0; x < w * h; x++) {
         if (indices[x]) indices[x] = opaque_indices[k++];
@@ -607,6 +607,12 @@ int CardArt_IndexedImage(const char *path, int w, int h, unsigned char *indices,
     free(opaque);
     free(opaque_indices);
     return 1;
+}
+
+int CardArt_IndexedImage(const char *path, int w, int h, unsigned char *indices, unsigned short *clut, char *why,
+                         size_t why_size)
+{
+    return indexed_image(path, w, h, 255, indices, clut, why, why_size);
 }
 
 /* The PNG's width and height, from its header. */

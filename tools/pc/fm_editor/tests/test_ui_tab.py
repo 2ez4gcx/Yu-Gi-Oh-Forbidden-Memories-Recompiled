@@ -13,6 +13,7 @@ from pathlib import Path
 from unittest import mock
 
 from fm_editor import manifest, pngio, ui_assets, ui_rules, validate
+from fm_editor import ui_tab
 from fm_editor.model import Project
 from fm_editor.tests.test_data import fixture
 from fm_editor.tests.test_gui import GuiCase, tk
@@ -104,6 +105,23 @@ class SceneTest(unittest.TestCase):
 
 
 class RulesTest(unittest.TestCase):
+    def test_frames_page_is_a_card_layout_page(self):
+        """The UI tab owns the new editor page, including its revert scope
+        and its separate frame-image folder."""
+        self.assertIn("frames", ui_tab.PAGE_KEYS)
+        self.assertEqual(ui_tab.PAGE_KEYS["frames"], [("card_layout", None)])
+        self.assertIn("card_layout", ui_tab.KEYS)
+        self.assertEqual(ui_tab.FRAME_IMAGE_DIR, "frames")
+        self.assertIn("frames", [key for key, *_ in ui_tab.UiTab.PAGES])
+
+    def test_frame_png_keeps_its_folder_when_renamed(self):
+        p = project()
+        with tempfile.TemporaryDirectory() as folder:
+            first = png(Path(folder) / "one.png", color=(1, 2, 3, 255))
+            second = png(Path(folder) / "two.png", color=(4, 5, 6, 255))
+            self.assertEqual(ui_tab.add_image_file(p, first, "style", "frames"), "frames/style.png")
+            self.assertEqual(ui_tab.add_image_file(p, second, "style", "frames"), "frames/style-2.png")
+
     def test_clean(self):
         p = project({"ui": {"duel": {"lp_player": {"y": -20, "scale": 150, "tint": "#FF0000", "label": "ME",
                                                    "digits": 0x00FF00, "hide": False},
@@ -606,6 +624,17 @@ class UiTabTest(GuiCase):
             page.view.seen = None
             page.view.fit()
         self.assertEqual(page.stage.zoom, 2)
+
+    def test_frames_preview_is_a_scaled_card(self):
+        """Frames uses all its column for the 140x196 card, not a 320x240 screen."""
+        page = self.page("frames")
+        self.assertEqual((page.stage.game_width, page.stage.game_height), (140, 196))
+        self.assertTrue(page.view.smooth)
+        with mock.patch.object(page.view, "winfo_width", return_value=800), \
+                mock.patch.object(page.view, "winfo_height", return_value=600):
+            page.view.seen = None
+            page.view.fit()
+        self.assertAlmostEqual(page.stage.zoom, (600 - page.view.tools.winfo_reqheight() - 6) / 196)
 
     def test_hold_the_games(self):
         page = self.page("duel")

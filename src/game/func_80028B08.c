@@ -684,12 +684,12 @@ void func_80028B08(DisplayObject *obj, s32 arg1) {
 #ifdef MEMORIES_PC
         PRM->xy.h.x = sa + star_layout.x;
         PRM->xy.h.y = win->field_30.h.field_32 + star_layout.y;
-        if (CardLayout_FullBleed()) {
-            /* star_layout.x is the row's centre, not retail's first-star
-             * anchor (notes/modding.md, the HD pack's anime frame): up to 12
-             * stars at a fixed 9px each would run past the frame's edge from
-             * a fixed anchor, so centre them instead. */
-            PRM->xy.h.x = sa + star_layout.x + 9 * (s32)rec->field_3A / 2 - 9;
+        /* Shared, pre-frame-style layouts (including the bundled HD anime
+         * frame) documented their stars.x as the row's centre.  Style-local
+         * stars.x is a literal rightmost-star anchor, which makes the Frames
+         * editor's drag position stable across card levels. */
+        if (CardLayout_StarsCentered()) {
+            PRM->xy.h.x += 9 * (s32)rec->field_3A / 2 - 9;
         }
         PRM->rgb = CardLayout_Tint(win->field_0C, star_layout.r, star_layout.g, star_layout.b);
 #endif

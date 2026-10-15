@@ -34,9 +34,8 @@ int CardLayoutArt_FrameTile(int col, int row, int *tpage, int *clut, int *w, int
 int CardLayoutArt_HandFrameCell(int card_id, int *tpage, int *u, int *v, int *clut, int *w, int *h);
 
 /* The current style's optional 52x60 texture for the 3D duel-field card
- * quad (func_80015EF4's POLY_GT4; card_layout.h's CardLayout_FieldFramePath,
- * which falls back to the hand frame). 0 leaves retail's Cards_FrameColor
- * palette-row recolor in place. */
+ * quad (func_80015EF4's POLY_GT4; card_layout.h's CardLayout_FieldFramePath).
+ * 0 leaves retail's Cards_FrameColor palette-row recolor in place. */
 int CardLayoutArt_FieldFrameCell(int card_id, int *tpage, int *u, int *v, int *clut, int *w, int *h);
 
 /* The current style's optional 52x60 face-down texture for the flat hand/

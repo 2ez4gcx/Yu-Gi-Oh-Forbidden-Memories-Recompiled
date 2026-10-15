@@ -224,8 +224,9 @@ custom frame too:
 ```
 
 The selected style controls the big-card image and its small-card palette
-color (`hand_color`), plus its optional flat duel-hand image (`hand_image`). It wins over `frame`, then the layout's `frame_for`
-rules, its `default_styles` kind/type defaults, and finally `default_style`.
+color (`hand_color`), plus its optional flat duel-hand image (`hand_image`). An
+explicit card style wins; otherwise selection falls through printed type, kind,
+and `default_style`, then retail.
 A copy inherits its base's named style; a later
 replacement keeps it when left out, and `null` clears it back to the layout
 rules. The named style must exist in the active layout; otherwise the game
@@ -233,10 +234,9 @@ uses its retail frame and notes the missing style in the Mods window.
 
 ## Tags
 
-`"tags": ["god"]` on a card entry labels it, so that a mod that draws card
-frames (`card_layout`'s `frame_for`, [modding.md](modding.md#frame-styles-and-the-rules-that-pick-them))
-can give it a frame of its own without the card naming a color: the cards mod
-says *what the card is*, the layout mod says *how that looks*. Tags are free
+`"tags": ["god"]` on a card entry labels it for other mod features. Card
+frames are selected with the card's explicit `frame_style`, or their printed
+type/kind defaults. Tags are free
 words (letters, digits, `-`, `_`); a card may have any number of them. There is
 no tag the game itself reads; the anime frame's own classes (`monster`,
 `effect_monster`, `spell`, `equip`, `ritual_spell`, `trap`) are worked out, not

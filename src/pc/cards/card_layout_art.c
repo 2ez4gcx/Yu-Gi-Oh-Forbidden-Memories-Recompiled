@@ -57,6 +57,7 @@ static void bank_pad_edge(uint16_t *bank, int bank_x_word, int bank_y, int w, in
     for (x = 0; x <= w; x++)
         bank_texel_set(bank, bank_x_word, bank_y, h, x, bank_texel_get(bank, bank_x_word, bank_y, h - 1, x));
 }
+
 /* A layout mod's own frame PNG is stretched to FRAME_W x FRAME_H texels
  * (CardArt_IndexedImage's own rule, as a "title" mod's image is), not the
  * on-screen draw size (card_layout.h's CardLayout_Part(CARD_LAYOUT_FRAME) w/h,

@@ -261,36 +261,59 @@ static int read_scene(const char *mod, const char *where, const JsonValue *value
     return TOWER_SCENE_KEEP;
 }
 
-/* A side's expression by name, its duelist known (`opponent`: as the
- * floor's): a name its bust lacks is the bust's default, by that name, so
- * the bust is still what is shown; a name for a duelist without a bust is
- * left out, and the side is the campaign's character as it first comes in
- * (expression 0), or nothing when the duelist has none. */
+/* A side's expression, its duelist known (`opponent`: as the floor's).
+ *
+ * By name: one its bust lacks is the bust's default, by that name, so the
+ * bust is still what is shown. By number: 0 to 3 of a disc duelist whose
+ * bust only adds expressions (no "replace_bust") are the campaign
+ * character's, as for any duelist without a bust; a number past 3 can only
+ * be a bust's, so it is that expression of the bust, by its name; one past
+ * the bust's count is its default. A name, or a number past 3, for a
+ * duelist without a bust is left out, and the side is the campaign's
+ * character as it first comes in (expression 0), or nothing when the
+ * duelist has none. Each is noted as what is shown. */
 static void bust_expression(const char *mod, const char *where, TowerCast *cast, int duelist, int opponent)
 {
-    int bust = Duelists_Bust(duelist), character;
+    int bust = Duelists_Bust(duelist), character,
+        own = duelist >= DUELISTS_RETAIL_COUNT || Duelists_ReplacesBust(duelist);
     const char *name = Duelists_Name(duelist) ? Duelists_Name(duelist) : "the duelist";
-    char who[96], whose[96];
-    if (!cast->expression_name[0]) return;
+    char who[96], whose[96], asked[64];
+    if (!cast->expression_name[0] && cast->expression <= 3 && (bust < 0 || !own)) return;
     snprintf(who, sizeof(who), opponent ? "the opponent, %s," : "%s", name);
     snprintf(whose, sizeof(whose), opponent ? "the opponent's (%s's) bust" : "%s's bust", name);
     if (bust >= 0) {
         const char *fallback = Busts_Name(bust, Busts_Default(bust));
-        if (Busts_Named(bust, cast->expression_name) >= 0 || !fallback) return;
-        Mods_Note(mod, "%s: %s has no expression \"%s\"; its default, \"%s\", is shown instead", where, whose,
-                  cast->expression_name, fallback);
-        snprintf(cast->expression_name, sizeof(cast->expression_name), "%s", fallback);
+        if (!fallback) return;
+        if (cast->expression_name[0]) {
+            if (Busts_Named(bust, cast->expression_name) >= 0) return;
+            Mods_Note(mod, "%s: %s has no expression \"%s\"; its default, \"%s\", is shown instead", where, whose,
+                      cast->expression_name, fallback);
+            snprintf(cast->expression_name, sizeof(cast->expression_name), "%s", fallback);
+            return;
+        }
+        if (cast->expression >= Busts_Count(bust)) {
+            Mods_Note(mod, "%s: %s has %d expression%s (0-%d); for %d its default, \"%s\", is shown instead", where,
+                      whose, Busts_Count(bust), Busts_Count(bust) == 1 ? "" : "s", Busts_Count(bust) - 1,
+                      cast->expression, fallback);
+            cast->expression = 0;
+            if (!own) snprintf(cast->expression_name, sizeof(cast->expression_name), "%s", fallback);
+        } else if (!own) {
+            const char *named = Busts_Name(bust, Busts_Ordered(bust, cast->expression));
+            snprintf(cast->expression_name, sizeof(cast->expression_name), "%s", named ? named : fallback);
+            cast->expression = 0;
+        }
         return;
     }
+    if (cast->expression_name[0]) snprintf(asked, sizeof(asked), "\"expression\" \"%s\"", cast->expression_name);
+    else snprintf(asked, sizeof(asked), "\"expression\" %d (past the campaign's 0 to 3)", cast->expression);
     character = Tower_DuelistCharacter(duelist);
     if (character)
-        Mods_Note(mod, "%s: %s has no bust of its own (its duelists entry's \"bust\"); \"expression\" \"%s\" is left "
-                  "out and the campaign's character %d is shown as it first comes in (expression 0)", where, who,
-                  cast->expression_name, character);
+        Mods_Note(mod, "%s: %s has no bust of its own (its duelists entry's \"bust\"); %s is left out and the "
+                  "campaign's character %d is shown as it first comes in (expression 0)", where, who, asked,
+                  character);
     else
         Mods_Note(mod, "%s: %s has no bust of its own (its duelists entry's \"bust\") and no character in the "
-                  "campaign; \"expression\" \"%s\" is left out%s", where, who, cast->expression_name,
-                  opponent ? " and the side stays empty" : "");
+                  "campaign; %s is left out%s", where, who, asked, opponent ? " and the side stays empty" : "");
     cast->expression_name[0] = 0;
     cast->expression = 0;
 }
@@ -298,7 +321,8 @@ static void bust_expression(const char *mod, const char *where, TowerCast *cast,
 /* One side's character: "none", a character of the campaign's by its
  * number (1-64), a duelist ("Seto"; "opponent", the floor's), a PNG of the
  * mod's, or an object of one of those ("character", "duelist", "image")
- * with "expression" (0-3) and, for a PNG, "flip". */
+ * with "expression" (0-3; a duelist's bust's by name or 0-15) and, for a
+ * PNG, "flip". */
 static TowerCast read_cast(const char *mod, const char *where, const JsonValue *value)
 {
     static const char *const known[] = {"character", "duelist", "image", "expression", "flip"};
@@ -317,15 +341,30 @@ static TowerCast read_cast(const char *mod, const char *where, const JsonValue *
         if (Json_Member(value, "character") && (Json_Member(value, "duelist") || Json_Member(value, "image")))
             Mods_Note(mod, "%s: a side is a \"character\", or a \"duelist\" and its \"image\"", where);
         if (Json_Member(value, "expression")) {
-            const char *named = Json_String(Json_Member(value, "expression"), NULL);
-            if (named && named[0] && strlen(named) < TOWER_EXPRESSION_NAME && !Json_Member(value, "character") &&
-                Json_Member(value, "duelist"))
-                snprintf(cast.expression_name, sizeof(cast.expression_name), "%s", named);
-            else if (named)
+            /* A campaign character's is 0 to 3; a duelist's may be its
+             * bust's, by name or by number (0-15), sorted out once the
+             * duelist is known (bust_expression). */
+            const JsonValue *expression = Json_Member(value, "expression");
+            const char *named = Json_String(expression, NULL);
+            int by_duelist = Json_Member(value, "duelist") && !Json_Member(value, "character");
+            if (named && !by_duelist)
                 Mods_Note(mod, "%s: \"expression\" by name is a duelist's bust's (\"duelist\" and \"expression\"); "
                           "a campaign character's is 0 to 3", where);
-            else if (whole(Json_Member(value, "expression"), 0, 3, &number)) cast.expression = (int)number;
-            else Mods_Note(mod, "%s: \"expression\" is 0 to 3, or the name of one of the duelist's bust's", where);
+            else if (named && !named[0])
+                Mods_Note(mod, "%s: \"expression\" \"\" names no expression; left out", where);
+            else if (named && strlen(named) >= TOWER_EXPRESSION_NAME)
+                Mods_Note(mod, "%s: \"expression\" \"%.24s...\" is longer than a bust's expression's name can be "
+                          "(%d bytes at most); left out", where, named, TOWER_EXPRESSION_NAME - 1);
+            else if (named)
+                snprintf(cast.expression_name, sizeof(cast.expression_name), "%s", named);
+            else if (whole(expression, 0, by_duelist ? BUST_EXPRESSIONS - 1 : 3, &number))
+                cast.expression = (int)number;
+            else if (by_duelist)
+                Mods_Note(mod, "%s: \"expression\" is the name of one of the duelist's bust's, or a number: 0 to 3 "
+                          "(the campaign character's, or the bust's), 4 to %d (the bust's)", where,
+                          BUST_EXPRESSIONS - 1);
+            else
+                Mods_Note(mod, "%s: \"expression\" is 0 to 3", where);
         }
         flip = read_flag(mod, where, value, "flip");
         if (Json_Member(value, "character") && Json_TypeOf(what) != JSON_NUMBER) {
@@ -357,6 +396,11 @@ static TowerCast read_cast(const char *mod, const char *where, const JsonValue *
         cast.kind = TOWER_CAST_ART;
         cast.id = art;
         cast.duelist = word && same_word(word, "opponent") ? TOWER_SPEAKER_FLOOR : duelist_named(mod, where, what);
+        if (cast.expression > 3) {
+            Mods_Note(mod, "%s: \"expression\" %d is a bust's; with an \"image\" it is 0 to 3, and 0 is shown", where,
+                      cast.expression);
+            cast.expression = 0;
+        }
         if (cast.expression_name[0]) {
             Mods_Note(mod, "%s: \"expression\" by name is the duelist's bust's; with an \"image\" the image is shown",
                       where);

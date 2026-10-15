@@ -325,9 +325,12 @@ Editor's Tower tab shows each one as a picture, made from the player's disc.
 - an object: `{"character": 4, "expression": 2}` (a campaign character's
   expression 0-3, changed in place on a later line), `{"duelist": "Seto"}`,
   `{"duelist": "ghost", "expression": "angry"}` (the duelist's bust in that
-  expression, by its name, or by its number: 0 the default, then the bust's
-  list; `{"duelist": "opponent", "expression": "angry"}` the floor's
-  opponent's), `{"image": "art/ghost.png", "flip": true, "duelist":
+  expression, by its name, or by its number, 0 to 15: 0 the default, then the
+  bust's list -- but for a disc duelist without `replace_bust`, 0 to 3 are its
+  campaign character's and 4 on its bust's; a number past the bust's count is
+  its default, noted; a name is at most 31 bytes;
+  `{"duelist": "opponent", "expression": "angry"}` the floor's opponent's,
+  checked against that duelist's bust), `{"image": "art/ghost.png", "flip": true, "duelist":
   "opponent"}` (the PNG turned to face the other way; its duelist the one
   whose lines it speaks).
 

@@ -74,21 +74,22 @@ int Duelists_BaseId(int duelist) { return duelist == 40 ? 1 : duelist; }
 const char *Duelists_Name(int duelist) { return duelist == 7 ? "Seto" : "a duelist"; }
 void Tower_MakeArt(TowerConfig *config) { (void)config; }
 /* Busts (busts.h): the added Ghost (40) has one of three expressions,
- * Seto (7) one that adds two to the campaign's character, Teana (2) one
+ * Seto (7) one that adds five to the campaign's character, Teana (2) one
  * that replaces hers when `teana_replaces`. */
 static int teana_replaces;
 int Duelists_Bust(int duelist) { return duelist == 40 ? 0 : duelist == 7 ? 1 : duelist == 2 ? 2 : -1; }
 int Duelists_ReplacesBust(int duelist) { return duelist == 2 && teana_replaces; }
-static const char *const bust_names[3][3] = {{"calm", "angry", "sad"}, {"smug", "shocked", ""}, {"stern", "", ""}};
+static const char *const bust_names[3][5] = {{"calm", "angry", "sad", "", ""},
+                                             {"smug", "shocked", "sly", "wry", "grim"}, {"stern", "", "", "", ""}};
 int Busts_Named(int bust, const char *name)
 {
     int k;
-    for (k = 0; bust >= 0 && bust < 3 && k < 3; k++) {
+    for (k = 0; bust >= 0 && bust < 3 && k < 5; k++) {
         if (bust_names[bust][k][0] && !strcmp(bust_names[bust][k], name)) return k;
     }
     return -1;
 }
-int Busts_Count(int bust) { return bust == 0 ? 3 : bust == 1 ? 2 : bust == 2 ? 1 : 0; }
+int Busts_Count(int bust) { return bust == 0 ? 3 : bust == 1 ? 5 : bust == 2 ? 1 : 0; }
 int Busts_Default(int bust) { return bust >= 0 && bust < 3 ? 0 : -1; }
 const char *Busts_Name(int bust, int expression)
 {
@@ -720,11 +721,68 @@ static void busts_cast(void)
     CHECK(!strcmp(line_of(tower->floors[0].before, 0)->cast[1].expression_name, "smug"));
 }
 
+/* An expression by number: a duelist's bust's are 0-15 (the bug: 0-3 only,
+ * as a campaign character's), 0-3 of a disc duelist without replace_bust
+ * still its campaign character's and past 3 its bust's; a name too long
+ * is said to be that, not a campaign character's. */
+static void busts_numbers(void)
+{
+    const TowerConfig *tower;
+    const TowerLine *line;
+    Tower_Reset();
+    forget();
+    teana_replaces = 0;
+    read_as("b", "{\"tower\": {\"intro\": {\"characters\": {\"left\": {\"duelist\": \"Seto\", \"expression\": 4},"
+                 " \"right\": {\"duelist\": \"Ghost\", \"expression\": 2}}, \"lines\": [\"One.\","
+                 "  {\"text\": \"Two.\", \"characters\": {\"left\": {\"duelist\": \"Seto\", \"expression\": 9},"
+                 "   \"right\": {\"duelist\": \"Ghost\", \"expression\": 15}}},"
+                 "  {\"text\": \"Three.\", \"characters\": {\"left\": {\"duelist\": \"Simon Muran\", \"expression\": 6},"
+                 "   \"right\": {\"character\": 4, \"expression\": 5}}},"
+                 "  {\"text\": \"Four.\", \"characters\": {\"left\": {\"duelist\": \"Ghost\", \"expression\": 16},"
+                 "   \"right\": {\"duelist\": \"Ghost\", \"expression\": \"a name far longer than thirty-one bytes\"}}},"
+                 "  {\"text\": \"Five.\", \"characters\": {\"left\": {\"image\": \"art/hero.png\", \"duelist\": \"Ghost\","
+                 "   \"expression\": 7}}}]},"
+                 " \"floors\": [{\"duelist\": \"Seto\", \"before\": {\"characters\": {\"right\":"
+                 "  {\"duelist\": \"opponent\", \"expression\": 3}, \"left\": {\"duelist\": \"opponent\", \"expression\": 4}},"
+                 "  \"lines\": [\"Hi.\"]}}]}}");
+    tower = Tower_Config();
+    CHECK(tower);
+    line = line_of(tower->intro, 0);
+    /* Seto's 4 is his bust's fifth, "grim" (0 the default, then the list). */
+    CHECK(line->cast[0].kind == TOWER_CAST_DUELIST && !strcmp(line->cast[0].expression_name, "grim"));
+    CHECK(line->cast[1].kind == TOWER_CAST_DUELIST && line->cast[1].expression == 2);
+    line = line_of(tower->intro, 1);
+    CHECK(heard("Seto's bust has 5 expressions (0-4); for 9 its default, \"smug\", is shown instead"));
+    CHECK(line->cast[0].kind == TOWER_CAST_DUELIST && !strcmp(line->cast[0].expression_name, "smug"));
+    CHECK(heard("a duelist's bust has 3 expressions (0-2); for 15 its default, \"calm\", is shown instead"));
+    CHECK(line->cast[1].kind == TOWER_CAST_DUELIST && line->cast[1].expression == 0);
+    line = line_of(tower->intro, 2);
+    CHECK(heard("a duelist has no bust of its own (its duelists entry's \"bust\"); \"expression\" 6 (past the "
+                "campaign's 0 to 3) is left out and the campaign's character 1 is shown as it first comes in"));
+    CHECK(line->cast[0].kind == TOWER_CAST_RETAIL && line->cast[0].id == 1 && line->cast[0].expression == 0);
+    CHECK(heard("\"expression\" is 0 to 3"));
+    line = line_of(tower->intro, 3);
+    CHECK(heard("\"expression\" is the name of one of the duelist's bust's, or a number: 0 to 3 (the campaign "
+                "character's, or the bust's), 4 to 15 (the bust's)"));
+    CHECK(heard("\"expression\" \"a name far longer than t...\" is longer than a bust's expression's name can be "
+                "(31 bytes at most); left out"));
+    CHECK(!heard("a campaign character's is 0 to 3"));
+    line = line_of(tower->intro, 4);
+    CHECK(heard("\"expression\" 7 is a bust's; with an \"image\" it is 0 to 3, and 0 is shown"));
+    CHECK(line->cast[0].kind == TOWER_CAST_ART && line->cast[0].expression == 0);
+    /* The floor's opponent, Seto: 3 his campaign character's, 4 his bust's. */
+    line = line_of(tower->floors[0].before, 0);
+    CHECK(line->cast[1].kind == TOWER_CAST_OPPONENT && line->cast[1].expression == 3 && !line->cast[1].expression_name[0]);
+    CHECK(line->cast[0].kind == TOWER_CAST_OPPONENT && !strcmp(line->cast[0].expression_name, "grim"));
+    CHECK(notes == 7);
+}
+
 int main(void)
 {
     int i;
     defaults();
     busts_cast();
+    busts_numbers();
     every_key();
     last_wins();
     mistakes();

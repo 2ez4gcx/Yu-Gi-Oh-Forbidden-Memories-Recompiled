@@ -646,6 +646,33 @@ class UiTabTest(GuiCase):
             page.view.fit()
         self.assertAlmostEqual(page.stage.zoom, (600 - page.view.tools.winfo_reqheight() - 6) / 196)
 
+    def test_deleting_frame_style_clears_its_assignments(self):
+        """Deleting a referenced style must not leave stale fallback rules."""
+        from fm_editor import ui_frames
+        page = self.page("frames")
+        layout = self.app.project.other.setdefault("card_layout", {})
+        layout.update({
+            "frame_styles": {"remove-me": {"hand_color": "gold"}, "keep-me": {}},
+            "default_style": "remove-me",
+            "default_styles": {"kinds": {"monster": "remove-me"},
+                               "types": {"Dragon": "remove-me"}},
+        })
+        self.app.project.card_extra[1] = {"frame_style": "remove-me", "art": "images/keep.png"}
+        page.style_name.set("remove-me")
+        with mock.patch.object(ui_frames.messagebox, "askyesno", return_value=False) as ask:
+            page.delete_style()
+        self.assertIn("remove-me", layout["frame_styles"])
+        self.assertEqual(layout["default_style"], "remove-me")
+        self.assertTrue(ask.called)
+        self.assertIn("Card:", ask.call_args.args[1])
+
+        with mock.patch.object(ui_frames.messagebox, "askyesno", return_value=True):
+            page.delete_style()
+        self.assertNotIn("remove-me", layout["frame_styles"])
+        self.assertNotIn("default_style", layout)
+        self.assertNotIn("default_styles", layout)
+        self.assertEqual(self.app.project.card_extra[1], {"art": "images/keep.png"})
+
     def test_hold_the_games(self):
         page = self.page("duel")
         page.moved("lp_player", 0, 40)

@@ -8,7 +8,7 @@ preview is the 320x240 card-viewer composition, so dragging uses game pixels.
 from __future__ import annotations
 
 import tkinter as tk
-from tkinter import simpledialog, ttk
+from tkinter import messagebox, simpledialog, ttk
 from pathlib import Path
 import shutil
 import subprocess
@@ -814,8 +814,65 @@ class FramesPage(ttk.Frame):
         if not name: return
         self.styles_dict(True).setdefault(name, {"hand_color": "gold"}); self.style_name.set(name); self.done()
 
+    def style_references(self, name):
+        """Return every manifest assignment that points at *name*.
+
+        A style name is only useful while it exists in ``frame_styles``.  Keep
+        these references together so deleting a style cannot leave a manifest
+        that silently falls through to retail at some later point.
+        """
+        layout = self.project.other.get("card_layout", {})
+        references = []
+        if layout.get("default_style") == name:
+            references.append(("Global default", layout, "default_style"))
+        defaults = layout.get("default_styles", {})
+        if not isinstance(defaults, dict):
+            defaults = {}
+        for group, label in (("kinds", "Kind"), ("types", "Printed type")):
+            values = defaults.get(group, {})
+            if isinstance(values, dict):
+                for key, value in values.items():
+                    if value == name:
+                        references.append((f"{label}: {key}", values, key))
+        for cid, entry in self.project.card_extra.items():
+            if entry.get("frame_style") == name:
+                references.append((f"Card: {self.project.cards[cid].name}", entry, "frame_style"))
+        for cid, added in self.project.added.items():
+            if added.extra.get("frame_style") == name:
+                references.append((f"Card: {self.project.cards[cid].name}", added.extra, "frame_style"))
+        return references
+
     def delete_style(self):
-        styles = self.styles_dict(True); styles.pop(self.style_name.get(), None)
+        name = self.style_name.get()
+        styles = self.styles_dict(True)
+        if name not in styles:
+            return
+        references = self.style_references(name)
+        if references:
+            listed = "\n".join(f"• {label}" for label, _, _ in references)
+            if not messagebox.askyesno(
+                    "Delete frame style?",
+                    f'"{name}" is assigned to:\n{listed}\n\n'
+                    "Delete the style and clear these assignments?",
+                    parent=self):
+                return
+            for _, owner, key in references:
+                owner.pop(key, None)
+            # Do not leave empty bookkeeping objects behind after their last
+            # assignment was cleared.  Added cards own their extra mapping;
+            # retail replacements can be removed entirely.
+            layout = self.project.other.get("card_layout", {})
+            defaults = layout.get("default_styles")
+            if isinstance(defaults, dict):
+                for group in ("kinds", "types"):
+                    if not defaults.get(group):
+                        defaults.pop(group, None)
+                if not defaults:
+                    layout.pop("default_styles", None)
+            for cid, entry in list(self.project.card_extra.items()):
+                if not entry:
+                    self.project.card_extra.pop(cid, None)
+        styles.pop(name)
         self.style_name.set(next(iter(styles), "custom")); self.done()
 
     def set_default(self):

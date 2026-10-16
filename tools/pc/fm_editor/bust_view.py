@@ -380,6 +380,8 @@ class BustView:
             return
         data = self.read_png(path) if path else self.ask_png(f"The picture of \"{e.name}\"")
         if data is not None:
+            if roster.picture_shared(self.project, e.image_path):
+                e.image_path = None     # a file of its own: the others keep theirs
             e.image = data
             self.changed(e)
 
@@ -410,6 +412,8 @@ class BustView:
             return
         data = self.read_png(path) if path else self.ask_png(f"\"{e.name}\" blinking: the picture with the eyes shut")
         if data is not None:
+            if roster.picture_shared(self.project, e.blink_path):
+                e.blink_path = None
             e.blink = data
             self.changed(e)
 

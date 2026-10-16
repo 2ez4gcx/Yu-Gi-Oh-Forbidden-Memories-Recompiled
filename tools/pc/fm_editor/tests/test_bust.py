@@ -181,6 +181,43 @@ class BustTest(unittest.TestCase):
         self.assertFalse((self.folder / "art/h.png").exists())
         self.assertTrue((self.folder / "art/g.png").is_file())
 
+    def test_shared_picture_changed_in_a_file_of_its_own(self):
+        """A picture a story or another expression shows too, changed on the
+        Bust page, goes in a file of its own (the bug: the new picture was
+        written over the shared file, changing the story's or the other
+        expression's); a duplicate of a bust kept as written names the same
+        files (the bug: it named files under its own id that never were)."""
+        self.folder.mkdir(parents=True)
+        (self.folder / "art").mkdir()
+        (self.folder / "art/g.png").write_bytes(figure(CALM))
+        (self.folder / "mod.json").write_text(json.dumps({"id": "m", "name": "M", "duelists": [
+            {"id": "g", "copy": 1, "bust": {"default": "x", "expressions": [
+                {"name": "x", "image": "art/g.png"}, {"name": "y", "image": "art/g.png"}]}},
+            {"id": "h", "copy": 2, "bust": "art/g.png"},
+            {"id": "u", "copy": 3, "bust": {"default": "z", "expressions": [
+                {"name": "z", "image": "art/g.png", "talk": "art/missing.png"}]}}],
+            "tower": {"intro": {"characters": {"left": "art/g.png"}, "lines": ["Hi."]},
+                      "floors": [{"duelist": 1}]}}))
+        p, _ = manifest.open_mod(self.p.retail, self.folder)
+        g, h = roster.find(p, "g"), roster.find(p, "h")
+        self.assertTrue(roster.picture_shared(p, "art/g.png"))
+        self.assertFalse(roster.picture_shared(p, "art/other.png"))
+        # As BustView.choose_picture does it.
+        for e in (bustm.find(g.bust, "y"), h.bust.expressions[0]):
+            if roster.picture_shared(p, e.image_path):
+                e.image_path = None
+            e.image = figure(ANGRY)
+        copy = roster.duplicate(p, roster.find(p, "u"))
+        manifest.save_mod(p, self.folder)
+        self.assertEqual((self.folder / "art/g.png").read_bytes(), figure(CALM))
+        again, _ = manifest.open_mod(self.p.retail, self.folder)
+        self.assertEqual(bustm.find(roster.find(again, "g").bust, "x").image, figure(CALM))
+        self.assertEqual(bustm.find(roster.find(again, "g").bust, "y").image, figure(ANGRY))
+        self.assertEqual(roster.find(again, "h").bust.expressions[0].image, figure(ANGRY))
+        written = json.loads((self.folder / f"duelists/{copy.key}.json").read_text())
+        self.assertEqual(written["bust"], {"default": "z", "expressions": [
+            {"name": "z", "image": "art/g.png", "talk": "art/missing.png"}]})
+
     def test_checks(self):
         p = self.p
         ghost = roster.add_copy(p, 1, "Ghost")

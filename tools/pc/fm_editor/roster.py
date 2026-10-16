@@ -310,7 +310,9 @@ def duplicate(project, e: RosterDuelist) -> RosterDuelist:
     other.slot = None
     other.portrait_path = None
     other.replace_bust = False
-    if other.bust is not None:      # its own files, under its own id
+    # Its own files, under its own id; a bust kept as written (a picture of
+    # it unread) is written as it was, naming the same files.
+    if other.bust is not None and not other.bust.unread:
         other.bust.written = None
         other.bust.unread = False
         for x in other.bust.expressions:
@@ -806,6 +808,24 @@ def used_elsewhere(project) -> set:
                 walk(item)
     walk(getattr(project, "other", None))
     return out
+
+
+def picture_shared(project, rel) -> bool:
+    """Whether a bust's picture's path is used by something else too: a
+    story, another tab's file, or another picture of a bust. A picture
+    changed there goes in a file of its own, or the others change too."""
+    if not rel:
+        return False
+    rel = str(rel).replace("\\", "/")
+    if rel in used_elsewhere(project):
+        return True
+    count = 0
+    for e in project.roster:
+        if e.bust is None:
+            continue
+        for x in e.bust.expressions:
+            count += sum(1 for path in [x.image_path, *x.talk_paths, x.blink_path] if path == rel)
+    return count > 1
 
 
 def write(project, folder, decks: dict, drops: dict):

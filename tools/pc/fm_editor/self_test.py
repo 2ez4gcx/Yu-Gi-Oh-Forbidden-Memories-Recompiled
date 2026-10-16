@@ -93,18 +93,39 @@ def exercise(folder: Path) -> dict:
             require(picked == "tower/picture.png", f"the stage's PNG is {picked}")
             app.tower._insert(f"[right: {picked}]")
             require(app.tower.commit(), "Tower Apply failed")
+            # The Duelists tab's Bust: Seto given a bust of one expression,
+            # which the Tower tab's picker stands on the ending's stage; a
+            # bust needs mod API 17.
+            app.notebook.select(app.duelists)
+            app.duelists.goto((7, None))
+            require(app.duelists.bust_view.add(str(art), "smug") is None, "the bust's expression was refused")
+            app.notebook.select(app.tower)
+            app.tower._set_text("ending", "The end.")
+            app.tower.last_story = "ending"
+            app.tower._bust_duelists()
+            app.tower.stage_duelist.set("Seto")
+            app.tower._bust_expressions()
+            app.tower.stage_side.set("left")
+            app.tower._bust()
+            require(app.tower.commit(), "Tower Apply failed")
             app.info.vars["id"].set("editor-smoke")
             require(app.info.commit(), "Mod info Apply failed")
             with mock.patch.object(file_dialogs, "askdirectory", return_value=str(folder / "mods")):
                 require(app.save(ask=True, export=True), "Export failed")
             saved = folder / "mods/editor-smoke"
             value = json.loads((saved / "mod.json").read_text(encoding="utf-8"))
-            require(value["min_api"] == 14, value)
+            require(value["min_api"] == 17, value)
             require(value["tower"] == {"name": "Smoke tower", "scene": "seal shrine",
                                        "intro": [{"text": "Welcome.", "characters": {"left": 1,
                                                                                      "right": "tower/picture.png"}}],
+                                       "ending": [{"text": "The end.", "characters": {
+                                           "left": {"duelist": "Seto", "expression": "smug"}}}],
                                        "floors": [{"duelist": 1}]}, value)
             require((saved / "tower/picture.png").is_file(), "the stage's PNG was not exported")
+            seto = json.loads((saved / "duelists/seto.json").read_text(encoding="utf-8"))
+            require(seto == {"replace": "Seto", "bust": {"default": "smug", "expressions": [
+                {"name": "smug", "image": "busts/seto/smug.png"}]}}, seto)
+            require((saved / "busts/seto/smug.png").is_file(), "the bust's PNG was not exported")
             app.load_mod(saved)
             app.update()
             require(app.project.cards[1].name == "Packaged editor smoke card", "card name did not reopen")
@@ -114,7 +135,7 @@ def exercise(folder: Path) -> dict:
             require(list(saved.rglob("*.png")), "exported art is missing")
             require(not callbacks, "\n".join(callbacks))
             return {"build": build_info.current(), "tabs": tabs, "ui_pages": pages,
-                    "export_reopen": True, "art": True, "tower": True}
+                    "export_reopen": True, "art": True, "tower": True, "bust": True}
         finally:
             app.dirty = False
             app.destroy()

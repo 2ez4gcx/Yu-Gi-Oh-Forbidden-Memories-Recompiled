@@ -50,6 +50,10 @@
  *  13  "limits" "card_drops" (manifest only), which limit() also answers
  *  14  the tower's manifest features (notes/tower-mode.md) only; no host
  *      layout or event change
+ *  15  "card_types" (manifest only); no host layout or event change
+ *  16  "attributes" (manifest only); no host layout or event change
+ *  17  a duelist's bust (notes/more-duelists.md) only; no host layout or
+ *      event change
  * A data mod declares its required version with min_api in mod.json. */
 #include "mod_types.h"
 

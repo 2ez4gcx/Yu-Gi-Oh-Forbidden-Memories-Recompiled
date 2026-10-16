@@ -642,6 +642,20 @@ if(BUILD_TESTING)
         target_compile_options(memories_title_config_test PRIVATE -Wall -Wextra -Wpedantic -Werror)
     endif()
     add_test(NAME pc_title_config COMMAND memories_title_config_test)
+    # A duelist's bust (src/pc/free_duel/busts.c): "bust" as read, and the
+    # records it is made into read back as the game reads a character's
+    # parts bank, on the test's own pictures.
+    add_executable(memories_busts_test tests/pc/busts_test.c src/pc/mods/json.c)
+    target_include_directories(memories_busts_test PRIVATE src)
+    target_compile_definitions(memories_busts_test PRIVATE MEMORIES_PC)
+    if(NOT MSVC)
+        target_compile_options(memories_busts_test PRIVATE -Wall -Wextra -Wpedantic -Werror)
+    endif()
+    if(MEMORIES_SANITIZERS)
+        target_compile_options(memories_busts_test PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
+        target_link_options(memories_busts_test PRIVATE -fsanitize=address,undefined)
+    endif()
+    add_test(NAME pc_busts COMMAND memories_busts_test)
     # The mods' "tower" key and a save's progress in it
     # (src/pc/tower/tower_config.c): manifests and numbers only.
     add_executable(memories_tower_test tests/pc/tower_test.c src/pc/mods/json.c)
@@ -857,6 +871,20 @@ if(BUILD_TESTING)
         endif()
         add_test(NAME pc_card_plate COMMAND memories_card_plate_test)
         set_tests_properties(pc_card_plate PROPERTIES SKIP_RETURN_CODE 77)
+        # What a duelist's bust costs the start (busts.c Busts_Make with the
+        # real art.c): the biggest bust and a typical one, drawn at runtime.
+        add_executable(memories_busts_make_test tests/pc/busts_make_test.c src/pc/cards/art.c src/pc/mods/json.c)
+        target_include_directories(memories_busts_make_test PRIVATE src ${MEMORIES_FREETYPE_INCLUDE})
+        target_compile_definitions(memories_busts_make_test PRIVATE MEMORIES_PC)
+        target_link_libraries(memories_busts_make_test PRIVATE ${MEMORIES_FREETYPE_LIBRARY} ${memories_plate_fonts}
+            PNG::PNG)
+        if(WIN32)
+            target_link_libraries(memories_busts_make_test PRIVATE memories_pc_fs)
+        endif()
+        if(NOT MSVC)
+            target_compile_options(memories_busts_make_test PRIVATE -Wall -Wextra -Werror)
+        endif()
+        add_test(NAME pc_busts_make COMMAND memories_busts_make_test "${CMAKE_CURRENT_BINARY_DIR}/busts-make-test")
     endif()
     # The update check's version order and release choice
     # (src/pc/platform/update.h, notes/updates.md); no network. The program's

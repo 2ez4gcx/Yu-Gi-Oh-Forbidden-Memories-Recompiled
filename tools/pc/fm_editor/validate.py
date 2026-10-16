@@ -511,7 +511,9 @@ def validate(project: Project) -> list:
         out.append(Issue(level, "Guardian Stars", where, message))
     _check_packs(project, out)
     for level, where, message in tower.check(project.other.get("tower"), lambda name: roster.named(project, name),
-                                             lambda name: project.resolve(name)):
+                                             lambda name: project.resolve(name),
+                                             lambda name: roster.bust_of(project, roster.named(project, name)),
+                                             lambda name: roster.shows_bust(project, roster.named(project, name))):
         out.append(Issue(level, "Tower", where, message))
     fixed_decks.check(project, out)
     roster.check(project, out)

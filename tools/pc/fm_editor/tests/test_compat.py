@@ -183,6 +183,17 @@ class FeatureTest(unittest.TestCase):
             with self.subTest(effect=bad):
                 self.assertTrue(monster_effects.problems([bad], p.resolve, type_names=p.type_names))
 
+    def test_api_17(self):
+        """A duelist's bust (notes/more-duelists.md): a game of API 16 would
+        show the campaign's characters instead."""
+        for value in ({"duelists": [{"id": "g", "copy": 1, "bust": "busts/g.png"}]},
+                      {"duelists": [{"replace": "Seto", "bust": "busts/s.png", "replace_bust": True}]},
+                      {"tower": {"floors": [{"duelist": 1}], "intro": {
+                          "characters": {"left": {"duelist": "g", "expression": "angry"}}, "lines": ["Hi."]}}}):
+            with self.subTest(value=value):
+                self.assertEqual(self.needs(value), 17)
+        self.assertIn("newer than v0.3.0", compat.release_text(17))
+
     def test_reasons_are_the_highest_apis(self):
         api, reasons = compat.required({"card_text_colors": {}, "ui": {}, "limits": {"swords_turns": 5}})
         self.assertEqual(api, 11)

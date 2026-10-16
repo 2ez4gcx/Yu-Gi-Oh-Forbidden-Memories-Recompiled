@@ -1552,6 +1552,7 @@ def save_mod(project: Project, folder, manifest: dict = None, copy_source: bool 
     source = project.source_dir
     if copy_source and source and Path(source).resolve() != folder.resolve() and Path(source).is_dir():
         destination = folder.resolve()
+        elsewhere = roster.used_elsewhere(project)
         for directory, subdirs, files in os.walk(source):
             directory = Path(directory)
             # Save As may put the new mod inside the old one. Never walk
@@ -1562,7 +1563,7 @@ def save_mod(project: Project, folder, manifest: dict = None, copy_source: bool 
                 # The roster's files it read are written afresh below, or
                 # are gone with the duelist they were for.
                 if item.is_file() and item.name != "mod.json" and \
-                        not roster.owned(project, item.relative_to(source).as_posix()):
+                        not roster.owned(project, item.relative_to(source).as_posix(), elsewhere):
                     target = folder / item.relative_to(source)
                     target.parent.mkdir(parents=True, exist_ok=True)
                     shutil.copy2(item, target)

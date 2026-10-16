@@ -311,7 +311,12 @@ Editor's Tower tab shows each one as a picture, made from the player's disc.
   disc). The Tower tab shows each one;
 - a duelist (id, name, identity), or `"opponent"`: the character the
   campaign shows that duelist as before its duel (an added duelist: its
-  base's). The villagers and the five shrine mages have none;
+  base's; the table is in [More duelists](more-duelists.md#which-character-a-disc-duelist-is)).
+  The villagers and the five shrine mages have none. A duelist with a
+  [bust](more-duelists.md#bust--the-large-character) of its own is its bust
+  in its default expression instead: an added duelist always, a disc duelist
+  with `replace_bust` (without it the campaign's character, unless an
+  expression of its bust is named, below);
 - a PNG, a path inside the mod: a picture of up to 256 x 256 (a larger one is
   shrunk to fit), its clear parts clear, standing on the box as the
   campaign's do -- its middle over the side's place, its bottom edge just
@@ -319,14 +324,35 @@ Editor's Tower tab shows each one as a picture, made from the player's disc.
   screen's and the rest under the box. It is drawn at the console's resolution;
 - an object: `{"character": 4, "expression": 2}` (a campaign character's
   expression 0-3, changed in place on a later line), `{"duelist": "Seto"}`,
-  `{"image": "art/ghost.png", "flip": true, "duelist": "opponent"}` (the
-  PNG turned to face the other way; its duelist the one whose lines it
-  speaks).
+  `{"duelist": "ghost", "expression": "angry"}` (the duelist's bust in that
+  expression, by its name, or by its number, 0 to 15: 0 the default, then the
+  bust's list -- but for a disc duelist without `replace_bust`, 0 to 3 are its
+  campaign character's and 4 on its bust's; a number past the bust's count is
+  its default, noted; a name is at most 31 bytes;
+  `{"duelist": "opponent", "expression": "angry"}` the floor's opponent's,
+  checked against that duelist's bust), `{"image": "art/ghost.png", "flip": true, "duelist":
+  "opponent"}` (the PNG turned to face the other way; its duelist the one
+  whose lines it speaks).
+
+A later line naming another expression of the same bust changes the face in
+place, as the campaign does (`F6 id 4e`), when both are in one of the bust's
+records (four expressions a record, [More
+duelists](more-duelists.md#bust--the-large-character)); else the new one slides
+in as another character. A name the bust lacks is noted and the bust is shown
+in its default (named in the note) -- for a disc duelist without
+`replace_bust` too, since a name asks for the bust. A name for a duelist
+without a bust is noted and left out, and the side is the campaign's
+character as it first comes in (expression 0; nothing for a villager or a
+shrine mage, who have none); a name for a campaign character
+(`{"character": n}`) is noted and left out, and with an `"image"` the image is
+shown. The speaker's bust talks and blinks with its own frames.
 
 **Limits.** Two sides, no middle (the campaign has two places; the third
 record is the small portrait). One character may stand on one side at a
 time (the game finds them by number). A story shows at most five pictures of
-the mod's (the cache of characters has five places), and a tower has at most
+the mod's (the cache of characters has five places; each record of a bust a
+story shows is one, but a `replace_bust` bust's first, which is the campaign's
+own character), and a tower has at most
 96 PNGs, scenes and characters together. A story is told in one box, so its words are at
 most about 12000 letters, each line counting 48 more for its stage's codes; the lines past
 that are left out, noted (and should a box still fill, the story ends there, logged). A
@@ -365,7 +391,11 @@ tower's screen rather than from the event script (`Script_RunTick`):
   0x28, 0x29, 0x0B, 0x05), and `func_8003A560` asks the tower to fill its
   cache slot (`#ifdef MEMORIES_PC`) before it would read the disc: the sheet,
   the two palette rows and a parts bank as the disc's records have them, so
-  it slides, speaks and goes as theirs do;
+  it slides, speaks and goes as theirs do. A loose PNG is one piece that
+  neither talks nor blinks; a duelist's bust record (`gTower.pool` holds
+  `TOWER_POOL_BUST` + the record, `busts.c`) has the eyes and mouth of its
+  frames; a `replace_bust` character is filled from its bust whether a story
+  is up or not ([More duelists](more-duelists.md#how-a-bust-is-made));
 - the stage goes down to black after the last page, the characters released
   (`func_80039FD4`), the scene's objects and the frame too, the wall up again.
 
@@ -501,7 +531,9 @@ CLEARED!, `FE7C` YOU LOST. BACK TO FLOOR %d., `FE7D` SAVE YOUR PROGRESS?,
 A tower needs mod API 14 (`"min_api": 14`, [Which game a mod
 needs](modding.md#which-game-a-mod-needs)): `tower`, a duelist's `tower_only`
 or `unlock` `tower`, a menu item's action `tower`. An older game would play the
-mod without its tower.
+mod without its tower. A duelist's `bust` and `replace_bust`, and a story's
+bust `"expression"` (by name, or a number past 3), need 17; a game of 16 would show the duelists as the
+campaign's characters.
 
 ## How it is built
 
@@ -537,7 +569,12 @@ what the end-to-end test follows.
   `CardRules_*` and the `Duel_Check*` the CPU asks, a code mod's answer
   overruled; the duelists' conditions; the button and the action.
 - `pc_tower` also reads every key of a story's stage, right and wrong, its
-  defaults and the story's cut.
+  defaults and the story's cut, and a side by a duelist's bust and expression
+  (by name and number, `"opponent"`'s checked against the floor's).
+- `tests/pc/tower/busts_e2e.py`: a story with a mod duelist's bust of three
+  expressions talking, blinking and changing face in place, the old forms
+  beside it, and the campaign with a disc duelist's bust kept and replaced
+  ([More duelists](more-duelists.md#checking-it)).
 - `tools/pc/fm_editor/tests/test_tower.py`: the Tower tab, the stage's text
   form and its round trip, the checks, the scene names and keys against
   `tower_config.c`, the pickers' pictures from an archive's bytes.

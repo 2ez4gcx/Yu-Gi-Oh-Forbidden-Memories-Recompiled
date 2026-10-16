@@ -206,3 +206,26 @@ the run written only when they differ from the defaults, and the unlock
 checkbox and picker. Window pictures of the tab (the guide, the options, a
 floor's unlock) are taken by PrintWindow, the editor's window alone.
 
+## Addendum 2026-10-13: a duelist's bust
+
+The Duelists tab's right side is now two pages under the header, **Pools**
+(as before) and **Bust** (`bust_view.py`, `bust.py`): a duelist's large
+character with named expressions, talking and blink frames, a default, a
+preview at the console's 320 x 240 where the game stands it, and for a disc
+duelist **The campaign's character too** (`replace_bust`), asked first and
+explained beside it. The Tower tab's Stage box has a row picking a duelist
+with a bust and one of its expressions (`[left: Ghost expression angry]`),
+and the story text form reads and writes an expression's name. The packaged
+`self-test` gives Seto a bust of one expression on the Duelists tab, stands
+it on the tower's ending through the picker, and checks the export carries
+`"min_api": 17`, `duelists/seto.json` with the bust and `busts/seto/smug.png`.
+`tests/test_bust.py` covers the bust's files round trip (saved under
+`busts/<id>/`, read back, saved again byte for byte, renamed and dropped with
+their old files gone, a hand-written bust's own paths and short form kept,
+an unreadable one kept as written), the checks, the game's numbering, the
+disc duelists' campaign characters and the bust's limits against
+`tower_config.c` and `busts.h`, the preview's placement, the mod API (17,
+for a duelist's own file too), the text form and the tower checks naming an
+expression, and the tab and the picker. The Duelists tab asks for 1110
+pixels across with Windows' Segoe UI (1112 before), the Tower tab 1004.
+In the game: `tests/pc/tower/busts_e2e.py`.

@@ -4695,7 +4695,11 @@ or 0xC0000000 starts the game all the same.
   game the value can list several addresses, 2 MiB held at each:
   `0x80000000,0x9C000000,0x9E000000,0x9FF00000` also holds the text arena,
   low memory and the interpreter stack, which it then takes elsewhere
-  (the fixed requests above) without a word in the log. The device
+  (the fixed requests above) without a word in the log. An entry
+  `START-END` holds that whole range: `0x762fd000-0x962fd000` is the large
+  object space of #372 (Retroid Pocket Nova, Android 13, where v0.3.0
+  stopped with "cannot map guest memory at 0x80000000: File exists"), which
+  the translated game starts past, with its code mods (2026-10-16). The device
   runner's `MEMORIES_RUNNER_HOLD_LOW` (`tools/pc/android/runner.c`) holds
   0x7C000000-0x9C000000 the same way.
 - **Speed:** on the x86_64 emulator, which runs arm64 code through a

@@ -63,7 +63,10 @@ static int map_failed(const char *why)
  * translated game needs no host address there, so it starts all the same:
  * this shows it. "0x80000000,0x9C000000,0x9E000000,0x9FF00000" also holds
  * the text arena, low memory and the interpreter stack, which
- * compat/mman.h's fixed requests take elsewhere (translated_mman.c).
+ * compat/mman.h's fixed requests take elsewhere (translated_mman.c). An
+ * entry START-END holds that whole range instead, as a phone's runtime
+ * can: 0x762fd000-0x962fd000 is the large object space of #372 (a Retroid
+ * Pocket Nova, Android 13), across guest RAM's 0x80000000.
  * <sys/mman.h>'s own mmap, which compat/mman.h does not reach here. A test
  * hook: not in a release. */
 static void hold_guest(void)
@@ -72,21 +75,25 @@ static void hold_guest(void)
     char *next;
     if (!value || !*value || !strcmp(value, "0")) return;
     for (;;) {
-        unsigned long at = strtoul(value, &next, 0);
+        unsigned long at = strtoul(value, &next, 0), size = 0x200000ul;
         void *wanted, *got;
         if (next == value) break;
         if (at <= 1) at = 0x80000000ul;
+        if (*next == '-') {   /* START-END: the whole range */
+            unsigned long end = strtoul(next + 1, &next, 0);
+            if (end > at) size = ((end - (at & ~0xFFFul)) + 0xFFFul) & ~0xFFFul;
+        }
         wanted = (void *)(uintptr_t)(at & ~0xFFFul);
-        got = mmap(wanted, 0x200000, PROT_NONE, MAP_FIXED_NOREPLACE | MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+        got = mmap(wanted, size, PROT_NONE, MAP_FIXED_NOREPLACE | MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
         if (got != wanted) {
-            if (got != MAP_FAILED) munmap(got, 0x200000);
+            if (got != MAP_FAILED) munmap(got, size);
             fprintf(stderr, "memories-pc: MEMORIES_TEST_HOLD_GUEST: %p could not be held\n", wanted);
         } else {
             /* PR_SET_VMA, PR_SET_VMA_ANON_NAME: Android kernels, Linux 5.17+. */
-            prctl(0x53564d41, 0, (unsigned long)(uintptr_t)got, 0x200000ul,
+            prctl(0x53564d41, 0, (unsigned long)(uintptr_t)got, size,
                   (unsigned long)(uintptr_t)"dalvik-free list large object space (MEMORIES_TEST_HOLD_GUEST)");
             fprintf(stderr, "memories-pc: %p-%p is held (MEMORIES_TEST_HOLD_GUEST); the translated game maps "
-                    "nothing there\n", got, (void *)((char *)got + 0x200000));
+                    "nothing there\n", got, (void *)((char *)got + size));
         }
         if (*next != ',') break;
         value = next + 1;

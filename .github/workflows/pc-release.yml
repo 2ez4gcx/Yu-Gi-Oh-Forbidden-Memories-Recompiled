@@ -93,7 +93,7 @@ jobs:
       # runs the full adapter suite; this checks setup and the archives.
       - uses: actions/download-artifact@v4
         with:
-          name: sdk-exports-aarch64
+          name: sdk-exports-aarch64-translated
           path: tmp/sdk-exports/android-arm64-v8a
       - uses: actions/download-artifact@v4
         with:
@@ -424,14 +424,17 @@ jobs:
       # next step signs again with the release key.
       - name: Build the APK
         run: MEMORIES_VERSION="$PACKAGE_VERSION" python tools/pc/build_game32.py --target android-arm64-v8a --backend sdl --release --build tmp/pc/android-arm64-v8a
-      # The arm64 game's export list, for the desktop archives' SDKs (the
-      # package job): every run, signed or not; the list holds no secret.
-      - name: Upload the aarch64 export list
+      # The arm64 game's export list and guest-pass tables, for the desktop
+      # archives' SDKs (the package job; build_mod.py --target
+      # aarch64-translated): every run, signed or not; they hold no secret.
+      - name: Upload the aarch64-translated export list
         uses: actions/upload-artifact@v4
         with:
-          name: sdk-exports-aarch64
+          name: sdk-exports-aarch64-translated
           path: |
-            tmp/pc/android-arm64-v8a/sdk/exports.aarch64.txt
+            tmp/pc/android-arm64-v8a/sdk/exports.aarch64-translated.txt
+            tmp/pc/android-arm64-v8a/sdk/mod_translation.json
+            tmp/pc/android-arm64-v8a/sdk/mod_signatures.json
             tmp/pc/android-arm64-v8a/source
           if-no-files-found: error
           retention-days: 14

@@ -29,8 +29,10 @@ its README's Mods section says that a code mod needs a 64-bit build
 there.
 
 Every archive's SDK carries the export list of each target build_mod.py
-builds for (sdk/exports.<target>.txt: i386, x86_64-windows, aarch64), so
-it checks every object it makes, not only the one for the game beside it.
+builds for (sdk/exports.<target>.txt: i386, x86_64-windows,
+aarch64-translated, with the Android game's guest-pass tables beside its
+list: TRANSLATION_TABLES), so it checks every object it makes, not only the
+one for the game beside it.
 A game build writes only its own target's list; the others come from those
 targets' game builds of the same tree (their <build>/source, which
 build_game32.py writes, must be this build's): tmp/pc/win32 (or game32),
@@ -72,9 +74,14 @@ FOLDER = {"windows-x64": "-x64"}
 # The mod target each system's game loads (build_mod.py's TARGETS), and the
 # builds another system's archive takes that target's export list from, in
 # the order they are looked in (the 32-bit Windows game's for i386 first).
-MOD_TARGET = {"windows": "i386", "linux": "i386", "windows-x64": "x86_64-windows", "android-arm64": "aarch64"}
-SDK_TARGETS = ("i386", "x86_64-windows", "aarch64")
-EXPORT_BUILDS = {"i386": ["windows", "linux"], "x86_64-windows": ["windows-x64"], "aarch64": ["android-arm64"]}
+MOD_TARGET = {"windows": "i386", "linux": "i386", "windows-x64": "x86_64-windows",
+              "android-arm64": "aarch64-translated"}
+SDK_TARGETS = ("i386", "x86_64-windows", "aarch64-translated")
+EXPORT_BUILDS = {"i386": ["windows", "linux"], "x86_64-windows": ["windows-x64"],
+                 "aarch64-translated": ["android-arm64"]}
+# What build_mod.py also needs of the Android game to build its object (the
+# guest pass's tables, build_game32.write_sdk), beside its export list.
+TRANSLATION_TABLES = ("mod_translation.json", "mod_signatures.json")
 # What the README's Mods section adds for the 64-bit Windows game, before
 # its paragraph on installing mods (tools/pc/release/README.txt).
 X64_MODS = """This is the 64-bit Windows game. A mod that contains code needs a 64-bit
@@ -236,7 +243,8 @@ def sdk_exports(system, exports_from=()):
         others = []
         for folder in export_folders(target, exports_from):
             path = os.path.join(folder, "sdk", f"exports.{target}.txt")
-            if not os.path.isfile(path):
+            if not os.path.isfile(path) or (target == "aarch64-translated" and not all(
+                    os.path.isfile(os.path.join(folder, "sdk", name)) for name in TRANSLATION_TABLES)):
                 continue
             source = read_source(folder)
             if source == own:
@@ -266,6 +274,9 @@ def stage(system, label, exports=None):
     # The other targets' export lists, beside this game's own (sdk_exports).
     for target, path in (exports or {}).items():
         shutil.copyfile(path, os.path.join(folder, "sdk", f"exports.{target}.txt"))
+        if target == "aarch64-translated":
+            for name in TRANSLATION_TABLES:
+                shutil.copyfile(os.path.join(os.path.dirname(path), name), os.path.join(folder, "sdk", name))
     # This build's symbol table, under its build id and under the game
     # fingerprint (the same table): not the ones earlier builds left there.
     with open(os.path.join(build_dir, "buildid")) as handle:

@@ -7,7 +7,7 @@ import tarfile
 import zipfile
 
 # build_mod.py's targets: each has its export list in every SDK.
-TARGETS = ("i386", "x86_64-windows", "aarch64")
+TARGETS = ("i386", "x86_64-windows", "aarch64-translated")
 
 
 def read_member(path, name):
@@ -100,7 +100,8 @@ def check(path):
     # Each code mod beside the game has the object for this game's target,
     # and not another target's.
     objects = [name for name in contents if name.startswith("mods/") and name.endswith(".o")]
-    ours = [name for name in objects if name.endswith(".x86_64-windows.o") == wide and not name.endswith(".aarch64.o")]
+    ours = [name for name in objects if name.endswith(".x86_64-windows.o") == wide
+            and not name.endswith((".aarch64.o", ".aarch64-translated.o"))]
     assert objects and ours == objects, f"mods/ has another target's objects: {sorted(set(objects) - set(ours))}"
     # The SDK's export lists: one per target build_mod.py builds for, so it
     # checks every object it makes (tools/pc/package.py), and for a 32-bit
@@ -110,6 +111,9 @@ def check(path):
         lists.add("sdk/exports.txt")
     assert lists <= contents, f"the SDK lacks export lists: {sorted(lists - contents)}"
     assert {name for name in contents if name.startswith("sdk/exports")} == lists, "the SDK has other export lists"
+    # The Android game's guest-pass tables, for its aarch64-translated object.
+    tables = {"sdk/mod_translation.json", "sdk/mod_signatures.json"}
+    assert tables <= contents, f"the SDK lacks the Android game's tables: {sorted(tables - contents)}"
     shipped = {name: read_member(path, f"{next(iter(roots))}/{name}") for name in sorted(lists)}
     assert all(len(text.split()) > 1000 for text in shipped.values()), "an SDK export list is (nearly) empty"
     if not wide:

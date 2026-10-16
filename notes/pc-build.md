@@ -4621,8 +4621,9 @@ unit with the NDK's clang to IR, runs the guest pass
 (`tools/pc/llvm/guest_ir.cpp`, `llvm_guest.py`) and links `libgame.so` at 0
 (`-Wl,--build-id=sha1`, no `--image-base`); `build_android_translated` in
 `build_game32.py` then links the loader, copies the data mods and the
-language packs, writes the identity files and the SDK's `aarch64` export
-list, and packs the APK as for the fixed game. Guest addresses are
+language packs, builds the code mods through the same pass
+(`build_mod.py --target aarch64-translated`) with the SDK beside them,
+writes the identity files, and packs the APK as for the fixed game. Guest addresses are
 translated, not mapped, so the app needs no fixed host address at all: a
 phone whose Java runtime holds 0x80000000 (the large object space below)
 or 0xC0000000 starts the game all the same.
@@ -4647,12 +4648,25 @@ or 0xC0000000 starts the game all the same.
   fixed game's states for one launch when it loaded elsewhere) is not
   built. The log says `libgame.so at <address> (translated)`: a crash
   address is symbolized as its offset from that.
-- **Code mods are off** in this build (`MEMORIES_NO_CODE_MODS`): the APK
-  carries the data mods and no code mod, so 3D Monsters, Hand Camera, AI
-  Hard Mode and yamyi's code mods are not in the app until translated ELF
-  mods exist (`build_mod.py` and `object_loader.c`, next). The SDK's
-  `exports.aarch64.txt` is this game's export table (`build_arm64.py`'s
-  `mod_exports.c`), which no aarch64 object is loaded against yet.
+- **Code mods** (2026-10-16, [modding.md, "Android code
+  mods"](modding.md#android-code-mods-aarch64-translated)) are
+  `<library>.aarch64-translated.o`: each unit of the mod through the guest
+  pass as the game's are, `-O2 -fPIC`, and a registration pair
+  (`MemoriesModRegisterGlobals`/`MemoriesModUnregisterGlobals`) that
+  `object_loader.c` calls before `MemoriesModInit` and on free. The loader
+  maps the image anywhere above 4 GB (`TRANSLATED_OBJECTS`): the code
+  reaches the game through GOT entries and veneers. `build_arm64.py` writes
+  what a mod is translated with beside the export table:
+  `mod_translation.json` (the aliases, the C library's runtime wrappers,
+  the pinned guest addresses, the pointer-free math the C library lends)
+  and `mod_signatures.json`; the SDK carries both with
+  `exports.aarch64-translated.txt`, and so do the desktop SDKs
+  (`package.py`, the release workflow's `sdk-exports-aarch64-translated`
+  artifact). A `.aarch64.o` of the fixed game stays off with "was built
+  for the fixed-memory Android game: rebuild this mod", whether it has its
+  own name or the new one (the `.memories.abi` tag). The APK carries the
+  four code mods built so: 3D Monsters, Hand Camera, AI Hard Mode and
+  yamyi's.
 - **Toolchain.** The pass is built against LLVM 21.1.8, the version of
   `macos_toolchain.json`. On Linux (CI) `llvm_guest.py` fetches the official
   `LLVM-21.1.8-Linux-X64.tar.xz` (`linux_toolchain.json`, SHA-256 checked)

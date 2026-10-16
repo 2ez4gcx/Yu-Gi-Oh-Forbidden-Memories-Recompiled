@@ -820,6 +820,8 @@ def copy_if_changed(source, destination):
         shutil.copy2(source, destination)
 
 
+TRANSLATION_TABLES = ("mod_translation.json", "mod_signatures.json")
+
 def write_sdk(build, target="i386"):
     """<build>/sdk: what a mod is built against, beside the game."""
     sdk = f"{build}/sdk"
@@ -855,6 +857,14 @@ def write_sdk(build, target="i386"):
     for listed in own:
         with open(f"{sdk}/{listed}", "w") as handle:
             handle.write(names)
+    # The translated game's tables, which build_mod.py puts a mod through
+    # the guest pass with (aarch64-translated: build_arm64.py writes them),
+    # and the desktop SDKs carry too (tools/pc/package.py).
+    for name in TRANSLATION_TABLES:
+        if target == "aarch64-translated":
+            copy_if_changed(f"{build}/{name}", f"{sdk}/{name}")
+        elif os.path.exists(f"{sdk}/{name}"):
+            os.remove(f"{sdk}/{name}")   # from a build folder used for the Android game before
     for path in glob.glob(f"{sdk}/exports*.txt"):
         if os.path.basename(path) not in own:
             os.remove(path)   # another target's, in a folder reused for this one
@@ -935,9 +945,9 @@ def build_android_translated(options):
     build_arm64.py --target android-arm64-translated compiles the game
     through the guest pass (tools/pc/llvm_guest.py) and links libgame.so at
     0 (notes/pc-build.md, "Android arm64"); here the loader, the data mods,
-    the language packs, the SDK's export list, the identity files and the
-    APK, as for the fixed game. Code mods are not built: the translated game
-    loads none yet (MEMORIES_NO_CODE_MODS, tools/pc/guest_build.py)."""
+    the language packs, the identity files and the APK, as for the fixed
+    game, and the code mods through the same guest pass (build_mod.py
+    --target aarch64-translated) with the SDK that builds them."""
     command = [sys.executable, os.path.join(ROOT, "tools/pc/build_arm64.py"), "--target", "android-arm64-translated",
                "--build", options.build, *(["--release"] if options.release else [])]
     print("Android arm64: the translated game (" + " ".join(command[1:]) + ")", flush=True)
@@ -946,11 +956,7 @@ def build_android_translated(options):
                  f"{options.build}/logs)")
     output = f"{options.build}/libgame.so"
     link_android_loader(options.build, output, translated=True)
-    build_mods(options.build, options.release, code=False)
-    # What this game lends a mod, for the desktop SDKs' aarch64 list
-    # (tools/pc/package.py, the release workflow), from build_arm64.py's
-    # table. The translated game loads no aarch64 object yet.
-    write_sdk(options.build, "aarch64")
+    build_mods(options.build, options.release, target="aarch64-translated")
     copy_languages(options.build, options.release)
     build_id = write_build_identity(options.build, output, lambda kind, address: kind in "Tt")
     package_android_build(options.build, output, build_id)

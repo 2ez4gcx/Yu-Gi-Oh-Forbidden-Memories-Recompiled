@@ -102,7 +102,11 @@ To install someone else's mod, put its folder in the "mods" folder of your
 user folder. A mod that contains code runs as part of the game, so only
 install mods from people you trust. Mod authors: see sdk/notes/modding.md,
 sdk/examples/mods and sdk/tools (build_mod.py builds a code mod;
-extract_images.py and upscale_pack.py make texture packs).
+extract_images.py and upscale_pack.py make texture packs). A code mod for
+the Android app is built through the game's guest pass (build_mod.py
+--target aarch64-translated, with clang 21 or older and memories-guest-ir;
+sdk/notes/modding.md, "Android code mods"); a mod built for the Android
+game before it (<name>.aarch64.o) needs building again.
 
 
 Languages

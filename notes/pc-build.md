@@ -2978,7 +2978,19 @@ bit-identical. How (details in `src/pc/guest/state.h`):
     moves, and a variables chunk shorter than the section (a state from
     before) restores the part it has. The other way round, an older build says the
     game's variables "do not match this build" and leaves them out: the
-    state loads, but play does not go on as saved.
+    state loads, but play does not go on as saved. Issue #229 was the same
+    gap in Build Deck: its two panes lie side by side and the screen slides
+    between them by `gGraphics_sViewportX` (`.sbss`), so a state saved in
+    the Chest and loaded after going over to the Deck brought back the
+    Chest's pane and cursor but left the view on the Deck: the picture
+    stood still while the Chest's cursor moved off the screen, until the
+    next slide between the panes. Reproduced on v0.2.0 (F5, Right, F7) and
+    on the commit before the fix; `tests/pc/state_load_build_deck_e2e.py`
+    checks it on the Build Deck screen of the main menu and the one before
+    a duel (frame hashes and pictures after the load, against a load made
+    at once; a local gate, as it needs the disc). Small-data variables are
+    not at their retail addresses in the Windows build, so `yfm_control`'s
+    `peek` by those names reads the wrong bytes there.
   Not reproduced bit for bit: the SPU mixer's state (`spu`, `libspu`) and the
   sound driver's work area, which the mixer thread updates in real time (as
   between any two runs).

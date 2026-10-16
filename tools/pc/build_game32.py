@@ -945,6 +945,12 @@ def main():
                         "tmp/pc/win32" if WINDOWS and sys.platform != "win32" else
                         f"tmp/pc/android-{ANDROID_ABI}" if ANDROID else "tmp/pc/game32")
     options = parser.parse_args()
+    # Forward slashes, as build.py on Windows hands over str(Path) with
+    # backslashes: the object paths below are this folder plus "/obj/...",
+    # and the Android build's `nm -A` check matches llvm-nm's listing against
+    # them, where a backslash comes back doubled ("tmp\\pc\\x/obj/...").
+    if os.sep == "\\":
+        options.build = options.build.replace("\\", "/")
     # Android's GLES has none of desktop GL's fixed function, which the
     # present pass and sdl.c's GL presenter call: that path is never taken
     # there (Platform_HasDesktopGL), and gl_desktop_none.c stands in for it.
@@ -1167,7 +1173,11 @@ def main():
         # the file each symbol came from at the head of its line.
         weaken, objects = {}, {obj(s) for s in game}
         for line in run([NM, "-A", "-g", "--defined-only", *sorted(objects)]).splitlines():
-            path, _, rest = line.partition(":")
+            # The file, then ":" and the address (GNU nm writes no space after
+            # the colon, llvm-nm one): the last such colon, since a Windows
+            # path's drive has one too.
+            found = re.match(r"(.*):\s*[0-9A-Fa-f]+\s", line)
+            path, rest = (found.group(1), line[found.end(1) + 1:]) if found else (line, "")
             if path not in objects:
                 sys.exit(f"{NM} -A named an object the build does not know: {line}")
             if rest.split() and c_name(rest.split()[-1]) in set_overridden:

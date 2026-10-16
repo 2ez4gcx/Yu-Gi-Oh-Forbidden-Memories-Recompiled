@@ -380,7 +380,8 @@ static void frame_color_override_wins_over_type(void)
     CHECK(!strcmp(CardLayout_FramePath(), "/mods/x/frame_trap.png"));
 }
 
-/* A global default supplies the final non-retail fallback. */
+/* "frame_styles", "frame_for" and "default_style" (card_layout.h's
+ * CardLayoutFrameStyle): the names the whole feature is built on. */
 static const char *const STYLES_MANIFEST =
     "{\"id\": \"x\", \"card_layout\": {"
     "\"frame_styles\": {"
@@ -390,6 +391,14 @@ static const char *const STYLES_MANIFEST =
         "\"orange\": {\"image\": \"orange.png\", \"hand_color\": \"orange\"},"
         "\"blue\": {\"image\": \"blue.png\", \"hand_color\": \"blue\"},"
         "\"godly\": {\"image\": \"god.png\", \"hand_color\": \"purple\", \"width\": 150, \"height\": 200}},"
+    "\"frame_for\": ["
+        "{\"tag\": \"god\", \"style\": \"godly\"},"
+        "{\"class\": \"ritual_spell\", \"style\": \"blue\", \"setting\": \"ritual_own_frame\"},"
+        "{\"class\": \"ritual_spell\", \"style\": \"green\"},"
+        "{\"class\": \"effect_monster\", \"style\": \"orange\"},"
+        "{\"class\": \"spell\", \"style\": \"green\"},"
+        "{\"class\": \"equip\", \"style\": \"green\"},"
+        "{\"class\": \"trap\", \"style\": \"pink\"}],"
     "\"default_style\": \"gold\"}}";
 
 static void add_styles_mod(int own_ritual_frame)
@@ -416,15 +425,15 @@ static void styles_by_class(void)
     add_styles_mod(0);
     CHECK(style_of(1, "/mods/x/gold.png") == CARD_FRAME_MONSTER);
     fake_effects[2] = 1;
-    CHECK(style_of(2, "/mods/x/gold.png") == CARD_FRAME_MONSTER);
+    CHECK(style_of(2, "/mods/x/orange.png") == CARD_FRAME_ORANGE);
     fake_card_type[3] = CARD_TYPE_MAGIC;
-    CHECK(style_of(3, "/mods/x/gold.png") == CARD_FRAME_MONSTER);
+    CHECK(style_of(3, "/mods/x/green.png") == CARD_FRAME_MAGIC);
     fake_card_type[4] = CARD_TYPE_EQUIP;
-    CHECK(style_of(4, "/mods/x/gold.png") == CARD_FRAME_MONSTER);
+    CHECK(style_of(4, "/mods/x/green.png") == CARD_FRAME_MAGIC);
     fake_card_type[5] = CARD_TYPE_TRAP;
-    CHECK(style_of(5, "/mods/x/gold.png") == CARD_FRAME_MONSTER);
+    CHECK(style_of(5, "/mods/x/pink.png") == CARD_FRAME_TRAP);
     fake_card_type[6] = CARD_TYPE_RITUAL;
-    CHECK(style_of(6, "/mods/x/gold.png") == CARD_FRAME_MONSTER);
+    CHECK(style_of(6, "/mods/x/green.png") == CARD_FRAME_MAGIC);   /* anime: a ritual spell is green */
     CHECK(CardLayout_IsSpell());                                    /* and laid out as a spell */
     CHECK(notes == 0);
 }
@@ -435,7 +444,7 @@ static void styles_by_tag_and_size(void)
     add_styles_mod(0);
     fake_tag[1][0] = 'g'; fake_tag[1][1] = 'o'; fake_tag[1][2] = 'd';
     fake_effects[1] = 1;   /* a god with effects: the tag rule comes first */
-    CHECK(style_of(1, "/mods/x/gold.png") == CARD_FRAME_MONSTER);
+    CHECK(style_of(1, "/mods/x/god.png") == CARD_FRAME_PURPLE);
     CHECK(!CardLayout_IsSpell());
     CHECK(CardLayout_Part(CARD_LAYOUT_FRAME).w == 140 && CardLayout_Part(CARD_LAYOUT_FRAME).h == 196);
 }
@@ -445,22 +454,21 @@ static void styles_rule_setting(void)
     reset();
     add_styles_mod(1);
     fake_card_type[1] = CARD_TYPE_RITUAL;
-    CHECK(style_of(1, "/mods/x/gold.png") == CARD_FRAME_MONSTER);
+    CHECK(style_of(1, "/mods/x/blue.png") == CARD_FRAME_RITUAL);   /* the sub-option on: its own frame */
     CHECK(CardLayout_IsSpell());
     reset();
     add_styles_mod(0);
     fake_card_type[1] = CARD_TYPE_RITUAL;
-    CHECK(style_of(1, "/mods/x/gold.png") == CARD_FRAME_MONSTER);
+    CHECK(style_of(1, "/mods/x/green.png") == CARD_FRAME_MAGIC);   /* off: the next rule */
 }
 
 static void styles_card_frame_and_default(void)
 {
     reset();
     add_styles_mod(0);
-    /* A color-named style is lower priority than the global default. */
-    fake_frame_color[1] = CARD_FRAME_ORANGE;
-    CHECK(style_of(1, "/mods/x/gold.png") == CARD_FRAME_MONSTER);
-    fake_frame_color[2] = CARD_FRAME_PURPLE;   /* no "purple" style: global default */
+    fake_frame_color[1] = CARD_FRAME_ORANGE;   /* a cards mod's "frame": Orange, on a plain monster */
+    CHECK(style_of(1, "/mods/x/orange.png") == CARD_FRAME_ORANGE);
+    fake_frame_color[2] = CARD_FRAME_PURPLE;   /* no "purple" style: the rules, then the default */
     CHECK(style_of(2, "/mods/x/gold.png") == CARD_FRAME_MONSTER);
     CHECK(notes == 0);
 }
@@ -479,7 +487,8 @@ static void styles_card_named_frame(void)
 }
 
 /* Type is more specific than kind, and an explicit card style is stronger
- * than either; the global default is the final non-retail fallback. */
+ * than either; both win over a color-named style and frame_for rules, and
+ * the global default is the final non-retail fallback. */
 static void styles_by_default_kind_and_type(void)
 {
     reset();
@@ -526,8 +535,8 @@ static void styles_by_default_kind_and_type(void)
             1, "full_bleed", 1);
     CHECK(!CardLayout_StyleOf(1, &(CardLayoutStyle){0}));
 
-    /* The color-named style remains available only after every configured
-     * default tier is absent. A global default is stronger than it. */
+    /* A color-named style (the released order) still wins over the global
+     * default, though no longer over a type or kind default. */
     reset();
     add_mod("x", "/mods/x",
             "{\"id\": \"x\", \"card_layout\": {\"frame_styles\": {"
@@ -536,7 +545,8 @@ static void styles_by_default_kind_and_type(void)
             "\"default_style\": \"global\"}}",
             1, "full_bleed", 1);
     fake_frame_color[1] = CARD_FRAME_PURPLE;
-    CHECK(style_of(1, "/mods/x/global.png") == CARD_FRAME_MONSTER);
+    CHECK(style_of(1, "/mods/x/purple.png") == CARD_FRAME_PURPLE);
+    CHECK(style_of(2, "/mods/x/global.png") == CARD_FRAME_MONSTER);
     reset();
     add_mod("x", "/mods/x",
             "{\"id\": \"x\", \"card_layout\": {\"frame_styles\": {"

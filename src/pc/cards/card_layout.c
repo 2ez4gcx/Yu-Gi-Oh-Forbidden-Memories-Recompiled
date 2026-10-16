@@ -312,6 +312,23 @@ static void note_once(const LayoutSource *source, const char *what, const char *
     Mods_Note(Mods_Id(source->mod), "card_layout: %s \"%s\"", what, name);
 }
 
+/* Whether a "frame_for" rule applies to `card`: every condition it names
+ * ("class", "tag") holds, and its "setting" (a bool the mod declares), if
+ * any, is on. A rule that names none applies to every card. Released layouts
+ * (v0.3.0's Forbidden Memories HD pack, tools/pc/anime_frame_layout.py) pick
+ * their per-class styles with these rules, so they stay supported. */
+static int rule_applies(const LayoutSource *source, const JsonValue *rule, int card, int cls)
+{
+    const char *key = Json_String(Json_Member(rule, "setting"), NULL);
+    const char *text;
+    if (key && !Mods_Setting(Mods_Id(source->mod), key, 0)) return 0;
+    text = Json_String(Json_Member(rule, "class"), NULL);
+    if (text && strcmp(text, Cards_ClassName(cls))) return 0;
+    text = Json_String(Json_Member(rule, "tag"), NULL);
+    if (text && !Cards_HasTag(card, text)) return 0;
+    return 1;
+}
+
 /* `default_styles.kinds` is deliberately friendlier than the internal class
  * names: "monster" includes ordinary and effect monsters; "magic" and
  * "ritual" are accepted alongside their precise class spellings.  A precise
@@ -365,6 +382,7 @@ static int resolve_style(const LayoutSource *source, int card, CardLayoutFrameSt
     const JsonValue *styles = Json_Member(source->layout, "frame_styles");
     const JsonValue *style = NULL, *hand;
     const char *name = NULL, *image;
+    const JsonValue *rule;
     int override = Cards_FrameOverride(card);
     const char *card_style = Cards_FrameStyle(card);
 
@@ -405,14 +423,18 @@ static int resolve_style(const LayoutSource *source, int card, CardLayoutFrameSt
         return 1;
     }
     /* Resolve every presentation consistently: an explicit card assignment,
-     * then its printed type, broad kind, global default, the legacy
-     * color-named style, and finally retail.  frame_for rules deliberately
-     * do not participate in this newer style-selection chain. */
+     * then its printed type and broad kind (default_styles), then the
+     * released order -- a style named for the card's "frame" color, the
+     * first "frame_for" rule that applies, the global default -- and
+     * finally retail. */
     if (card_style && *card_style) name = card_style;
     if (!name) name = default_style_for_type(source->layout, card);
     if (!name) name = default_style_for_kind(source->layout, cls);
-    if (!name) name = Json_String(Json_Member(source->layout, "default_style"), NULL);
     if (!name && override >= 0 && Json_Member(styles, color_names[override])) name = color_names[override];
+    for (rule = Json_At(Json_Member(source->layout, "frame_for"), 0); !name && rule; rule = Json_Next(rule)) {
+        if (rule_applies(source, rule, card, cls)) name = Json_String(Json_Member(rule, "style"), NULL);
+    }
+    if (!name) name = Json_String(Json_Member(source->layout, "default_style"), NULL);
     if (!name || !*name) return 0;
     style = Json_Member(styles, name);
     if (!style) {

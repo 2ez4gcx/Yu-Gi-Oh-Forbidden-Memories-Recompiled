@@ -1130,9 +1130,17 @@ disagree. Three keys say it:
   image keep the retail full-card frame.
 - A card entry's `"frame_style"` may name any style directly. It is the
   strongest choice; the full order is explicit card style, printed type,
-  kind, `default_style`, a style named for the card's six-color `"frame"`,
-  then retail. This lets a cards mod opt into a new frame without using a tag
-  as an implementation detail. `null` clears an inherited named style.
+  kind, a style named for the card's six-color `"frame"`, the first
+  `frame_for` rule that applies, `default_style`, then retail. This lets a
+  cards mod opt into a new frame without using a tag as an implementation
+  detail. `null` clears an inherited named style.
+- `frame_for`: a list of rules, the first that applies to a card wins. A rule
+  says `"style"` and, to limit it, any of `"class"` (what the card is, below),
+  `"tag"` (one of the card's [`tags`](more-cards.md#tags)) and `"setting"` (a
+  `bool` the mod declares: the rule counts only while it is on, which is how a
+  player gets a sub-option in the Mods window). A rule that names none applies
+  to every card. Released layouts (Forbidden Memories HD) use these rules;
+  `default_styles` below wins over them.
 - `default_styles`: defaults for cards that have no explicit card style. Its optional
   `kinds` object assigns a style to `monster`, `effect_monster`, `magic`
   (also accepted as `spell`), `equip`, `ritual` (also `ritual_spell`) or
@@ -1179,10 +1187,6 @@ was, which is a deliberate, supported look (a mod may want the art and stats
 floating with no backing). The PNG is stretched to the texture's own
 resolution regardless of its native size, the same rule a `title` mod's
 `image` follows.
-
-`frame_for` rules are not a selector for `frame_styles`. Use an explicit
-card `frame_style` or the `default_styles` tiers above instead; this keeps one
-documented resolution order across the viewer, hand, field and Library.
 
 Whatever size the source art is, it lands on a fixed 177x254 texture
 (`src/pc/cards/card_layout_art.c`'s `FRAME_W`/`FRAME_H`, the largest size

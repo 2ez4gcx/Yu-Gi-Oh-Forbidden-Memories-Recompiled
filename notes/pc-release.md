@@ -93,7 +93,9 @@ Android packaging, so a fork can make the Mac artifact without Android release
 secrets. Manual runs only make Actions artifacts. The workflow must already exist on
 the default branch with `workflow_dispatch`; select the support branch in the
 Branch dropdown. See [GitHub manual workflow instructions](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/manually-run-a-workflow). The `android` job builds the
-arm64 APK and, with the release key (pushes, tags and manual runs; "Android
+arm64 APK (the translated game: it fetches the official LLVM 21.1.8 Linux
+archive once, cached as `tmp/pc/llvm-linux`, for the guest pass; notes/pc-build.md,
+"The app's game is the translated one") and, with the release key (pushes, tags and manual runs; "Android
 signing" below), uploads it signed as
 `yfm-redecomp-<version>-android-arm64.apk`. On a version tag, all jobs must
 succeed before the final job creates a **draft** GitHub release and attaches

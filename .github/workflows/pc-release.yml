@@ -332,7 +332,7 @@ jobs:
   android:
     if: github.event_name != 'workflow_dispatch' || inputs.platform != 'macos-arm64'
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 90
     env:
       # Whether this run signs with the release key; the secrets themselves
       # are handed only to the step that uses them. The rule: a push to
@@ -366,7 +366,7 @@ jobs:
       # NDK added; ANDROID_NDK_ROOT is set to it, over the image's default.
       - name: Android SDK and NDK
         run: |
-          sudo apt-get update && sudo apt-get install --yes --no-install-recommends cmake ninja-build
+          sudo apt-get update && sudo apt-get install --yes --no-install-recommends cmake ninja-build zlib1g-dev libzstd-dev
           sdkmanager="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
           # Its progress bars fill the log: kept aside, and shown when it fails.
           if ! "$sdkmanager" --install "ndk;$ANDROID_NDK_VERSION" "build-tools;$ANDROID_BUILD_TOOLS" "platforms;$ANDROID_PLATFORM" > "$RUNNER_TEMP/sdkmanager.log" 2>&1; then
@@ -386,6 +386,14 @@ jobs:
             tmp/pc/android-deps/arm64-v8a
             tmp/pc/android-deps/java
           key: release-android-${{ env.ANDROID_NDK_VERSION }}-${{ hashFiles('tools/pc/build_android_deps.py', 'tools/pc/build_linux_sysroot.py', 'tools/pc/build_win32_deps.py', 'tools/pc/fetch_tools.py') }}
+      # LLVM 21.1.8's libraries and llvm-config, which the translated game's
+      # guest pass is built against (tools/pc/llvm_guest.py, linux_llvm: the
+      # official archive's parts it needs, about 440 MB of its 2 GB).
+      - name: Cache LLVM for the guest pass
+        uses: actions/cache@v4
+        with:
+          path: tmp/pc/llvm-linux
+          key: release-llvm-linux-${{ hashFiles('tools/pc/linux_toolchain.json') }}
       - name: Archive version
         env:
           REF_TYPE: ${{ github.ref_type }}
@@ -408,6 +416,9 @@ jobs:
           else
             echo "::notice title=Android::no release key in this run (only pushes and manual runs on master or a v* tag are signed, with the ANDROID_KEYSTORE_BASE64 and ANDROID_KEYSTORE_PASSWORD secrets): the APK is built as a check, signed with a debug key, and not uploaded"
           fi
+      # The APK's game is the translated one (build_game32.py runs
+      # build_arm64.py --target android-arm64-translated; notes/pc-build.md,
+      # "Android arm64"): no fixed host address on the phone.
       # The build (the NDK, cmake, the dependencies' downloaded sources) runs
       # with no secret in its environment. It signs with the debug key; the
       # next step signs again with the release key.

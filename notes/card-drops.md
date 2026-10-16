@@ -23,6 +23,9 @@ player's own value is not touched: it stays saved as `card_drops`, and
 when the mod is removed (a restart, as for every `limits` key) the menu and
 the duels have it back.
 
+- **A tower duel** whose tower sets `drops` gives the tower's count, not
+  this lock: inside the tower its value wins ([Tower mode](tower-mode.md),
+  `drops`; `tests/pc/tower/tower_e2e.py --only drops_lock`).
 - **Several mods** that set it: the one applied later wins, as for every
   `limits` key (the mods' load order, [When mods
   overlap](modding.md#when-mods-overlap)). The mod whose different number

@@ -92,9 +92,14 @@ int TexturePack_BankEntryLevelFor(int entry, int scale);
 int TexturePack_BankKeyLive(unsigned key);
 unsigned TexturePack_BankGeneration(void);
 enum { TEXTURE_BANK_OWNER_STARS = 1, TEXTURE_BANK_OWNER_LAYOUT_FRAME, TEXTURE_BANK_OWNER_LAYOUT_DIGITS,
-       TEXTURE_BANK_OWNER_DUEL_UI, TEXTURE_BANK_OWNER_TYPE_ICONS, TEXTURE_BANK_OWNER_ATTRIBUTE_ICONS };
+       TEXTURE_BANK_OWNER_DUEL_UI, TEXTURE_BANK_OWNER_TYPE_ICONS, TEXTURE_BANK_OWNER_ATTRIBUTE_ICONS,
+       TEXTURE_BANK_OWNER_LAYOUT_BACK };
 void TexturePack_BankSpritesUseOwner(unsigned owner);
 void TexturePack_BankSpritesClear(unsigned owner);
+/* Drops the decoded copy of `file` the bank sprites kept (or its cached failure)
+ * when no sprite shows it any more, so a PNG changed on disk is read again.
+ * One a sprite still shows is left alone. */
+void TexturePack_BankImageForget(const char *file);
 
 /* For a renderer that samples the pack's images itself, at their own
  * resolution (gl_picture.c). The entry (its index + 1) whose image replaces

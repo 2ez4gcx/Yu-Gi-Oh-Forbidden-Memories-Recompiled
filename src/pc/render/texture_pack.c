@@ -248,6 +248,19 @@ void TexturePack_BankImagePreload(const char *file)
     bank_trim();
 }
 
+void TexturePack_BankImageForget(const char *file)
+{
+    int i;
+    if (!file) return;
+    for (i = 0; i < bank_image_count; i++) {
+        if (strcmp(bank_images[i]->file, file) || bank_images[i]->users) continue;
+        bank_free(bank_images[i]);
+        bank_images[i] = bank_images[--bank_image_count];
+        if (!bank_image_count) { free(bank_images); bank_images = NULL; }
+        return;
+    }
+}
+
 void TexturePack_BankSpritesUseOwner(unsigned owner) { bank_sprite_owner = owner; }
 
 void TexturePack_BankSpritesClear(unsigned owner)

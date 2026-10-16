@@ -4,22 +4,86 @@ import functools
 import hashlib
 import json
 import shlex
+import os
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 OUT = ROOT / "tmp/pc/guest-compiler"
 CONFIG = Path(__file__).with_name("macos_toolchain.json")
+LINUX_CONFIG = Path(__file__).with_name("linux_toolchain.json")
 
 
 class TranslationError(ValueError):
     pass
 
 
+def host_llvm():
+    """A pinned LLVM built on this host (MEMORIES_GUEST_LLVM: a build or install
+    folder with bin/llvm-config), for hosts without an official archive
+    (Windows), or to use another copy of the same version."""
+    folder = os.environ.get("MEMORIES_GUEST_LLVM")
+    return Path(folder) if folder else None
+
+
+# What the pass (host_compiler) is built from in the official Linux x86-64
+# archive (linux_toolchain.json): llvm-config, the headers and the static
+# libraries, about 440 MB of its 2 GB; the rest (clang, lld, the tools) is
+# never unpacked.
+LINUX_PARTS = ("bin/llvm-config", "include/llvm/", "include/llvm-c/", "lib/libLLVM")
+
+
+def linux_llvm(version):
+    """The official LLVM release for Linux x86-64 (the release workflow's
+    Android job), fetched and checked by its SHA-256 the first time, of which
+    only LINUX_PARTS is unpacked, into tmp/pc/llvm-linux."""
+    config = json.loads(LINUX_CONFIG.read_text())
+    if config["version"] != version:
+        raise RuntimeError(f"{LINUX_CONFIG.name} pins LLVM {config['version']}, {CONFIG.name} {version}")
+    top = config["archive"][: -len(".tar.xz")]
+    folder = ROOT / "tmp/pc/llvm-linux" / top
+    if not (folder / "bin/llvm-config").is_file():
+        import shutil
+        import tarfile
+        from fetch_tools import download
+
+        archive = download(config["url"], config["sha256"])
+        staging = folder.parent / (top + ".part")
+        shutil.rmtree(staging, ignore_errors=True)
+        # As a stream: one pass through the archive, each part as it comes.
+        with tarfile.open(archive, "r|xz") as bundle:
+            for member in bundle:
+                head, _, relative = member.name.partition("/")
+                if head != top or not (member.isfile() or member.issym()) or not relative.startswith(LINUX_PARTS):
+                    continue
+                member.name = relative
+                if hasattr(tarfile, "data_filter"):
+                    bundle.extract(member, staging, filter="data")
+                else:
+                    bundle.extract(member, staging)
+        shutil.rmtree(folder, ignore_errors=True)
+        staging.replace(folder)
+        os.remove(archive)  # 2 GB, and the unpacked parts are all that is used
+    version_found = subprocess.check_output([str(folder / "bin/llvm-config"), "--version"], text=True).strip()
+    if version_found != version:
+        raise RuntimeError(f"Expected LLVM {version}, found {version_found}")
+    return folder
+
+
 @functools.lru_cache(maxsize=1)
 def toolchain():
     config = json.loads(CONFIG.read_text())
+    if host_llvm():
+        folder = host_llvm()
+        config_tool = folder / ("bin/llvm-config" + (".exe" if sys.platform == "win32" else ""))
+        version = subprocess.check_output([str(config_tool), "--version"], text=True).strip()
+        if version != config["version"]:
+            raise RuntimeError(f"Expected LLVM {config['version']}, found {version}")
+        return folder
+    if sys.platform.startswith("linux"):
+        return linux_llvm(config["version"])
     folder = ROOT / "tmp/pc/llvm-macos" / ("LLVM-" + config["version"] + "-macOS-ARM64")
     if not (folder / "bin/llvm-config").is_file():
         from fetch_tools import download, unpack
@@ -39,8 +103,10 @@ def toolchain():
 @functools.lru_cache(maxsize=1)
 def compiler():
     OUT.mkdir(parents=True, exist_ok=True)
-    binary = OUT / "memories-guest-ir"
+    binary = OUT / ("memories-guest-ir" + (".exe" if sys.platform == "win32" else ""))
     source = ROOT / "tools/pc/llvm/guest_ir.cpp"
+    if host_llvm() or sys.platform.startswith("linux"):
+        return host_compiler(binary, source)
     deps_source = Path(__file__).with_name("macos_deps.py")
     llvm = toolchain()
     llvm_config = subprocess.check_output(
@@ -119,6 +185,42 @@ def compiler():
         return binary
     # Publish a complete executable: parallel runners can still use the old
     # compiler while another process rebuilds it for the same fingerprint.
+    with tempfile.TemporaryDirectory(dir=OUT) as temporary:
+        staged = Path(temporary) / binary.name
+        subprocess.run([*command[:-1], str(staged)], check=True)
+        staged.replace(binary)
+    stamp.write_text(fingerprint + "\n")
+    return binary
+
+
+def host_compiler(binary, source):
+    """The pass built with this host's C++ compiler (MEMORIES_GUEST_CXX, else
+    c++: on Linux the system's g++, whose libstdc++ the official archive's
+    libraries are built against) and MEMORIES_GUEST_LLVM or the official
+    Linux archive (linux_llvm): the same source and LLVM version as on macOS.
+    On Linux the archive's --system-libs want zlib and zstd (zlib1g-dev,
+    libzstd-dev)."""
+    llvm = toolchain()
+    config_tool = llvm / ("bin/llvm-config" + (".exe" if sys.platform == "win32" else ""))
+    llvm_config = subprocess.check_output(
+        [str(config_tool), "--cxxflags", "--ldflags", "--libs", "core", "irreader",
+         "passes", "support", "--system-libs"],
+        text=True,
+    )
+    cxx = os.environ.get("MEMORIES_GUEST_CXX", "c++")
+    command = [cxx, str(source), *shlex.split(llvm_config.replace("\\", "/")), "-O2",
+               *(["-static"] if sys.platform == "win32" else []), "-o", str(binary)]
+    fingerprint = hashlib.sha256(json.dumps({
+        "source": hashlib.sha256(source.read_bytes()).hexdigest(),
+        "memory_map": hashlib.sha256((ROOT / "src/pc/memory_map.h").read_bytes()).hexdigest(),
+        "config": hashlib.sha256(CONFIG.read_bytes()).hexdigest(),
+        "linux_config": hashlib.sha256(LINUX_CONFIG.read_bytes()).hexdigest(),
+        "driver": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
+        "command": command,
+    }, sort_keys=True).encode()).hexdigest()
+    stamp = OUT / "compiler.fingerprint"
+    if binary.is_file() and stamp.is_file() and stamp.read_text().strip() == fingerprint:
+        return binary
     with tempfile.TemporaryDirectory(dir=OUT) as temporary:
         staged = Path(temporary) / binary.name
         subprocess.run([*command[:-1], str(staged)], check=True)

@@ -65,7 +65,18 @@ def maps():
     return result
 
 
+ANDROID_API = 24
+
+
 def darwin_flags(sdk):
+    """Target flags: Darwin with an SDK path, Android arm64 when sdk is None
+    (build_arm64.py --target android-arm64-translated). -fsigned-char: MIPS and Darwin's char is
+    signed, Linux AArch64's is not."""
+    if sdk is None:
+        # Code mods stay off: an app cannot load a library from its data
+        # folder (targetSdk 29+), and no translated ELF mod format exists yet.
+        return [f"--target=aarch64-linux-android{ANDROID_API}", "-fPIC", "-fsigned-char",
+                "-DMEMORIES_NO_CODE_MODS"]
     return ["-isysroot", str(sdk), f"-mmacosx-version-min={MACOS_MINIMUM}"]
 
 
@@ -84,6 +95,9 @@ def guest_frontend_flags(sdk):
         "-DMEMORIES_TRANSLATED",
         "-D_LANGUAGE_C",
         "-DLANGUAGE_C",
-        "-D_DARWIN_C_SOURCE",
+        *(["-D_DARWIN_C_SOURCE"] if sdk is not None else [
+            "-I" + str(ROOT / "src/pc/compat/android"),
+            "-include", str(ROOT / "src/pc/compat/android/android_compat.h"),
+        ]),
         "-I" + str(ROOT / "src"),
     ]

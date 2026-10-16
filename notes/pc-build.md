@@ -4602,6 +4602,58 @@ audio, or assembly-replacement equivalence claim is made by these checks.
 
 ## Android arm64 (A1/A2, 2026-10-03)
 
+### The translated game for arm64 (2026-10-16)
+
+`tools/pc/build_arm64.py --target android-arm64-translated` builds the
+game on the **translated** backend, the macOS memory model: it compiles
+every unit with the NDK's clang to IR, runs the guest pass
+(`tools/pc/llvm/guest_ir.cpp`, `llvm_guest.py`) and links `libgame.so` at 0
+(`-Wl,--build-id=sha1`, no `--image-base`) in
+`tmp/pc/android-arm64-translated`. Guest addresses are translated, not
+mapped, so this game needs no fixed host address at all: a process whose
+Java runtime holds 0x80000000 (the large object space below) or
+0xC0000000 runs it all the same. The device runner
+(`tools/pc/android/runner.c`, `device_run.py`) opens a library linked at 0
+with a plain `dlopen`.
+
+- **Fixed requests** (`compat/mman.h`): in any `MEMORIES_TRANSLATED` build
+  (macOS, Android) `mmap` with `MAP_FIXED_NOREPLACE` is
+  `Memories_TranslatedMmap` (`translated_mman.c`): host memory anywhere,
+  registered with the runtime at the guest address asked for. The text
+  arena (0x9C000000), low memory (0x9E000000) and the interpreter stack
+  (0x9FF00000) go that way, as on macOS; before, on Android they were raw
+  fixed mappings that the runtime did not know, so a held range broke the
+  translations and the interpreter stack. Linux's own flag value is kept.
+- **Save states** name the game by its GNU build ID (`translated_state_backend.c`,
+  `dl_iterate_phdr`) and are relocated to where it is loaded, so they carry
+  from one launch to the next; `check_load_bias` (`android.c`, which kept a
+  fixed game's states for one launch when it loaded elsewhere) is not
+  built. The log says `libgame.so at <address> (translated)`: a crash
+  address is symbolized as its offset from that.
+- **Code mods are off** in this build (`MEMORIES_NO_CODE_MODS`) until
+  translated ELF mods exist (`build_mod.py` and `object_loader.c`).
+- **Toolchain.** The pass is built against LLVM 21.1.8, the version of
+  `macos_toolchain.json`. On Linux (CI) `llvm_guest.py` fetches the official
+  `LLVM-21.1.8-Linux-X64.tar.xz` (`linux_toolchain.json`, SHA-256 checked)
+  and unpacks only `llvm-config`, the headers and the static libraries
+  (about 440 MB of 2 GB) into `tmp/pc/llvm-linux`; the system's `g++`
+  builds the pass (zlib1g-dev and libzstd-dev for `--system-libs`). On
+  Windows there is no official archive with the libraries:
+  `MEMORIES_GUEST_LLVM` names a local LLVM 21.1.8 build or install folder
+  (one whose `llvm-config` finds its headers under `include/` and its
+  libraries under `lib/`) and `MEMORIES_GUEST_CXX` the C++ compiler
+  (llvm-mingw's `clang++`, linked `-static`). The NDK's clang emits the IR.
+- **Test build hooks.** `build_arm64.py` adds `MEMORIES_TEST_HOOKS` to an
+  Android build without `--release`, as `build_game32.py` does.
+  `MEMORIES_TEST_HOLD_GUEST=1` holds 2 MiB of host memory at 0x80000000
+  named as ART's large object space, as image.c's does for the fixed game;
+  the translated game starts all the same. Its value can list several
+  addresses, 2 MiB held at each: `0x80000000,0x9C000000,0x9E000000,0x9FF00000`
+  also holds the text arena, low memory and the interpreter stack, which
+  it then takes elsewhere (the fixed requests above) without a word in the
+  log. The device runner's `MEMORIES_RUNNER_HOLD_LOW` holds
+  0x7C000000-0x9C000000 the same way.
+
 `--target android-arm64-v8a` builds libgame.so with G32
 pointers (`WIDE` in build_game32.py: the windows-x64 flags), clang's
 `-mharden-sls=blr` thunks in AArch64 form (`branch_thunks.c`; the build

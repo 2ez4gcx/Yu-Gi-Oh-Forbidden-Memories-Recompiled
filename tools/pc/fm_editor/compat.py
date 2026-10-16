@@ -19,7 +19,7 @@ from pathlib import Path
 from .gamedata import FRAME_COLOR_NAMES, TYPE_MAGIC
 from .model import type_named
 
-HOST_API = 17
+HOST_API = 18
 
 # The release each mod API first shipped in, for the hints. An API past the
 # last listed is newer than every release.
@@ -228,7 +228,41 @@ def features(manifest: dict, project=None) -> list:
             add(17, "a disc duelist's bust in the campaign (\"replace_bust\")")
     if _named_expression(manifest.get("tower")):
         add(17, "a story's character by its bust's expression (\"expression\": a name, or a number past 3)")
+    # --- API 18 -------------------------------------------------------------
+    for entry in _entries(manifest.get("cards")):
+        if "frame_style" in entry:
+            add(18, "a card's own frame style (\"frame_style\")")
+    for what in _frame_features(manifest.get("card_layout")):
+        add(18, what)
     return out
+
+
+# card_layout keys a game of API 17 or older never reads. What API 11 reads
+# stays at 11: frame_styles' image, hand_color, width and height, frame_for,
+# default_style, and the layout's own art, attribute, spell, atk, def, stars
+# and digits.
+_LAYOUT_KEYS_18 = ("default_styles", "atk_label", "dfd_label", "type_label")
+_STYLE_KEYS_18 = ("hand_image", "field_image", "field_back_image", "back_image", "library_icon", "hand",
+                  "full_bleed", "atk_label", "dfd_label", "type_label", "digits", "title", "stars", "attribute",
+                  "spell", "art", "atk", "def")
+_PART_KEYS_18 = ("hide", "hidden", "show", "color")
+
+
+def _frame_features(layout) -> list:
+    """What a card_layout uses that the frame styles added (mod API 18), each
+    said once."""
+    if not isinstance(layout, dict):
+        return []
+    found = [f"the card layout's \"{key}\"" for key in _LAYOUT_KEYS_18 if key in layout]
+    styles = layout.get("frame_styles")
+    for style in (styles.values() if isinstance(styles, dict) else ()):
+        if isinstance(style, dict):
+            found += [f"a frame style's \"{key}\"" for key in _STYLE_KEYS_18 if key in style]
+    digits = layout.get("digits")
+    if isinstance(digits, dict) and ("atk" in digits or "def" in digits):
+        found.append("the digits' own \"atk\" and \"def\" places")
+    found += [f"a card part's \"{key}\"" for key in _PART_KEYS_18 if _has_key(layout, key)]
+    return list(dict.fromkeys(found))
 
 
 def _roster_files(project) -> list:

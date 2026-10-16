@@ -804,6 +804,9 @@ that the game leaves out).
   The first style becomes the
   layout's default; enable its `full_bleed` setting in-game to see custom
   frame art.
+  The frame keys need mod API 18 (a style's images, `hand`, parts and
+  `hide`, `default_styles`, a card's `frame_style`): Save raises `min_api`
+  to it, so a game of v0.3.0 refuses the mod rather than draw the retail frame.
 
 Colors are the game's: a tint multiplies, so it can only darken what is
 there. The pictures are the console's size here; the game draws a PNG of

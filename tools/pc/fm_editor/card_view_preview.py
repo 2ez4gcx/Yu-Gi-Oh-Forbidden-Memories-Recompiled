@@ -9,12 +9,11 @@ from __future__ import annotations
 
 import base64
 import math
-import sys
 import tkinter as tk
 from pathlib import Path
 from tkinter import ttk
 
-from . import card_view, pngio, settings
+from . import card_view, disc, pngio, settings
 
 SIZES = ("Fit", "1x", "2x", "3x")
 
@@ -50,7 +49,7 @@ class CardViewPreview(ttk.Frame):
         """Where the translations may be: the repository's, beside the editor
         program, and beside (or above) the game files it reads."""
         folders = list(card_view.language_folders())
-        folders.append(Path(sys.executable).resolve().parent / "languages")
+        folders.append(disc.program_dir() / "languages")
         files = getattr(self.app, "files", None)
         source = Path(files.source) if files is not None and getattr(files, "source", None) else None
         if source is not None:

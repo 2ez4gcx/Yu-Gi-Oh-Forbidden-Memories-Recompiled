@@ -207,6 +207,7 @@ static void full_bleed_mod(void)
     CHECK(p.x == 104 && p.y == 178);
     p = CardLayout_Part(CARD_LAYOUT_LEVEL_STARS);
     CHECK(p.x == 80 && p.y == 153);
+    CHECK(CardLayout_StarsCentered());
     CHECK(!strcmp(frame_path(), "/mods/anime-card-frame/frame.png"));
     reset();
     add_mod("title-style", "/mods/title-style",
@@ -216,6 +217,7 @@ static void full_bleed_mod(void)
     CardLayout_SetCard(0);
     p = CardLayout_Part(CARD_LAYOUT_TITLE);
     CHECK(p.visible && p.x == 18 && p.y == 10);
+    CHECK(!CardLayout_StarsCentered());
 }
 
 /* The same manifest, but the mod's own full_bleed setting is off (a fresh
@@ -484,9 +486,9 @@ static void styles_card_named_frame(void)
     CHECK(!CardLayout_FrameStyleOf(2, &(CardLayoutFrameStyle){0}) && notes == 1);
 }
 
-/* `default_styles` supplies defaults only when a card did not name a style,
- * choose a palette style, or match a frame_for rule.  Type is more specific
- * than kind, so a Dragon may differ from the wider monster default. */
+/* Type is more specific than kind, and an explicit card style is stronger
+ * than either; both win over a color-named style and frame_for rules, and
+ * the global default is the final non-retail fallback. */
 static void styles_by_default_kind_and_type(void)
 {
     reset();
@@ -501,12 +503,15 @@ static void styles_by_default_kind_and_type(void)
             "\"dragon\": {\"image\": \"dragon.png\", \"hand_color\": \"purple\"},"
             "\"zombie\": {\"image\": \"zombie.png\", \"hand_color\": \"orange\"},"
             "\"type_equip\": {\"image\": \"type_equip.png\", \"hand_color\": \"orange\"},"
+            "\"purple\": {\"image\": \"purple.png\", \"hand_color\": \"purple\"},"
             "\"specific\": {\"image\": \"specific.png\", \"hand_color\": \"pink\"}},"
             "\"default_styles\": {\"kinds\": {\"monster\": \"kind_monster\", \"magic\": \"kind_magic\","
             "\"ritual\": \"kind_ritual\", \"equip\": \"kind_equip\", \"trap\": \"kind_trap\"},"
             "\"types\": {\"Dragon\": \"dragon\", \"Zombie\": \"zombie\", \"Equip\": \"type_equip\"}},"
             "\"default_style\": \"global\"}}",
             1, "full_bleed", 1);
+    /* A color-named style is a legacy fallback, not stronger than a type. */
+    fake_frame_color[1] = CARD_FRAME_PURPLE;
     CHECK(style_of(1, "/mods/x/dragon.png") == CARD_FRAME_PURPLE);
     fake_card_type[2] = CARD_TYPE_ZOMBIE;
     CHECK(style_of(2, "/mods/x/zombie.png") == CARD_FRAME_ORANGE);
@@ -520,6 +525,35 @@ static void styles_by_default_kind_and_type(void)
     CHECK(style_of(6, "/mods/x/trap.png") == CARD_FRAME_TRAP);
     snprintf(fake_frame_style[7], sizeof(fake_frame_style[7]), "%s", "specific");
     CHECK(style_of(7, "/mods/x/specific.png") == CARD_FRAME_TRAP);
+
+    /* No global default means that cards not caught by a card/type/kind
+     * assignment retain the retail layout. */
+    reset();
+    add_mod("x", "/mods/x",
+            "{\"id\": \"x\", \"card_layout\": {\"frame_styles\": {\"only\": {\"image\": \"only.png\","
+            "\"hand_color\": \"gold\"}}}}",
+            1, "full_bleed", 1);
+    CHECK(!CardLayout_StyleOf(1, &(CardLayoutStyle){0}));
+
+    /* A color-named style (the released order) still wins over the global
+     * default, though no longer over a type or kind default. */
+    reset();
+    add_mod("x", "/mods/x",
+            "{\"id\": \"x\", \"card_layout\": {\"frame_styles\": {"
+            "\"global\": {\"image\": \"global.png\", \"hand_color\": \"gold\"},"
+            "\"purple\": {\"image\": \"purple.png\", \"hand_color\": \"purple\"}},"
+            "\"default_style\": \"global\"}}",
+            1, "full_bleed", 1);
+    fake_frame_color[1] = CARD_FRAME_PURPLE;
+    CHECK(style_of(1, "/mods/x/purple.png") == CARD_FRAME_PURPLE);
+    CHECK(style_of(2, "/mods/x/global.png") == CARD_FRAME_MONSTER);
+    reset();
+    add_mod("x", "/mods/x",
+            "{\"id\": \"x\", \"card_layout\": {\"frame_styles\": {"
+            "\"purple\": {\"image\": \"purple.png\", \"hand_color\": \"purple\"}}}}",
+            1, "full_bleed", 1);
+    fake_frame_color[1] = CARD_FRAME_PURPLE;
+    CHECK(style_of(1, "/mods/x/purple.png") == CARD_FRAME_PURPLE);
 }
 
 /* A layout can provide palette-only fallback styles.  They keep the normal
@@ -550,15 +584,63 @@ static void styles_hand_frame(void)
     reset();
     add_mod("x", "/mods/x",
             "{\"id\": \"x\", \"card_layout\": {\"frame_styles\": {\"gold\": {\"image\": \"g.png\","
-            "\"hand_color\": \"gold\", \"hand_image\": \"hand.png\"}}}}",
+            "\"hand_color\": \"gold\", \"hand_image\": \"hand.png\"}}, \"default_style\": \"gold\"}}",
             1, "full_bleed", 1);
     CHECK(!strcmp(CardLayout_HandFramePath(1), "/mods/x/hand.png"));
     reset();
     add_mod("x", "/mods/x",
             "{\"id\": \"x\", \"card_layout\": {\"frame_styles\": {\"gold\": {\"image\": \"g.png\","
-            "\"hand_color\": \"gold\", \"hand_image\": \"../hand.png\"}}}}",
+            "\"hand_color\": \"gold\", \"hand_image\": \"../hand.png\"}}, \"default_style\": \"gold\"}}",
             1, "full_bleed", 1);
     CHECK(!*CardLayout_HandFramePath(1) && notes == 1);
+}
+
+/* Hand and 3D-field frames are independent.  In particular, a hand-only
+ * style must not enter the 3D field renderer: it leaves the field card's
+ * retail texture intact. */
+static void styles_field_frame_is_explicit(void)
+{
+    reset();
+    add_mod("x", "/mods/x",
+            "{\"id\": \"x\", \"card_layout\": {\"frame_styles\": {\"gold\": {\"image\": \"g.png\","
+            "\"hand_color\": \"gold\", \"hand_image\": \"hand.png\"}}, \"default_style\": \"gold\"}}",
+            1, "full_bleed", 1);
+    CHECK(!strcmp(CardLayout_HandFramePath(1), "/mods/x/hand.png"));
+    CHECK(!*CardLayout_FieldFramePath(1));
+
+    reset();
+    add_mod("x", "/mods/x",
+            "{\"id\": \"x\", \"card_layout\": {\"frame_styles\": {\"gold\": {\"image\": \"g.png\","
+            "\"hand_color\": \"gold\", \"hand_image\": \"hand.png\", \"field_image\": \"field.png\"}}, \"default_style\": \"gold\"}}",
+            1, "full_bleed", 1);
+    CHECK(!strcmp(CardLayout_FieldFramePath(1), "/mods/x/field.png"));
+}
+
+static void styles_hand_elements(void)
+{
+    CardLayoutPlacement p;
+    reset();
+    add_mod("x", "/mods/x",
+            "{\"id\": \"x\", \"card_layout\": {\"frame_styles\": {\"gold\": {\"image\": \"g.png\","
+            "\"hand_color\": \"gold\", \"hand\": {\"art\": {\"x\": 3, \"y\": 4, \"width\": 30,"
+            "\"height\": 25}, \"atk\": {\"x\": 18, \"hide\": true},"
+            "\"dfd_label\": {\"y\": 51, \"width\": 10},"
+            "\"def\": {\"x\": 999999, \"y\": -999999, \"width\": 999999, \"height\": 0}}}},"
+            "\"default_style\": \"gold\"}}",
+            1, "full_bleed", 1);
+    CHECK(CardLayout_HandStyled(1));
+    p = CardLayout_HandGet(1, CARD_LAYOUT_HAND_ART);
+    CHECK(p.visible && p.x == 3 && p.y == 4 && p.w == 30 && p.h == 25);
+    p = CardLayout_HandGet(1, CARD_LAYOUT_HAND_ATK);
+    CHECK(!p.visible && p.x == 18 && p.y == 40 && p.w == 8 && p.h == 8);
+    p = CardLayout_HandGet(1, CARD_LAYOUT_HAND_DEF_LABEL);
+    CHECK(p.visible && p.x == 5 && p.y == 51 && p.w == 10 && p.h == 8);
+    p = CardLayout_HandGet(1, CARD_LAYOUT_HAND_DEF);
+    CHECK(p.visible && p.x == 128 && p.y == -128 && p.w == 128 && p.h == 8);
+    reset();
+    CHECK(!CardLayout_HandStyled(1));
+    p = CardLayout_HandGet(1, CARD_LAYOUT_HAND_ART);
+    CHECK(p.visible && p.x == 6 && p.y == 6 && p.w == 40 && p.h == 32);
 }
 
 static void styles_library_icon(void)
@@ -566,7 +648,7 @@ static void styles_library_icon(void)
     reset();
     add_mod("x", "/mods/x",
             "{\"id\": \"x\", \"card_layout\": {\"frame_styles\": {\"gold\": {\"image\": \"g.png\","
-            "\"hand_color\": \"gold\", \"library_icon\": \"library.png\"}}}}",
+            "\"hand_color\": \"gold\", \"library_icon\": \"library.png\"}}, \"default_style\": \"gold\"}}",
             1, "full_bleed", 1);
     CHECK(!strcmp(CardLayout_LibraryIconPath(1), "/mods/x/library.png"));
 }
@@ -576,7 +658,7 @@ static void styles_unusable_is_retail(void)
     CardLayoutFrameStyle style;
     reset();
     add_mod("x", "/mods/x",
-            "{\"id\": \"x\", \"card_layout\": {\"frame_styles\": {\"gold\": {\"image\": \"g.png\", \"hand_color\": \"lilac\"}}}}",
+            "{\"id\": \"x\", \"card_layout\": {\"frame_styles\": {\"gold\": {\"image\": \"g.png\", \"hand_color\": \"lilac\"}}, \"default_style\": \"gold\"}}",
             1, "full_bleed", 1);
     CHECK(!CardLayout_FrameStyleOf(1, &style) && notes == 1);   /* a "hand_color" the disc has no row for */
     reset();
@@ -763,6 +845,34 @@ static void per_style_layout(void)
     CHECK(p.x == 85 && p.y == 0x9D);                  /* x from the style, y retail's -- not the layout's 108 */
 }
 
+/* A partial art object is useful when a frame retains retail's art cutout
+ * size but moves it.  Its missing values must be the retail rectangle, while
+ * no art object at all still returns w/h 0 and leaves retail drawing alone. */
+static void partial_art_rect_uses_retail_defaults(void)
+{
+    CardLayoutPlacement p;
+
+    reset();
+    add_mod("x", "/mods/x",
+            "{\"id\": \"x\", \"card_layout\": {\"frame_styles\": {\"link\": {"
+            "\"image\": \"link.png\", \"hand_color\": \"purple\", \"art\": {\"y\": 84}}},"
+            "\"default_style\": \"link\"}}",
+            1, "full_bleed", 1);
+    CardLayout_SetCard(0);
+    p = CardLayout_Get(CARD_LAYOUT_ART);
+    CHECK(p.x == 0x13 && p.y == 84 && p.w == 0x66 && p.h == 0x60);
+
+    reset();
+    add_mod("x", "/mods/x",
+            "{\"id\": \"x\", \"card_layout\": {\"frame_styles\": {\"plain\": {"
+            "\"image\": \"plain.png\", \"hand_color\": \"purple\"}},"
+            "\"default_style\": \"plain\"}}",
+            1, "full_bleed", 1);
+    CardLayout_SetCard(0);
+    p = CardLayout_Get(CARD_LAYOUT_ART);
+    CHECK(p.w == 0 && p.h == 0);
+}
+
 /* The card viewer's left-side footprint is fixed.  Manifest dimensions may
  * make a frame smaller, but cannot let either style format cover its right
  * information panel or the Library name bar. */
@@ -924,6 +1034,8 @@ int main(void)
     styles_by_default_kind_and_type();
     styles_can_preserve_retail_frame();
     styles_hand_frame();
+    styles_field_frame_is_explicit();
+    styles_hand_elements();
     styles_library_icon();
     styles_unusable_is_retail();
     styles_hand_colour_alias();
@@ -931,6 +1043,7 @@ int main(void)
     digits_from_mod();
     color_tint();
     per_style_layout();
+    partial_art_rect_uses_retail_defaults();
     frame_box_is_bounded();
     movable_parts_can_hide();
     type_label_replaces_and_hides();

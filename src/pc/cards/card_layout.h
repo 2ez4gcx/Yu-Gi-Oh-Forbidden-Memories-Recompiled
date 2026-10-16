@@ -64,7 +64,27 @@ typedef struct {
     int x, y;
     int w, h;
 } CardLayoutPlacement;
+/* The small, flat duel-hand card has its own coordinate system (52x60),
+ * independent of the 140x196 card viewer.  These entries read a resolved
+ * frame style's optional ``hand`` object: ``art``, ``atk``, ``def``,
+ * ``atk_label`` and ``dfd_label``. */
+typedef enum {
+    CARD_LAYOUT_HAND_ART,
+    CARD_LAYOUT_HAND_ATK,
+    CARD_LAYOUT_HAND_DEF,
+    CARD_LAYOUT_HAND_ATK_LABEL,
+    CARD_LAYOUT_HAND_DEF_LABEL
+} CardLayoutHandElement;
+
+CardLayoutPlacement CardLayout_HandGet(int card_id, CardLayoutHandElement element);
+int CardLayout_HandStyled(int card_id);
 CardLayoutPlacement CardLayout_Get(CardLayoutElement element);
+/* Older layouts put ``stars`` beside the shared card_layout keys and use
+ * its x coordinate as the row's centre.  A frame style's own ``stars`` key
+ * is newer and uses the renderer's natural rightmost-star anchor, so it can
+ * be positioned directly in the editor.  This keeps the original HD anime
+ * layout compatible without making new styles card-level dependent. */
+int CardLayout_StarsCentered(void);
 /* Whether `card_id`'s resolved full-bleed style explicitly has a `title`
  * entry. Unlike CardLayout_Get this is a pure lookup: render replay can ask
  * it after the game has moved on to another card without changing state. */
@@ -142,9 +162,11 @@ typedef struct {
 /* The style the layout gives `card_id`, into `style` (its `image` empty); 1,
  * or 0 when the anime frame is off or the layout has none to give (retail's
  * frame colors then). A layout says it in "frame_styles" (name -> {"image",
- * "hand_color", "width", "height", "full_bleed"}), "frame_for" (rules, first that applies
- * wins: {"class" | "tag", "setting", "style"}) and "default_style"; a
- * card's own "frame" color takes the style named for it first. A layout
+ * "hand_color", "width", "height", "full_bleed"}), `default_styles`,
+ * "frame_for" (rules, first that applies wins: {"class" | "tag", "setting",
+ * "style"}) and "default_style". A card's own named "frame_style" wins,
+ * followed by printed type, kind, a style named for the card's frame color,
+ * the frame_for rules and then the global default. A layout
  * with a "frame" per kind and no "frame_styles" is read as before: the kind
  * of the card, and a ritual spell with no picture of its own wears magic's. */
 int CardLayout_FrameStyleOf(int card_id, CardLayoutFrameStyle *style);
@@ -164,10 +186,9 @@ int CardLayout_StyleOf(int card_id, CardLayoutStyle *style);
 const char *CardLayout_HandFramePath(int card_id);
 /* A style's optional "field_image", for the 3D duel-field card quad
  * (func_80015EF4's POLY_GT4, upright on the battlefield -- distinct from
- * the flat hand sprite above). Falls back to "hand_image" when a style
- * gives no "field_image" of its own, since both are the same 52x60 texels;
- * "" (neither set) leaves retail's Cards_FrameColor palette-row recolor in
- * place. */
+ * the flat hand sprite above). There is deliberately no fallback to
+ * "hand_image": a hand-only style leaves the 3D field card entirely retail.
+ * "" leaves retail's Cards_FrameColor palette-row recolor in place. */
 const char *CardLayout_FieldFramePath(int card_id);
 /* A style's optional "field_back_image", for the same flat hand/field sprite
  * above while the card is face down (duel_card_frame_draw.c's field_69

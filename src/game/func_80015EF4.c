@@ -179,6 +179,14 @@ void func_80015EF4(void *record, POLY_GT4 *prim, POLY_FT4 *sprite, s32 *color)
     }
 
 #ifdef MEMORIES_PC
+    /* Duel_DrawFieldCards primes this scratch primitive once before walking
+     * every card.  A previous custom field texture leaves bank bits in its
+     * tpage, whereas retail only ever uses bank 0.  Start every card from
+     * the retail page before deciding whether this particular card has an
+     * explicit field_image; otherwise a missing/failed image can inherit
+     * the prior card's bank texture. */
+    prim->tpage = (0x9E & 0xFF9F) | ((obj->attribute >> 23) & 0x60);
+
     /* A style's own field texture (card_layout_art.h's
      * CardLayoutArt_FieldFrameCell/FieldBackCell) replaces retail's
      * Cards_FrameColor palette-row pick above outright: tpage/clut/u/v only,
@@ -211,21 +219,9 @@ void func_80015EF4(void *record, POLY_GT4 *prim, POLY_FT4 *sprite, s32 *color)
             prim->v2 = prim->v3 = (u8)(field_v + field_h);
         } else {
             /* Neither cell applies to this card (no style at all, or a
-             * face-down card with no field_back_image): prim->tpage must be
-             * put back to Duel_DrawFieldCards' own known base
-             * (func_800164FC.c's p3->tpage = 0x9E), not left as whatever
-             * this scratchpad currently holds. It is the same POLY_GT4
-             * reused for every field card drawn this frame, reset only
-             * there, once, before the whole loop -- retail's own tpage line
-             * two above only ever touches its bits 5-6, never its bank bits
-             * (11-14), because retail itself never needs to: real VRAM is
-             * always bank 0. A style's own full tpage above is the first
-             * thing that ever puts a different bank there, and with
-             * nothing to reset it, an unrelated plain card drawn right
-             * after would go on sampling that same bank (confirmed live: a
-             * stray green tint on a plain card, but only once a styled card
-             * had drawn earlier in the same frame -- not on its own). */
-            prim->tpage = (0x9E & 0xFF9F) | ((obj->attribute >> 23) & 0x60);
+             * face-down card with no field_back_image): the retail base was
+             * restored before this block, so only its face-down palette-row
+             * correction remains. */
             if (face_down && Cards_FrameColor(card_id) >= 0) {
                 /* No style back_image to fall back to and face down: retail's
                  * own monster/magic/trap/ritual rows (0-3) read the same bytes

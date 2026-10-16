@@ -1,4 +1,5 @@
 #include "../types.h"
+#include <string.h>
 #include "../psyq/libgte.h"
 #include "../psyq/libgpu.h"
 #include "text_encode_decimal_digits.h"
@@ -15,11 +16,45 @@
 #ifdef MEMORIES_PC
 #include "../psyq/libgs.h"
 #include "pc/cards/cards.h"
+#include "pc/cards/card_layout.h"
 #include "pc/cards/card_layout_art.h"
 #endif
 
 #define POLY_FT4_BYTES(packet) ((u8 *)(packet))
 #define CARD_FRAME_SCRATCH_BYTES(scratch) ((u8 *)(scratch))
+
+#ifdef MEMORIES_PC
+/* A hand card's retail art, labels and digits all have fixed texture cells.
+ * A custom hand layout changes their on-screen rectangles, not the source
+ * cells: changing SpritePrim's extent crops or spills into its neighbours.
+ * Draw a quad with the original UV footprint instead. */
+static void CardLayout_DrawHandCell(const SpritePrim *src, s32 x, s32 y, s32 w, s32 h,
+                                    u8 u, u8 v, u8 cell_w, u8 cell_h, s32 ot, s32 depth)
+{
+    POLY_FT4 quad;
+    u32 attribute = src->attribute;
+
+    if (w <= 0 || h <= 0) return;
+    memset(&quad, 0, sizeof(quad));
+    setPolyFT4(&quad);
+    if (attribute & 0x40000000) setSemiTrans(&quad, 1);
+    if ((attribute & 0x40) || (src->rgb & 0xFFFFFF) == 0x808080) setShadeTex(&quad, 1);
+    quad.r0 = (u8)src->rgb;
+    quad.g0 = (u8)(src->rgb >> 8);
+    quad.b0 = (u8)(src->rgb >> 16);
+    quad.tpage = (u16)(src->tpage | ((attribute >> 17) & 0x180) | ((attribute >> 23) & 0x60));
+    quad.clut = (u16)((src->cxcy.h.cy << 6) | ((src->cxcy.h.cx >> 4) & 0x3F));
+    quad.x0 = quad.x2 = (short)x;
+    quad.x1 = quad.x3 = (short)(x + w);
+    quad.y0 = quad.y1 = (short)y;
+    quad.y2 = quad.y3 = (short)(y + h);
+    quad.u0 = quad.u2 = u;
+    quad.u1 = quad.u3 = (u8)(u + cell_w);
+    quad.v0 = quad.v1 = v;
+    quad.v2 = quad.v3 = (u8)(v + cell_h);
+    GsSortPoly(&quad, (GsOT *G32)ot, (u16)depth);
+}
+#endif
 
 /* Draws one card's frame on the duel field: position, the hand/field
  * flags, the card-number digits (via Duel_CalcCardStats and
@@ -61,6 +96,9 @@ void func_80016784(DisplayObject *object, s32 arg1, s32 arg2, s32 arg3) {
     s32 wide;
     s32 hand_tpage, hand_u, hand_v, hand_clut, hand_w, hand_h;
     s32 back_tpage, back_u, back_v, back_clut, back_w, back_h;
+    s32 hand_styled;
+    s32 hand_digits;
+    CardLayoutPlacement hand_art, hand_atk, hand_def, hand_atk_label, hand_def_label;
 #endif
 
     if ((u32)(arg2 + 0x33) < 0x173) {
@@ -71,6 +109,16 @@ void func_80016784(DisplayObject *object, s32 arg1, s32 arg2, s32 arg3) {
                 y = (POLY_FT4 *)SCRATCHPAD_ADDR(0x1F800344);
                 z = (SpritePrim *)SCRATCHPAD_ADDR(0x1F800000);
                 card = &D_801A7AD8[object->field_6A];
+#ifdef MEMORIES_PC
+                hand_styled = CardLayout_HandStyled(card->card_id);
+                if (hand_styled) {
+                    hand_art = CardLayout_HandGet(card->card_id, CARD_LAYOUT_HAND_ART);
+                    hand_atk = CardLayout_HandGet(card->card_id, CARD_LAYOUT_HAND_ATK);
+                    hand_def = CardLayout_HandGet(card->card_id, CARD_LAYOUT_HAND_DEF);
+                    hand_atk_label = CardLayout_HandGet(card->card_id, CARD_LAYOUT_HAND_ATK_LABEL);
+                    hand_def_label = CardLayout_HandGet(card->card_id, CARD_LAYOUT_HAND_DEF_LABEL);
+                }
+#endif
                 o->pos.h.x = arg2;
                 o->pos.h.y = arg3;
                 fl = object->field_14 | 0x10000;
@@ -146,6 +194,43 @@ void func_80016784(DisplayObject *object, s32 arg1, s32 arg2, s32 arg3) {
                         break;
                     default:
 #ifdef MEMORIES_PC
+                        if (hand_styled) {
+                            d = Duel_CalcCardStats(card);
+                            /* Keep the retail five-digit capability for a
+                             * mod that raises a card stat above 9999. */
+                            hand_digits = (d & 0xFFFF) >= 10000 || ((u32)d >> 16) >= 10000 ? 5 : 4;
+                            Text_EncodeDecimalDigits((s16)d, hand_digits, sp18);
+                            Text_EncodeDecimalDigits(d >> 0x10, hand_digits, sp20);
+                            if (hand_atk_label.visible) {
+                                CardLayout_DrawHandCell(k, o->pos.h.x + hand_atk_label.x,
+                                                        o->pos.h.y + hand_atk_label.y,
+                                                        hand_atk_label.w, hand_atk_label.h,
+                                                        0x78, 0x70, 8, 8, arg1, fl);
+                            }
+                            if (hand_def_label.visible) {
+                                CardLayout_DrawHandCell(k, o->pos.h.x + hand_def_label.x,
+                                                        o->pos.h.y + hand_def_label.y,
+                                                        hand_def_label.w, hand_def_label.h,
+                                                        0x78, 0x78, 8, 8, arg1, fl);
+                            }
+                            for (i = hand_digits - 1; i >= 0; i--) {
+                                if (hand_atk.visible)
+                                    CardLayout_DrawHandCell(k,
+                                                            o->pos.h.x + hand_atk.x + (hand_digits - 1 - i) * hand_atk.w,
+                                                            o->pos.h.y + hand_atk.y,
+                                                            hand_atk.w, hand_atk.h,
+                                                            sp18[i] * 8, 0x58, 8, 8, arg1, fl);
+                            }
+                            for (i = hand_digits - 1; i >= 0; i--) {
+                                if (hand_def.visible)
+                                    CardLayout_DrawHandCell(k,
+                                                            o->pos.h.x + hand_def.x + (hand_digits - 1 - i) * hand_def.w,
+                                                            o->pos.h.y + hand_def.y,
+                                                            hand_def.w, hand_def.h,
+                                                            sp20[i] * 8, 0x58, 8, 8, arg1, fl);
+                            }
+                            break;
+                        }
                         /* ATK or DEF past 9999 (a mod's "limits",
                            pc/cards/tables.h): five digits a row, seven
                            pixels apart from two further left, and the
@@ -220,17 +305,36 @@ void func_80016784(DisplayObject *object, s32 arg1, s32 arg2, s32 arg3) {
 #endif
                     z->tpage = 0xE;
                     z->rgb = object->field_0C;
+#ifdef MEMORIES_PC
+                    z->xy.h.x = o->pos.h.x + (hand_styled ? hand_art.x : 6);
+                    z->xy.h.y = o->pos.h.y + (hand_styled ? hand_art.y : 6);
+#else
                     z->xy.h.x = o->pos.h.x + 6;
                     z->xy.h.y = o->pos.h.y + 6;
+#endif
                     i = (s8)card->table_index;
                     z->cxcy.h.cx = 0x380;
                     z->cxcy.h.cy = i + 0xE0;
                     z->uv.b.lo = (i % 5) * 0x28;
+#ifdef MEMORIES_PC
+                    /* Keep the retail 40x32 source cell here.  A styled
+                     * rectangle is scaled by CardLayout_DrawHandArt below;
+                     * putting its size in extent would expand the source UV
+                     * read and bleed into adjacent thumbnail cells. */
                     z->extent.word = 0x200028;
+#else
+                    z->extent.word = 0x200028;
+#endif
                     z->uv.b.hi = (i / 5) << 5;
-                    DisplayObject_SubmitPacket(
-                        z, POLY_FT4_BYTES(y), arg1, fl,
-                        CARD_FRAME_SCRATCH_BYTES(o));
+#ifdef MEMORIES_PC
+                    if (hand_styled && hand_art.visible) {
+                        CardLayout_DrawHandCell(z, o->pos.h.x + hand_art.x, o->pos.h.y + hand_art.y,
+                                                hand_art.w, hand_art.h, z->uv.b.lo, z->uv.b.hi,
+                                                40, 32, arg1, fl);
+                    } else if (!hand_styled)
+#endif
+                        DisplayObject_SubmitPacket(z, POLY_FT4_BYTES(y), arg1, fl,
+                                                   CARD_FRAME_SCRATCH_BYTES(o));
                 }
                 k->extent.word = 0x3C0034;
                 k->uv.word = 0x8000;

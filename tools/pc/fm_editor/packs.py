@@ -1269,11 +1269,12 @@ def serif_path():
     return None
 
 
-def name_plate_inks(name: str, font=None):
+def name_plate_inks(name: str, font=None, factor=1):
     """The 96x14 plate inks the game makes of a name (art.c set_name and
     CardArt_TitleFromName, closely): Times at 13 pixels, the baseline under
-    row 11, from column 3, a name wider than 90 pixels squeezed. None when
-    no serif face is found."""
+    row 11, from column 3, a name wider than 90 pixels squeezed.  ``factor``
+    makes the identical plate at an integer internal resolution for previews.
+    None is returned when no serif face is found."""
     from . import art, ttf
     if font is None:
         path = serif_path()
@@ -1283,7 +1284,13 @@ def name_plate_inks(name: str, font=None):
             font = ttf.Font(path)
         except ttf.FontError:
             return None
-    size, wide, height, baseline, left, room = 13, 512, 14, 11, 3, 90
+    try:
+        factor = max(1, int(factor))
+    except (TypeError, ValueError):
+        factor = 1
+    width = 96 * factor
+    size, wide, height = 13 * factor, 512 * factor, 14 * factor
+    baseline, left, room = 11 * factor, 3 * factor, 90 * factor
     line = bytearray(wide * height)
     pen, low, high = left, wide, -1
     for c in name:
@@ -1300,12 +1307,12 @@ def name_plate_inks(name: str, font=None):
         pen += round(font.advance(ord(c)) * size)
         if pen >= wide:
             break
-    out = [0] * (96 * height)
+    out = [0] * (width * height)
     if high >= low:
         if high - low + 1 <= room:
             for y in range(height):
-                for x in range(96):
-                    out[y * 96 + x] = line[y * wide + x]
+                for x in range(width):
+                    out[y * width + x] = line[y * wide + x]
         else:
             step = (high - low + 1) / room
             rows = []
@@ -1323,5 +1330,5 @@ def name_plate_inks(name: str, font=None):
                 rows.append(row)
             for y in range(height):
                 for x in range(room):
-                    out[y * 96 + left + x] = int(rows[y][x] * 255 / peak + 0.5)
+                    out[y * width + left + x] = int(rows[y][x] * 255 / peak + 0.5)
     return [art.ink_of(v) for v in out]

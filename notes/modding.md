@@ -957,14 +957,9 @@ some of them out, with a `"card_layout"` object, no code needed:
         "pink":   {"image": "anime_frame_trap.png",    "hand_color": "pink"},
         "orange": {"image": "anime_frame_orange.png",  "hand_color": "orange"}
     },
-    "frame_for": [
-        {"class": "ritual_spell",   "style": "green"},
-        {"class": "effect_monster", "style": "orange"},
-        {"class": "spell",          "style": "green"},
-        {"class": "equip",          "style": "green"},
-        {"class": "trap",           "style": "pink"},
-        {"class": "monster",        "style": "gold"}
-    ],
+    "default_styles": {
+        "kinds": {"monster": "gold", "magic": "green", "equip": "green", "ritual": "green", "trap": "pink"}
+    },
     "default_style": "gold",
     "art": {"x": 3, "y": 3, "width": 134, "height": 139},
     "attribute": {"x": 114, "y": 149},
@@ -1075,6 +1070,12 @@ half-finished look. The description box is always shown -- its own
 backdrop panel is on screen either way, so there is nothing to gain by
 leaving its text out.
 
+For `art` specifically, once an `art` object is present, its omitted fields
+use retail's art rectangle (`x: 19`, `y: 50`, `width: 102`, `height: 96`).
+This makes a position-only override such as `"art": {"y": 84}` valid: it
+keeps the retail size and X position while moving the picture down. Leave
+the whole `art` object out to keep the unmodified retail art draw path.
+
 ### Frame styles and the rules that pick them
 
 A card is drawn in a frame **style**: a picture and the color its small card
@@ -1082,7 +1083,7 @@ wears in the hand, together, so the card view and the hand can never
 disagree. Three keys say it:
 
 - `frame_styles`: name -> `{"image", "hand_image", "field_image", "field_back_image", "back_image",
-  "library_icon", "hand_color", "width", "height", "full_bleed"}`.
+  "library_icon", "hand_color", "hand", "width", "height", "full_bleed"}`.
   `image` is relative to the mod's directory, as a `title` mod's pictures
   are, drawn as one textured quad behind everything else, at `width`/`height`
   (140x196 with neither given). A frame may be smaller, but its dimensions
@@ -1098,30 +1099,50 @@ disagree. Three keys say it:
   is that color wears.
   `hand_image`, when present, is a PNG reduced to the 52x60 sprite for that
   style's flat duel-hand and flat field-card frame. Its artwork is drawn under the game's own card
-  art, stats and markers. It is also the 3D field card's frame unless the
-  style gives `field_image` (the same 52x60 size); with neither, the 3D field
-  card uses `hand_color`.
-  `field_back_image` (52x60) is the face-down card's back in the hand and on
-  the field; `back_image` is the back the card viewer shows while a card
-  turns, stretched to the style's `width`/`height` (254 at most each). Without
-  them the retail card back is drawn.
+  art, stats and markers. `field_image` independently replaces the face-up
+  3D field-card frame (the same 52x60 size); without it, that card keeps its
+  retail image. `field_back_image` (52x60) replaces the face-down back in the
+  hand and on the field; `back_image` is the back the card viewer shows while
+  a card turns, stretched to the style's `width`/`height` (254 at most each).
+  Without those images, the corresponding retail card back is drawn.
+  Its optional `hand` object independently places the overlays on that same
+  52x60 card: `art`, `atk`, `def`, `atk_label` and `dfd_label`. Each accepts
+  `x`, `y`, `width`, `height` and `hide` just like the larger card-viewer
+  elements. Coordinates are kept within -128 to 128 and dimensions within
+  1 to 128, so malformed JSON cannot wrap the duel renderer's geometry.
+  Five-digit values draw five cells across; keep `x + 5 * width` inside the
+  52-pixel card when the row must not extend past its edge. `atk_label` and `dfd_label` are the hand's sword and shield
+  markers, not the literal `ATK`/`DFD` text used by the big card. Leave the
+  whole object out to keep the retail hand draw path exactly as it is.
+
+  ```json
+  "hand": {
+    "art":       {"x": 6,  "y": 6,  "width": 40, "height": 32},
+    "atk_label": {"x": 5,  "y": 40, "width": 8,  "height": 8},
+    "atk":       {"x": 14, "y": 40, "width": 8,  "height": 8},
+    "dfd_label": {"x": 5,  "y": 48, "width": 8,  "height": 8},
+    "def":       {"x": 14, "y": 48, "width": 8,  "height": 8}
+  }
+  ```
   `library_icon` is a PNG reduced to the Library grid's 12x14
   cell; without it, the grid uses the style's `hand_color` palette row.
   `full_bleed` defaults on for a style with an `image`; set it to `false`
   for a palette-only fallback style, so cards that do not select a custom
   image keep the retail full-card frame.
-- A card entry's `"frame_style"` may name any style directly. It wins over
-  its six-color `"frame"`, then the rules below; this lets a cards mod opt
-  into a new frame without using a tag as an implementation detail. `null`
-  clears an inherited named style.
+- A card entry's `"frame_style"` may name any style directly. It is the
+  strongest choice; the full order is explicit card style, printed type,
+  kind, a style named for the card's six-color `"frame"`, the first
+  `frame_for` rule that applies, `default_style`, then retail. This lets a
+  cards mod opt into a new frame without using a tag as an implementation
+  detail. `null` clears an inherited named style.
 - `frame_for`: a list of rules, the first that applies to a card wins. A rule
   says `"style"` and, to limit it, any of `"class"` (what the card is, below),
   `"tag"` (one of the card's [`tags`](more-cards.md#tags)) and `"setting"` (a
   `bool` the mod declares: the rule counts only while it is on, which is how a
   player gets a sub-option in the Mods window). A rule that names none applies
-  to every card.
-- `default_styles`: defaults for cards that have no explicit `frame_style`,
-  no matching color-named style and no `frame_for` rule. Its optional
+  to every card. Released layouts (Forbidden Memories HD) use these rules;
+  `default_styles` below wins over them.
+- `default_styles`: defaults for cards that have no explicit card style. Its optional
   `kinds` object assigns a style to `monster`, `effect_monster`, `magic`
   (also accepted as `spell`), `equip`, `ritual` (also `ritual_spell`) or
   `trap`. `monster` includes ordinary and effect monsters unless the latter
@@ -1138,8 +1159,8 @@ disagree. Three keys say it:
   }
   ```
 
-- `default_style`: the style of a card no rule picks (`gold` if left out).
-  It is the final fallback after `default_styles`.
+- `default_style`: the style of a card no more-specific assignment picks. It
+  is the final mod fallback after `default_styles`; omit it to keep retail.
 
 The class of a card is worked out by the engine from its type and its
 `monster_effects`, never written by a mod: `monster`, `effect_monster`,
@@ -1150,15 +1171,12 @@ and DEF.
 
 Forbidden Memories HD follows the anime: a ritual spell is **green**, in the card
 view and in the hand. Give the build a ritual picture (`--anime-frame-ritual`)
-and it adds the style `blue` and the sub-option "Ritual spells: own frame" (off).
-To keep ritual spells blue by default, put that rule's `"setting"` on and
-declare its `default` as `1`, or delete the rule above it. A mod that adds
-god monsters tags them (`"tags": ["god"]`) and adds a style and a rule for the
-tag, before the class rules:
+and assign its `blue` style through `default_styles.kinds.ritual`. A mod that
+adds god monsters can assign its named style directly in that card's entry:
 
 ```json
 "frame_styles": { "god": {"image": "god_frame.png", "hand_color": "purple"} },
-"frame_for": [ {"tag": "god", "style": "god"} ]
+"cards": [ {"replace": 1, "frame_style": "god"} ]
 ```
 
 An older layout with a `frame` per kind (`monster`, `magic`, `trap`, `ritual`,

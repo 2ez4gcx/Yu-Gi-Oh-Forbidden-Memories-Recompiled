@@ -22,6 +22,7 @@ from .widgets import px, ui_font
 
 GAME_W, GAME_H = 320, 240
 IMAGE_DIR = "ui"          # where the tab puts a PNG it is given, in the mod
+FRAME_IMAGE_DIR = "frames"
 
 
 # --- the mod's keys ---------------------------------------------------------------
@@ -42,12 +43,14 @@ def ensure(project, *path) -> dict:
 
 
 def prune(project, key: str):
-    """Empty objects under `key` taken out, then `key` itself if empty."""
-    def tidy(value: dict):
+    """Empty objects under `key` taken out, then `key` itself if empty.
+    A frame style is kept even when empty: {} named for a color is a usable
+    palette-only style, and cards or rules may still name it."""
+    def tidy(value: dict, keep_empty=False):
         for k in list(value):
             if isinstance(value[k], dict):
-                tidy(value[k])
-                if not value[k]:
+                tidy(value[k], keep_empty=k == "frame_styles")
+                if not value[k] and not keep_empty:
                     del value[k]
     value = project.other.get(key)
     if isinstance(value, dict):
@@ -114,7 +117,12 @@ _sized = {}
 def sized(image: pngio.Image, width: int, height: int) -> pngio.Image:
     """The picture at width x height as the game's console resolution draws
     it (each texel the average of what is under it, art.c), kept."""
-    key = (id(image), width, height)
+    # ``image`` is often a short-lived cropped sprite (for example an
+    # individual hand-stat digit).  An ``id(image)`` cache key can therefore
+    # be recycled by Python for a different sprite on a later redraw and
+    # return the previous bitmap.  Image.digest() is immutable and retained
+    # by Image itself, so it is both stable and correct across redraws.
+    key = (image.digest(), width, height)
     if key not in _sized:
         if image.width <= width * 3 and image.height <= height * 3:
             _sized[key] = pngio.scale_to(image, max(1, width), max(1, height))
@@ -124,7 +132,7 @@ def sized(image: pngio.Image, width: int, height: int) -> pngio.Image:
     return _sized[key]
 
 
-def add_image_file(project, path, stem: str) -> str:
+def add_image_file(project, path, stem: str, directory: str = IMAGE_DIR) -> str:
     """The PNG at `path` put in the mod as ui/<stem>.png (another name when
     that holds another picture); its name. ValueError when it is no PNG."""
     data = Path(path).read_bytes()
@@ -132,23 +140,23 @@ def add_image_file(project, path, stem: str) -> str:
         pngio.decode(data)
     except (pngio.PngError, ValueError) as problem:
         raise ValueError(f"{Path(path).name} is not a PNG the editor can read: {problem}")
-    name, n = f"{IMAGE_DIR}/{stem}.png", 2
+    name, n = f"{directory}/{stem}.png", 2
     while (name in project.files and project.files[name] != data) or \
             (name not in project.files and image_bytes(project, name) not in (None, data)):
-        name = f"{IMAGE_DIR}/{stem}-{n}.png"
+        name = f"{directory}/{stem}-{n}.png"
         n += 1
     project.files[name] = data
     return name
 
 
-def import_image(widget, project, stem: str):
+def import_image(widget, project, stem: str, directory: str = IMAGE_DIR):
     """A PNG the user chooses, put in the mod (add_image_file); its name or None."""
     path = file_dialogs.askopenfilename(parent=widget, title="Choose a PNG",
                                         filetypes=[("PNG pictures", "*.png"), ("All files", "*")])
     if not path:
         return None
     try:
-        return add_image_file(project, path, stem)
+        return add_image_file(project, path, stem, directory)
     except (OSError, ValueError) as problem:
         messagebox.showerror("FM Editor", str(problem), parent=widget)
         return None
@@ -218,7 +226,7 @@ def fixed_cursor(widget) -> str:
 
 
 class Stage(tk.Canvas):
-    """The game's 320 x 240 at a whole zoom: pictures placed in the game's
+    """A game-sized canvas at a zoom: pictures placed in the game's
     pixels, dragged with the mouse (the game's pixels again, on release;
     on_drag hears each step on the way) or nudged with the arrow keys (8
     with Shift), one chosen at a time with a dashed box round it. Pictures
@@ -227,9 +235,10 @@ class Stage(tk.Canvas):
     down only, "" not at all, though it is still chosen by a click); the
     pointer over it says so."""
 
-    def __init__(self, master, zoom: int = 2, on_select=None, on_move=None, on_wheel=None, on_drag=None,
-                 on_hover=None):
-        super().__init__(master, width=GAME_W * zoom, height=GAME_H * zoom, highlightthickness=0,
+    def __init__(self, master, zoom: float = 2, game_width: int = GAME_W, game_height: int = GAME_H,
+                 on_select=None, on_move=None, on_wheel=None, on_drag=None, on_hover=None):
+        self.game_width, self.game_height = game_width, game_height
+        super().__init__(master, width=round(game_width * zoom), height=round(game_height * zoom), highlightthickness=0,
                          background="#000", cursor="arrow", takefocus=1)
         self.zoom = zoom
         self.on_select, self.on_move, self.on_wheel = on_select, on_move, on_wheel
@@ -253,25 +262,26 @@ class Stage(tk.Canvas):
         for key, (dx, dy) in (("Left", (-1, 0)), ("Right", (1, 0)), ("Up", (0, -1)), ("Down", (0, 1))):
             self.bind(f"<KeyPress-{key}>", lambda e, d=(dx, dy): self._nudge(e, *d))
 
-    def set_zoom(self, zoom: int):
+    def set_zoom(self, zoom: float):
         if zoom != self.zoom:
             self.zoom = zoom
-            self.configure(width=GAME_W * zoom, height=GAME_H * zoom)
+            self.configure(width=round(self.game_width * zoom), height=round(self.game_height * zoom))
             self.photos.clear()
 
-    def photo(self, key, image: pngio.Image):
+    def photo(self, key, image: pngio.Image, zoom=None):
         """The Tk photo of a picture at the zoom, made again only when the
         picture (its bytes) or the zoom changes."""
-        signature = (key, image.width, image.height, hash(image.rgba))
+        zoom = self.zoom if zoom is None else zoom
+        signature = (key, image.width, image.height, hash(image.rgba), zoom)
         held = self.photos.get(signature)
-        if held and held[1] == self.zoom:
+        if held and held[1] == zoom:
             self.shown.append(held[2])
             return held[2]
         base = tk.PhotoImage(master=self, data=base64.b64encode(pngio.encode(image)), format="png")
-        photo = base.zoom(self.zoom) if self.zoom > 1 else base
+        photo = base.zoom(zoom) if zoom > 1 else base
         if len(self.photos) > 400:
             self.photos.clear()
-        self.photos[signature] = (image, self.zoom, photo)
+        self.photos[signature] = (image, zoom, photo)
         self.shown.append(photo)
         return photo
 
@@ -283,11 +293,20 @@ class Stage(tk.Canvas):
         self.draggable.clear()
         self.axes.clear()
 
-    def picture(self, key, image: pngio.Image, x: int, y: int, drag=True, box=None):
+    def picture(self, key, image: pngio.Image, x: int, y: int, drag=True, box=None, high_quality=False):
         """`image` with its top left at x, y; `box` (x, y, w, h) is what
-        selects it (its own rectangle by default)."""
+        selects it (its own rectangle by default).  ``high_quality`` draws
+        from the original image at the canvas' physical resolution rather
+        than first reducing it to game pixels and nearest-neighbour zooming
+        it.  It is used by the Frames preview for the game's 4x assets."""
         z = self.zoom
-        item = self.create_image(x * z, y * z, image=self.photo(key, image), anchor="nw")
+        target = box or (x, y, image.width, image.height)
+        if high_quality:
+            image = sized(image, max(1, round(target[2] * z)), max(1, round(target[3] * z)))
+            photo = self.photo(key, image, 1)
+        else:
+            photo = self.photo(key, image)
+        item = self.create_image(x * z, y * z, image=photo, anchor="nw")
         self.items.setdefault(key, []).append(item)
         if box is not None or key not in self.boxes:
             self.boxes[key] = box or (x, y, image.width, image.height)
@@ -410,19 +429,22 @@ class Stage(tk.Canvas):
 
 
 class StageView(ttk.Frame):
-    """A page's picture as big as the room beside its form lets it be, at a
-    whole zoom (the game's pixels stay square and sharp), centred, with a row
-    of the page's own under it (tools) and where the mouse is in the
-    game's pixels. Fitted once the size stops changing, not per event."""
+    """A page's picture as big as the room beside its form lets it be,
+    centred, with a row of the page's own under it and where the mouse is in
+    the game's pixels.  Most pages use a whole, crisp game-pixel zoom; the
+    Frames page uses its portrait card canvas and can use a fractional zoom
+    to fill its column while retaining the exact card aspect ratio."""
 
     MOST = 6
 
-    def __init__(self, master, draw, **callbacks):
+    def __init__(self, master, draw, game_width=GAME_W, game_height=GAME_H, smooth=False, **callbacks):
         super().__init__(master)
         self.draw = draw
+        self.game_width, self.game_height, self.smooth = game_width, game_height, smooth
         self.inner = ttk.Frame(self)
         self.inner.place(relx=0.5, y=0, anchor="n")
-        self.stage = Stage(self.inner, zoom=2, on_hover=self.hovered, **callbacks)
+        self.stage = Stage(self.inner, zoom=2, game_width=game_width, game_height=game_height,
+                           on_hover=self.hovered, **callbacks)
         self.stage.pack()
         self.tools = ttk.Frame(self.inner)
         self.tools.pack(fill="x", pady=(px(self, 6), 0))
@@ -431,7 +453,7 @@ class StageView(ttk.Frame):
         self.job = None
         self.seen = None
         # What it asks of the page: the picture at 2x (place() asks nothing).
-        self.configure(width=GAME_W * 2, height=GAME_H * 2 + px(self, 40))
+        self.configure(width=game_width * 2, height=game_height * 2 + px(self, 40))
         self.bind("<Configure>", lambda e: self.fit_later())
 
     def hovered(self, at):
@@ -450,7 +472,8 @@ class StageView(ttk.Frame):
         if width <= 1 or (width, height) == self.seen:
             return
         self.seen = (width, height)
-        zoom = max(1, min(self.MOST, width // GAME_W, height // GAME_H))
+        available = min(self.MOST, width / self.game_width, height / self.game_height)
+        zoom = max(1, available if self.smooth else int(available))
         if zoom != self.stage.zoom:
             self.stage.set_zoom(zoom)
             self.draw()
@@ -562,8 +585,8 @@ def page_layout(page, draw, columns=(), list_height=4, **callbacks):
 # title's "entries" and "spacing" are the menus' (title_config.c reads them
 # for the menus as the "menu" key's own).
 PAGE_KEYS = {"title": [("title", "screen")], "menu": [("menu", None), ("title", ("entries", "spacing"))],
-             "duel": [("ui", None)]}
-KEYS = ("title", "menu", "ui")
+             "duel": [("ui", None)], "frames": [("card_layout", None)]}
+KEYS = ("title", "menu", "ui", "card_layout")
 
 
 def _kept(key, members, member) -> bool:
@@ -624,7 +647,7 @@ def strings(value) -> set:
 def orphans(project, other: dict) -> list:
     """The tab's own pictures (ui/...) the mod holds that other does not name."""
     used = strings(other)
-    return [name for name in project.files if name.startswith(IMAGE_DIR + "/") and name not in used]
+    return [name for name in project.files if name.startswith((IMAGE_DIR + "/", FRAME_IMAGE_DIR + "/")) and name not in used]
 
 
 def revert(project, keys) -> list:
@@ -659,6 +682,9 @@ def describe(project, keys) -> list:
     if have.get("ui"):
         count = len(duel) if isinstance(duel, dict) else 0
         lines.append("the duel's pictures" + (f" ({count} changed)" if count else ""))
+    if have.get("card_layout"):
+        styles = have["card_layout"].get("frame_styles", {}) if isinstance(have["card_layout"], dict) else {}
+        lines.append("the card-frame layouts" + (f" ({len(styles)} style(s))" if isinstance(styles, dict) else ""))
     return lines
 
 
@@ -673,6 +699,7 @@ class UiTab(Tab):
               "Click the background for its colors."),
              ("menu", "Menus", ("ui_title", "MenuPage"), "Drag a button to place it; the list sets the order."),
              ("duel", "Duel", ("ui_duel", "DuelPage"), "Drag to move, wheel to size, arrows nudge."),
+             ("frames", "Frames", ("ui_frames", "FramesPage"), "Choose a style and element; drag, resize or hide it."),
              ("board", "Duel board", ("ui_board", "BoardPage"), "Click a part of the board or the list; Replace "
               "puts your PNG in its place.")]
 
@@ -797,7 +824,7 @@ class UiTab(Tab):
 
     def revert_all(self):
         self.revert([(k, None) for k in KEYS], "Revert to retail",
-                    "Put the title screen, its menus, the duel's pictures and the duel board back as the game "
+                    "Put the title screen, its menus, the duel's pictures, card-frame layouts and the duel board back as the game "
                     "has them?", board=True)
 
     def revert_page(self, page):

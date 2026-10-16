@@ -17,6 +17,16 @@ from fm_editor.model import Project
 from fm_editor.tests.test_data import fixture
 from fm_editor.tests.test_gui import GuiCase, tk
 
+# CI's lightweight Python deliberately has no Tk package.  The non-widget
+# checks below can still run there; the checks that inspect UiTab itself need
+# its tkinter import and are skipped, just like the GUI cases.
+try:
+    from fm_editor import ui_tab
+except ModuleNotFoundError as problem:
+    if problem.name != "tkinter":
+        raise
+    ui_tab = None
+
 
 def project(other=None) -> Project:
     p = Project(fixture().game())
@@ -103,7 +113,25 @@ class SceneTest(unittest.TestCase):
         self.assertEqual(fit(400, 112, 256, 64, guess_h=32), (100, 28))  # an item drawn at 4x
 
 
+@unittest.skipIf(ui_tab is None, "ui_tab needs Tk")
 class RulesTest(unittest.TestCase):
+    def test_frames_page_is_a_card_layout_page(self):
+        """The UI tab owns the new editor page, including its revert scope
+        and its separate frame-image folder."""
+        self.assertIn("frames", ui_tab.PAGE_KEYS)
+        self.assertEqual(ui_tab.PAGE_KEYS["frames"], [("card_layout", None)])
+        self.assertIn("card_layout", ui_tab.KEYS)
+        self.assertEqual(ui_tab.FRAME_IMAGE_DIR, "frames")
+        self.assertIn("frames", [key for key, *_ in ui_tab.UiTab.PAGES])
+
+    def test_frame_png_keeps_its_folder_when_renamed(self):
+        p = project()
+        with tempfile.TemporaryDirectory() as folder:
+            first = png(Path(folder) / "one.png", color=(1, 2, 3, 255))
+            second = png(Path(folder) / "two.png", color=(4, 5, 6, 255))
+            self.assertEqual(ui_tab.add_image_file(p, first, "style", "frames"), "frames/style.png")
+            self.assertEqual(ui_tab.add_image_file(p, second, "style", "frames"), "frames/style-2.png")
+
     def test_clean(self):
         p = project({"ui": {"duel": {"lp_player": {"y": -20, "scale": 150, "tint": "#FF0000", "label": "ME",
                                                    "digits": 0x00FF00, "hide": False},
@@ -606,6 +634,54 @@ class UiTabTest(GuiCase):
             page.view.seen = None
             page.view.fit()
         self.assertEqual(page.stage.zoom, 2)
+
+    def test_frames_preview_is_a_scaled_card(self):
+        """Frames uses all its column for the 140x196 card, not a 320x240 screen."""
+        page = self.page("frames")
+        self.assertEqual((page.stage.game_width, page.stage.game_height), (140, 196))
+        self.assertTrue(page.view.smooth)
+        with mock.patch.object(page.view, "winfo_width", return_value=800), \
+                mock.patch.object(page.view, "winfo_height", return_value=600):
+            page.view.seen = None
+            page.view.fit()
+        self.assertAlmostEqual(page.stage.zoom, (600 - page.view.tools.winfo_reqheight() - 6) / 196)
+
+    def test_deleting_frame_style_clears_its_assignments(self):
+        """Deleting a referenced style must not leave stale fallback rules."""
+        from fm_editor import ui_frames
+        page = self.page("frames")
+        layout = self.app.project.other.setdefault("card_layout", {})
+        layout.update({
+            "frame_styles": {"remove-me": {"hand_color": "gold"}, "keep-me": {}},
+            "default_style": "remove-me",
+            "default_styles": {"kinds": {"monster": "remove-me"},
+                               "types": {"Dragon": "remove-me"}},
+            "frame_for": [{"class": "trap", "style": "remove-me"}, {"class": "spell", "style": "keep-me"}],
+        })
+        self.app.project.card_extra[1] = {"frame_style": "remove-me", "art": "images/keep.png"}
+        self.app.project.card_extra[999] = {"frame_style": "remove-me"}  # stale project data is still editable
+        added = self.app.project.add_card(1)
+        self.app.project.added[added].extra["frame_style"] = "remove-me"
+        page.style_name.set("remove-me")
+        with mock.patch.object(ui_frames.messagebox, "askyesno", return_value=False) as ask:
+            page.delete_style()
+        self.assertIn("remove-me", layout["frame_styles"])
+        self.assertEqual(layout["default_style"], "remove-me")
+        self.assertTrue(ask.called)
+        self.assertIn("Card:", ask.call_args.args[1])
+        self.assertIn("Card: 999", ask.call_args.args[1])
+        self.assertIn("Rule: class trap", ask.call_args.args[1])
+
+        with mock.patch.object(ui_frames.messagebox, "askyesno", return_value=True):
+            page.delete_style()
+        self.assertNotIn("remove-me", layout["frame_styles"])
+        self.assertIn("keep-me", layout["frame_styles"])   # an empty style is still a style
+        self.assertEqual(layout["frame_for"], [{"class": "spell", "style": "keep-me"}])
+        self.assertNotIn("default_style", layout)
+        self.assertNotIn("default_styles", layout)
+        self.assertEqual(self.app.project.card_extra[1], {"art": "images/keep.png"})
+        self.assertNotIn(999, self.app.project.card_extra)
+        self.assertNotIn("frame_style", self.app.project.added[added].extra)
 
     def test_hold_the_games(self):
         page = self.page("duel")

@@ -17,6 +17,14 @@ static const char *const element_names[CARD_LAYOUT_ELEMENT_COUNT] = {
 #define CARD_LAYOUT_FRAME_MAX_W 140
 #define CARD_LAYOUT_FRAME_MAX_H 196
 
+/* Hand overlays live on a 52x60 sprite.  Keep user values in a modest,
+ * deliberately generous range so their additions to a screen position and
+ * five-digit rows cannot wrap the PS1 short geometry fields. */
+#define CARD_LAYOUT_HAND_COORD_MIN (-128)
+#define CARD_LAYOUT_HAND_COORD_MAX 128
+#define CARD_LAYOUT_HAND_MAX_W 128
+#define CARD_LAYOUT_HAND_MAX_H 128
+
 /* cards.h's CARD_FRAME_* order, named as "frame"'s own sub-keys. */
 static const char *const frame_kind_names[CARD_FRAME_COUNT] = {
     "monster", "magic", "trap", "ritual", "purple", "orange"
@@ -29,9 +37,8 @@ static const char *const frame_kind_names[CARD_FRAME_COUNT] = {
 static CardLayoutPart last[CARD_LAYOUT_ELEMENT_COUNT];
 static int last_set[CARD_LAYOUT_ELEMENT_COUNT];
 
-/* The card CardLayout_SetCard last named: its frame style (the layout's
- * "frame_styles" entry the "frame_for" rules picked, or, for a layout with no
- * styles, the "frame" of its kind) -- its color, the picture's path and
+/* The card CardLayout_SetCard last named: its resolved frame style (or, for a
+ * layout with no styles, the legacy "frame" of its kind) -- its color, picture path and
  * size, and whether it is laid out as a spell. A monster with no frame until
  * a call site sets a real card, as every call site that never draws one. */
 static CardLayoutFrameStyle current;
@@ -140,6 +147,15 @@ static void rect(const JsonValue *part, int *x, int *y, int *w, int *h, int dx, 
     *y = (int)Json_Number(Json_Member(part, "y"), dy);
     *w = (int)Json_Number(Json_Member(part, "width"), dw);
     *h = (int)Json_Number(Json_Member(part, "height"), dh);
+}
+
+static int bounded_coordinate(const JsonValue *part, const char *key, int fallback, int minimum, int maximum)
+{
+    long value = Json_Number(Json_Member(part, key), fallback);
+
+    if (value < minimum) return minimum;
+    if (value > maximum) return maximum;
+    return (int)value;
 }
 
 static int frame_box_dimension(const JsonValue *frame, const char *key, int fallback, int maximum)
@@ -298,7 +314,9 @@ static void note_once(const LayoutSource *source, const char *what, const char *
 
 /* Whether a "frame_for" rule applies to `card`: every condition it names
  * ("class", "tag") holds, and its "setting" (a bool the mod declares), if
- * any, is on. A rule that names none applies to every card. */
+ * any, is on. A rule that names none applies to every card. Released layouts
+ * (v0.3.0's Forbidden Memories HD pack, tools/pc/anime_frame_layout.py) pick
+ * their per-class styles with these rules, so they stay supported. */
 static int rule_applies(const LayoutSource *source, const JsonValue *rule, int card, int cls)
 {
     const char *key = Json_String(Json_Member(rule, "setting"), NULL);
@@ -404,18 +422,20 @@ static int resolve_style(const LayoutSource *source, int card, CardLayoutFrameSt
                      sizeof(out->image));
         return 1;
     }
-    /* A card's explicit named style is strongest.  Unlike its "frame"
-     * palette color it can name any style a layout provides.  Next comes a
-     * color's same-named style, then explicit frame_for rules, then a
-     * type/kind default and finally the global default. */
+    /* Resolve every presentation consistently: an explicit card assignment,
+     * then its printed type and broad kind (default_styles), then the
+     * released order -- a style named for the card's "frame" color, the
+     * first "frame_for" rule that applies, the global default -- and
+     * finally retail. */
     if (card_style && *card_style) name = card_style;
+    if (!name) name = default_style_for_type(source->layout, card);
+    if (!name) name = default_style_for_kind(source->layout, cls);
     if (!name && override >= 0 && Json_Member(styles, color_names[override])) name = color_names[override];
     for (rule = Json_At(Json_Member(source->layout, "frame_for"), 0); !name && rule; rule = Json_Next(rule)) {
         if (rule_applies(source, rule, card, cls)) name = Json_String(Json_Member(rule, "style"), NULL);
     }
-    if (!name) name = default_style_for_type(source->layout, card);
-    if (!name) name = default_style_for_kind(source->layout, cls);
-    if (!name) name = Json_String(Json_Member(source->layout, "default_style"), "gold");
+    if (!name) name = Json_String(Json_Member(source->layout, "default_style"), NULL);
+    if (!name || !*name) return 0;
     style = Json_Member(styles, name);
     if (!style) {
         note_once(source, "no \"frame_styles\" entry named", name);
@@ -483,6 +503,55 @@ int CardLayout_StyleOf(int card_id, CardLayoutStyle *style)
     return found;
 }
 
+/* The hand renderer cannot use ``current``: it draws several duel cards in
+ * one pass, while the large-card viewer has one selected card.  Resolve the
+ * style from the passed card id instead. */
+static const JsonValue *hand_part_for(int card_id, const char *name)
+{
+    LayoutSource source = find_source();
+    CardLayoutFrameStyle style;
+    const JsonValue *styles, *node, *hand;
+
+    if (!full_bleed_of(&source) || !resolve_style(&source, card_id, &style, 0)) return NULL;
+    styles = Json_Member(source.layout, "frame_styles");
+    node = styles && *style.name ? Json_Member(styles, style.name) : NULL;
+    hand = Json_Member(node, "hand");
+    return Json_Member(hand, name);
+}
+
+int CardLayout_HandStyled(int card_id)
+{
+    LayoutSource source = find_source();
+    CardLayoutFrameStyle style;
+    const JsonValue *styles, *node;
+
+    if (!full_bleed_of(&source) || !resolve_style(&source, card_id, &style, 0)) return 0;
+    styles = Json_Member(source.layout, "frame_styles");
+    node = styles && *style.name ? Json_Member(styles, style.name) : NULL;
+    return Json_Member(node, "hand") != NULL;
+}
+
+CardLayoutPlacement CardLayout_HandGet(int card_id, CardLayoutHandElement element)
+{
+    static const char *const names[] = {"art", "atk", "def", "atk_label", "dfd_label"};
+    static const int defaults[][4] = {
+        {6, 6, 40, 32}, {14, 40, 8, 8}, {14, 48, 8, 8}, {5, 40, 8, 8}, {5, 48, 8, 8}
+    };
+    CardLayoutPlacement p = {1, 0, 0, 0, 0};
+    const JsonValue *part;
+
+    if (element < CARD_LAYOUT_HAND_ART || element > CARD_LAYOUT_HAND_DEF_LABEL) return p;
+    part = hand_part_for(card_id, names[element]);
+    p.x = bounded_coordinate(part, "x", defaults[element][0],
+                             CARD_LAYOUT_HAND_COORD_MIN, CARD_LAYOUT_HAND_COORD_MAX);
+    p.y = bounded_coordinate(part, "y", defaults[element][1],
+                             CARD_LAYOUT_HAND_COORD_MIN, CARD_LAYOUT_HAND_COORD_MAX);
+    p.w = frame_box_dimension(part, "width", defaults[element][2], CARD_LAYOUT_HAND_MAX_W);
+    p.h = frame_box_dimension(part, "height", defaults[element][3], CARD_LAYOUT_HAND_MAX_H);
+    p.visible = part_visible(part, 1);
+    return p;
+}
+
 const char *CardLayout_HandFramePath(int card_id)
 {
     static char path[1024];
@@ -503,7 +572,7 @@ const char *CardLayout_FieldFramePath(int card_id)
 
     path[0] = 0;
     if (full_bleed_of(&source) && resolve_style(&source, card_id, &style, 1))
-        snprintf(path, sizeof(path), "%s", *style.field_image ? style.field_image : style.hand_image);
+        snprintf(path, sizeof(path), "%s", style.field_image);
     return path;
 }
 
@@ -581,6 +650,22 @@ int CardLayout_TitleStyled(int card_id)
     styles = Json_Member(source.layout, "frame_styles");
     style_node = styles && *style.name ? Json_Member(styles, style.name) : NULL;
     return layout_part(style_node, source.layout, "title") != NULL;
+}
+
+int CardLayout_StarsCentered(void)
+{
+    LayoutSource source = find_source();
+    const JsonValue *styles, *style_node;
+
+    if (!full_bleed_of(&source) || !current.full_bleed) return 0;
+    styles = Json_Member(source.layout, "frame_styles");
+    style_node = styles && *current.name ? Json_Member(styles, current.name) : NULL;
+    /* Before frame_styles gained per-style parts, the bundled anime layout
+     * used the shared ``stars.x`` as a centre coordinate.  Keep that
+     * established manifest convention.  A style's own stars object is the
+     * editor-facing form and deliberately remains a literal anchor. */
+    return Json_Member(style_node, "stars") == NULL &&
+           Json_Member(source.layout, "stars") != NULL;
 }
 
 const char *CardLayout_FramePath(void)
@@ -699,16 +784,18 @@ CardLayoutPart CardLayout_Part(CardLayoutElement element)
         part = layout_part(style_node, source.layout, "dfd_label");
         break;
     case CARD_LAYOUT_ART:
-        /* w/h at 0 (retail) unless full-bleed and the mod (or the style
-         * itself) gives a rect: func_80028B08.c reads w != 0 as "stretch
-         * the art", so an empty "art" key here (no mod, or full_bleed off)
-         * correctly draws nothing special. Spell reads "spell"."art"
+        /* w/h stay 0 (retail) unless full-bleed and the layout gives an
+         * art object at all: func_80028B08.c reads w != 0 as "stretch the
+         * art".  Once an object exists, however, its omitted fields mean
+         * the retail art rectangle.  That makes {"y": 84} a useful
+         * position-only override, rather than silently leaving the retail
+         * sprite at its original position.  Spell reads "spell"."art"
          * instead of "art" -- magic/trap/ritual's own art box, not
          * monster's. */
         if (spell) part = Json_Member(layout_part(style_node, source.layout, "spell"), "art");
         else part = layout_part(style_node, source.layout, "art");
         if (full_bleed) {
-            rect(part, &p.x, &p.y, &p.w, &p.h, 0, 0, 0, 0);
+            if (part) rect(part, &p.x, &p.y, &p.w, &p.h, 0x13, 0x32, 0x66, 0x60);
         }
         break;
     default:

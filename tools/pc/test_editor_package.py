@@ -75,7 +75,7 @@ def check(archive: Path, version=None, commit=None):
         report = json.loads(report_path.read_text(encoding="utf-8"))
         require(result.returncode == 0 and report.get("ok"), report)
         require(report.get("tabs") == TABS, f"tabs {report.get('tabs')}, expected {TABS}")
-        require(set(report["ui_pages"]) == {"title", "menu", "duel", "board"}, report)
+        require(set(report["ui_pages"]) == {"title", "menu", "duel", "frames", "board"}, report)
         if version:
             require(report["build"]["version"] == version, report)
         if commit:

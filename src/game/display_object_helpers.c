@@ -203,6 +203,60 @@ void DisplayObject_SubmitPacket(SpritePrim *sprite, u8 *packet, s32 ot, s32 mode
     }
 }
 
+#ifdef MEMORIES_PC
+/* See display_object_packet_submit.h. The default case above, from its
+ * vertices on, for a quad whose texels the caller already chose: the same
+ * scratchpad vertices relative to `origin`, the same RotAverageNclip4 under
+ * the matrix func_80041F90 left in the GTE, and the same DivideFT4 split
+ * when the object asks for one. */
+void DisplayObject_SubmitProjectedQuad(u8 *packet, s32 ot, s32 depth, u8 *extra)
+{
+    DisplayObjectPacketOrigin *origin = (DisplayObjectPacketOrigin *)extra;
+    PSXLONG *otz = (PSXLONG *)SCRATCHPAD_ADDR(0x1F8002E0);
+    SVECTOR *v = SCRATCH_VERTEX(0);
+    s32 pri = (s16)depth;
+
+    v[0].vx = POLY_FT4_VIEW(packet)->x0 - origin->x;
+    v[0].vy = POLY_FT4_VIEW(packet)->y0 - origin->y;
+    v[1].vx = POLY_FT4_VIEW(packet)->x1 - origin->x;
+    v[1].vy = POLY_FT4_VIEW(packet)->y1 - origin->y;
+    v[2].vx = POLY_FT4_VIEW(packet)->x2 - origin->x;
+    v[2].vy = POLY_FT4_VIEW(packet)->y2 - origin->y;
+    v[3].vx = POLY_FT4_VIEW(packet)->x3 - origin->x;
+    v[3].vy = POLY_FT4_VIEW(packet)->y3 - origin->y;
+    v[0].vz = v[1].vz = v[2].vz = v[3].vz = 0;
+    if (RotAverageNclip4(v, v + 1, v + 2, v + 3,
+                         (PSXLONG *)&POLY_FT4_VIEW(packet)->x0, (PSXLONG *)&POLY_FT4_VIEW(packet)->x1,
+                         (PSXLONG *)&POLY_FT4_VIEW(packet)->x2, (PSXLONG *)&POLY_FT4_VIEW(packet)->x3,
+                         otz, otz + 1, otz + 2) <= 0) {
+        return;
+    }
+    if (origin->divisions == 0) {
+        GsSortPoly(packet, GS_OT_VIEW(ot), pri);
+        return;
+    }
+    {
+        u32 *rgbc = (u32 *)SCRATCHPAD_ADDR(0x1F800280);
+        u32 *uv = (u32 *)SCRATCHPAD_ADDR(0x1F800290);
+        DIVPOLYGON4 *divp = (DIVPOLYGON4 *)SCRATCHPAD_ADDR(0x1F800000);
+
+        divp->ndiv = origin->divisions;
+        divp->pih = 320;
+        divp->piv = 272;
+        *rgbc = *(u32 *)&POLY_FT4_VIEW(packet)->r0;
+        uv[0] = *(u32 *)&POLY_FT4_VIEW(packet)->u0;
+        uv[1] = *(u32 *)&POLY_FT4_VIEW(packet)->u1;
+        uv[2] = *(u32 *)&POLY_FT4_VIEW(packet)->u2;
+        uv[3] = *(u32 *)&POLY_FT4_VIEW(packet)->u3;
+        D_800FE240 = (u32 *)DivideFT4(v, v + 1, v + 2, v + 3,
+                                     uv, (u32 *)SCRATCHPAD_ADDR(0x1F800294), (u32 *)SCRATCHPAD_ADDR(0x1F800298),
+                                     (u32 *)SCRATCHPAD_ADDR(0x1F80029C),
+                                     (CVECTOR *)rgbc, (POLY_FT4 *)D_800FE240,
+                                     (u32 *)GS_OT_VIEW(ot)->org + pri, divp);
+    }
+}
+#endif
+
 void DisplayObject_InitializeGouraudQuad(
     DisplayObject *object,
     s32 has_secondary_quad

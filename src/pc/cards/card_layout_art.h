@@ -48,12 +48,12 @@ int CardLayoutArt_FieldBackCell(int card_id, int *tpage, int *u, int *v, int *cl
  * to the style's own "width" x "height". *w/*h on success describe that
  * replacement texture's source dimensions; the renderer maps each retail
  * turning-sheet part into them while retaining the retail geometry that
- * drives the turn animation. (card_layout_art.c's
- * BACK_MAX_SIDE caps each axis at 254, one short of POLY_FT4's own u8 UV
- * span limit to leave room for the padded edge this file's cells all keep
- * against the PS1 GPU's last-texel-drop quirk; a style whose box is bigger
- * gets neither this -- a logged note instead, and retail's own swirl
- * stays). 0 leaves retail's own swirl sprite alone. */
+ * drives the turn animation. (The style box is already capped at 140x196,
+ * card_layout.c's CARD_LAYOUT_FRAME_MAX_W/H; card_layout_art.c's
+ * BACK_MAX_SIDE, 254 an axis -- one short of POLY_FT4's own u8 UV span, for
+ * the padded edge this file's cells all keep against the PS1 GPU's
+ * last-texel-drop quirk -- is a guard behind that.) 0 leaves retail's own
+ * swirl sprite alone. */
 int CardLayoutArt_BackCell(int card_id, int *tpage, int *u, int *v, int *clut, int *w, int *h);
 
 /* The current style's optional 12x14 Library-grid cell. */

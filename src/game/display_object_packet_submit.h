@@ -36,4 +36,16 @@ void DisplayObject_SubmitPacket(
 void DisplayObject_SubmitPacket(SpritePrim *sprite, u8 *packet, s32 ot, s32 mode, u8 *extra);
 #endif
 
+#ifdef MEMORIES_PC
+/* The projected half of DisplayObject_SubmitPacket's default case for a
+ * POLY_FT4 the port built itself (a card_layout mod's own texels, whose UV
+ * span need not match the on-screen size the way a SpritePrim's extent
+ * must): `packet`'s four x/y are taken as the flat screen corners, moved
+ * relative to `extra`'s origin, projected through the matrix func_80041F90
+ * left in the GTE, and sorted at `depth` -- subdivided through DivideFT4
+ * when the origin asks for divisions, culled when the quad faces away. Use
+ * it where retail submits with a 0xF0000 (clip-tested) mode. */
+void DisplayObject_SubmitProjectedQuad(u8 *packet, s32 ot, s32 depth, u8 *extra);
+#endif
+
 #endif

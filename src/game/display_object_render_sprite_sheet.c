@@ -24,45 +24,53 @@
 #include "duel_effect_resource_record.h"
 #include "pc/debug/log.h"
 
-/* The card viewer's rotating "card turning" sprite is screen-space
- * (DISPLAY_OBJECT_FLAG_SCREEN_SPACE, confirmed live), and every sample taken
- * this session -- through its slide-in and settled states alike -- showed
- * sprite->rotate == 0. func_800283F4.c's own "open" animation sets
- * object->field_20.b.field_21, never field_22, and field_22 (shifted <<4)
- * is what DisplayObject_RenderSpriteSheet's own sprite->rotate actually
- * reads a few lines above; nothing here ever changes it. So this needs no
- * GTE projection at all to place a quad correctly: x, y are already final
- * screen coordinates, the same way GsSortFastSprite's own "no rotate, no
- * scale" fast path treats them (confirmed by two wrong guesses that both
- * routed through RotTransPers and both ended up mispositioned). One call a
- * SpriteSheetPart, at that part's own (x + dx, y + dy) and size, the exact
- * geometry retail's own loop below computes for it -- just sampling this
- * cell's own bank instead of retail's page. GsSortFastSprite's packet
- * (what DisplayObject_SubmitPacket would otherwise route this through)
- * only keeps 5 bits of tpage, the same limit every other custom cell in
- * this codebase already works around the same way: a quad through
- * GsSortPoly instead, whose own tpage field is a full word. */
-static void submit_screen_cell(const SpritePrim *sprite, s32 x, s32 y, s32 w, s32 h,
-                               s32 tpage, s32 u, s32 v, s32 tex_w, s32 tex_h,
-                               s32 clut, s32 ot, s32 depth)
+/* One piece of a style's card-viewer back (back_image), on the on-screen
+ * rectangle retail's own loop below gives the same SpriteSheetPart, sampling
+ * the style's bank cell instead of retail's page. GsSortFastSprite's packet
+ * only keeps 5 bits of tpage, so this is a POLY_FT4 (a full-word tpage).
+ * `flip` swaps the u columns, as DisplayObject_SubmitPacket does for a
+ * sprite with 0x800000. While the card turns, the object is clip-tested:
+ * func_80041F90 has left its rotation in the GTE, and `proj` is the origin
+ * it wrote, so the piece is projected (and subdivided) the way retail's
+ * 0xF0000 submission projects its own; with `proj` NULL the rectangle is
+ * already final screen space.
+ *
+ * `attribute` is the word retail's loop gives each part's sprite: as in
+ * DisplayObject_SubmitPacket's default case, its 0x40000000 makes the quad
+ * semi-transparent and its bits 28-29 are the rate in the tpage. Its color
+ * mode bits (24-25) are not taken: they describe retail's page, and the
+ * style's cell already carries its own depth. */
+static void submit_back_cell(u32 attribute, u32 rgb, s32 x, s32 y, s32 w, s32 h,
+                             s32 tpage, s32 u, s32 v, s32 tex_w, s32 tex_h,
+                             s32 clut, s32 flip, s32 ot, s32 depth, u8 *proj)
 {
     POLY_FT4 quad;
     setPolyFT4(&quad);
     quad.pad1 = quad.pad2 = 0;
-    quad.r0 = GS_SPRITE_VIEW(sprite)->r;
-    quad.g0 = GS_SPRITE_VIEW(sprite)->g;
-    quad.b0 = GS_SPRITE_VIEW(sprite)->b;
-    quad.tpage = (u16)tpage;
+    if (attribute & 0x40000000) setSemiTrans(&quad, 1);
+    quad.r0 = (u8)rgb;
+    quad.g0 = (u8)(rgb >> 8);
+    quad.b0 = (u8)(rgb >> 16);
+    quad.tpage = (u16)(tpage | ((attribute >> 23) & 0x60));
     quad.clut = (u16)clut;
     quad.x0 = quad.x2 = (short)x;
     quad.x1 = quad.x3 = (short)(x + w);
     quad.y0 = quad.y1 = (short)y;
     quad.y2 = quad.y3 = (short)(y + h);
-    quad.u0 = quad.u2 = (u8)u;
-    quad.u1 = quad.u3 = (u8)(u + tex_w);
+    if (flip) {
+        quad.u1 = quad.u3 = (u8)u;
+        quad.u0 = quad.u2 = (u8)(u + tex_w);
+    } else {
+        quad.u0 = quad.u2 = (u8)u;
+        quad.u1 = quad.u3 = (u8)(u + tex_w);
+    }
     quad.v0 = quad.v1 = (u8)v;
     quad.v2 = quad.v3 = (u8)(v + tex_h);
-    GsSortPoly(&quad, (GsOT *G32)ot, (u16)depth);
+    if (proj) {
+        DisplayObject_SubmitProjectedQuad((u8 *)&quad, ot, depth, proj);
+    } else {
+        GsSortPoly(&quad, (GsOT *G32)ot, (u16)depth);
+    }
 }
 #endif
 
@@ -197,28 +205,43 @@ retry:
      * but leaves that pointer intact; a later menu object can reuse the same
      * slot/address.  Require slot 3 to still own this object as well, so a
      * stale viewer pointer cannot turn an unrelated title-menu sprite into a
-     * card back. */
-    if (object == gDuel_pCardViewerCard && D_800EA0E8[3].object_00 == object) {
+     * card back.
+     *
+     * The same object also draws the card's front plate: CardPreview_
+     * UpdateVariant (its field_10 callback, run by func_80041F90 above)
+     * switches it to variant 2, the back, while the card faces away and
+     * back to its own variant (field_6A) when it faces the viewer. Only
+     * variant 2 is the back; the front plate stays retail's (or is retired
+     * by func_80028B08.c's GsDOFF when a full-bleed frame replaces it). */
+    if (object == gDuel_pCardViewerCard && D_800EA0E8[3].object_00 == object &&
+        object->field_69 == 2) {
         s32 back_tpage, back_u, back_v, back_clut, back_w, back_h;
         s32 card_id = (s16)D_800EA0E8[3].field_30;
-        if (CardLayoutArt_BackCell(card_id, &back_tpage, &back_u, &back_v, &back_clut, &back_w, &back_h)) {
+        /* Without the clip test the retail loop below either sorts fast
+         * sprites at (x + dx, y + dy) (the 0x08000000 screen cull) or
+         * rotates and scales them about the +0x48 pivot. Only the first, or
+         * the second at no rotation and unit scale, is the flat rectangle
+         * submit_back_cell draws; anything else keeps retail's own back. */
+        s32 flat_exact = state->screen != 0 ||
+                         (sprite->rotate == 0 && GS_SPRITE_VIEW(sprite)->scalex == ONE &&
+                          GS_SPRITE_VIEW(sprite)->scaley == ONE);
+        if ((work->clip != 0 || flat_exact) &&
+            CardLayoutArt_BackCell(card_id, &back_tpage, &back_u, &back_v, &back_clut, &back_w, &back_h)) {
             /* Retail's own card-view back is six SpriteSheetPart pieces
-             * tiling one logical image, not one texture (confirmed live:
-             * their own (dx, dy) to (dx + w, dy + h) boxes cover exactly
-             * (0, 0)-(144, 200) with no gaps or overlap, matching
-             * tools/pc/hd_assets_pack.py's own BACK_SIZE). A single
-             * replacement quad can never stand in for that correctly (two
-             * tries, both confirmed wrong live) -- each piece's own dx, dy
-             * is read directly as this cell's own texel offset instead
-             * (CardLayoutArt_BackCell builds it at that same 144x200, the
-             * card_layout.h default "image" and "back_image" now share),
-             * so this walks the same pieces retail's own loop below would,
-             * at the same on-screen position and size, just sampling a
-             * different bank. */
+             * tiling one logical 144x200 image ((0, 0)-(144, 200), no gaps
+             * or overlap; tools/pc/hd_assets_pack.py's BACK_SIZE). Each
+             * piece keeps retail's on-screen rectangle -- also the turn
+             * animation's geometry -- and samples the part of the style's
+             * picture (back_w x back_h, the style's width/height) that
+             * covers the same fraction of the card. */
+            u32 rgb = DISPLAY_OBJECT_COLOR_BYTES(object)[0] |
+                      (DISPLAY_OBJECT_COLOR_BYTES(object)[1] << 8) |
+                      (DISPLAY_OBJECT_COLOR_BYTES(object)[2] << 16);
+            u8 *proj = work->clip != 0 ? (u8 *)&work->proj : 0;
             s32 pi;
             for (pi = 0; pi < count; pi++) {
                 SpriteSheetPart *p = &part[pi];
-                s32 pdx, pdy, pw, ph;
+                s32 pdx, pdy, pw, ph, sx0, sy0, sx1, sy1, sx;
                 if (state->flags & 0x10) {
                     pdx = (u8)p->dx | ((p->cell & 0xC000) >> 6);
                     if (pdx & 0x200) pdx |= ~0x1FF;
@@ -230,19 +253,22 @@ retry:
                 }
                 pw = ((p->size >> 2) & 0x78) + 8;
                 ph = ((p->size >> 6) & 0x78) + 8;
-                /* Keep the retail sheet's geometry: it is also the card
-                 * turn animation's geometry.  The replacement picture may
-                 * be a different size, so map this part's source rectangle
-                 * into that picture independently.  Rounding both edges,
-                 * rather than scaling a width alone, keeps neighbouring
-                 * parts contiguous and never reads beyond back_w/back_h. */
-                s32 sx0 = pdx * back_w / 144;
-                s32 sy0 = pdy * back_h / 200;
-                s32 sx1 = (pdx + pw) * back_w / 144;
-                s32 sy1 = (pdy + ph) * back_h / 200;
-                submit_screen_cell(sprite, x + pdx, y + pdy, pw, ph,
-                                   back_tpage, back_u + sx0, back_v + sy0, sx1 - sx0, sy1 - sy0,
-                                   back_clut, ot, depth);
+                /* Rounding both edges, rather than scaling a width alone,
+                 * keeps neighbouring parts contiguous and never reads
+                 * beyond back_w/back_h. */
+                sx0 = pdx * back_w / 144;
+                sy0 = pdy * back_h / 200;
+                sx1 = (pdx + pw) * back_w / 144;
+                sy1 = (pdy + ph) * back_h / 200;
+                /* A mirrored object (attribute 0x800000) puts the piece at
+                 * -(dx + w), as retail's loop does, and shows its texels
+                 * reversed. A part's own 0x2000 cell bit is not applied:
+                 * that marks retail texels stored mirrored, while these are
+                 * read from the picture's own unmirrored place. */
+                sx = state->mirror != 0 ? -(pdx + pw) : pdx;
+                submit_back_cell(work->attribute, rgb, x + sx, y + pdy, pw, ph,
+                                 back_tpage, back_u + sx0, back_v + sy0, sx1 - sx0, sy1 - sy0,
+                                 back_clut, state->mirror != 0, ot, depth, proj);
             }
             return;
         }

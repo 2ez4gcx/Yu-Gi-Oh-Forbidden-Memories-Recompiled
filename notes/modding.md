@@ -1103,8 +1103,16 @@ disagree. Three keys say it:
   art, stats and markers. `field_image` independently replaces the face-up
   3D field-card frame (the same 52x60 size); without it, that card keeps its
   retail image. `field_back_image` (52x60) replaces the face-down back in the
-  hand and on the field; `back_image` is the back the card viewer shows while
-  a card turns, stretched to the style's `width`/`height` (254 at most each).
+  hand and on the field. A hand card that is raised, flipped or played turns
+  and scales with the game's own projection, and so do these two pictures
+  and the `hand` overlays below. `back_image` is the card back the card
+  viewer shows: the side the card opens on, until it has turned to its
+  front (only the back -- the front stays the style's `image`, or retail's
+  plate without one or with `full_bleed` off). The picture is reduced to
+  the style's `width`/`height` (the frame box above, so 140x196 at most),
+  and the viewer keeps retail's own 144x200 card back on screen -- its
+  size, slide and turn -- with each part of it showing the same part of the
+  picture.
   Without those images, the corresponding retail card back is drawn.
   Its optional `hand` object independently places the overlays on that same
   52x60 card: `art`, `atk`, `def`, `atk_label` and `dfd_label`. Each accepts

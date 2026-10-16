@@ -438,8 +438,8 @@ game's Free Duel does: the console's one card, or more with the player's
 Game > Card drops (up to 99). In a tower duel `drops` is the count instead:
 1 by default, so a player's 99 does not inflate a tower; `"player"` follows
 the setting. The floor's `reward` is given as well. Inside the tower the
-tower's value wins over any other count of drops, the game's or another
-mod's.
+tower's value wins over any other count of drops: the game's, or any
+mod's `"limits": {"card_drops": n}`, the tower's own mod included.
 
 **`save_states`: false.** No save state is saved or loaded while the player
 is in the tower, whichever way it is asked for (the hotkeys, the menu's
@@ -599,7 +599,8 @@ what the end-to-end test follows.
   jump to the title) and `"restart"` (floor 1 after LEAVE, past a
   checkpoint), `unlock_opponent` (`false` keeps the tower-only Ghost Simon
   out of Free Duel once beaten, `true` gives Rex Raptor his Free Duel flag),
-  `drops` 5 with Game > Card drops at 99 (five cards), and `"save_states":
+  `drops` 5 with Game > Card drops at 99 (five cards), and again with the
+  mod's own `"limits": {"card_drops": 20}` (still five), and `"save_states":
   false` with `"cheats": false` (a state neither saved nor loaded on the
   intro's stage, the status or in the duel, a duel at 8000 with Starting LP
   at 9999, no jump out of it; a state saved outside the tower as usual);

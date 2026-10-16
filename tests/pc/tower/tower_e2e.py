@@ -17,7 +17,12 @@ Drives the game through tools/pc/yfm_control.py with the tests' tower mod
      reward's duelist (Nitemare) joins the Free Duel grid;
   7. a control run without the rule: the same CPU deck fuses;
   8. "unlock": "after_ending": the button is dimmed and buzzes until the
-     save has seen the ending.
+     save has seen the ending;
+  9. the campaign's stage for a tower story (stage), the rules of a run
+     (leave, unlock), the tower's "drops" over Game > Card drops and over the
+     mod's own "limits" card_drops (drops, drops_lock), save states and
+     cheats kept out (guards), and without the mod the title as a build
+     without tower mode (no_mod).
 
 Pictures of the game's frames go to --out. Exit status 0 when every check
 holds.
@@ -805,15 +810,37 @@ def phase_unlock(exe: Path, out: Path):
 def phase_drops(exe: Path, out: Path):
     """"drops": the tower's count of cards a won duel gives, over Game > Card
     drops at 99."""
+    tower_drops(exe, out, "drops", "06", None,
+                "drops 5 with Game > Card drops at 99: a won floor gives 5 cards")
+
+
+def phase_drops_lock(exe: Path, out: Path):
+    """"drops" over the mod's own lock: "limits": {"card_drops": 20} sets
+    every won duel's count (notes/card-drops.md), and inside the tower the
+    tower's 5 still wins (Tower_CardDrops over CardDrops_Count)."""
+    tower_drops(exe, out, "drops-lock", "07", 20,
+                "drops 5 over the mod's \"limits\" card_drops 20: a won floor gives 5 cards")
+
+
+def tower_drops(exe: Path, out: Path, name: str, shot: str, lock, what: str):
+    """A tower of "drops" 5, Game > Card drops at 99 and, when `lock` is a
+    number, the mod's "limits" card_drops at it: the first floor won gives
+    the tower's 5."""
     def change(tower):
         tower.pop("intro", None)
         tower["drops"] = 5
         tower["floors"] = [plain_floor("Simon Muran"), plain_floor("Seto")]
-    t = Tower(exe, out, "drops", manifest_variant(change), settings={"card_drops": 99})
+    manifest = manifest_variant(change)
+    if lock is not None:
+        manifest.setdefault("limits", {})["card_drops"] = lock
+    t = Tower(exe, out, name, manifest, settings={"card_drops": 99})
     g = t.game
     to_second_menu(g)
     enter_tower(t)
     t.until_said("tower: status")
+    if lock is not None:   # else 99 against the tower's 5 would pass all the same
+        check(f"the mod's lock is applied (tables: value card_drops {lock})",
+              t.said(f"tables: value card_drops {lock}") >= 1)
     g.step(120)
     before = chest_total(g)
     g.press("cross", hold=4, after=40)
@@ -821,15 +848,15 @@ def phase_drops(exe: Path, out: Path):
     win_quickly(g)
     g.wait_until(lambda g: g.mode() == DUEL and over(g), 3000, what="the duel's end")
     g.step(400)
-    shot3(t, out, "06-drops-results.png")
+    shot3(t, out, f"{shot}-{name}-results.png")
     for page in "abc":                      # the results: rank, then the cards, a page each
         g.press("cross", hold=4, after=10)
         g.step(150)
-        shot3(t, out, f"06{page}-drops-results.png")
+        shot3(t, out, f"{shot}{page}-{name}-results.png")
     back_to_tower(t)
     t.until_said("tower: status", count=2, timeout=9000)
     after = chest_total(g)
-    check(f"drops 5 with Game > Card drops at 99: a won floor gives 5 cards ({after - before})", after - before == 5)
+    check(f"{what} ({after - before})", after - before == 5)
     t.quit()
 
 
@@ -1088,6 +1115,7 @@ def main():
               "leave": lambda: phase_leave(options.exe, options.out),
               "unlock": lambda: phase_unlock(options.exe, options.out),
               "drops": lambda: phase_drops(options.exe, options.out),
+              "drops_lock": lambda: phase_drops_lock(options.exe, options.out),
               "guards": lambda: phase_guards(options.exe, options.out),
               "no_mod": lambda: phase_no_mod(options.exe, options.out, options.baseline)}
     for name, phase in phases.items():

@@ -724,8 +724,11 @@ def translated_clang():
     sys.exit(translation_problem(None) or "build_mod: no clang for aarch64-translated")
 
 
-def guest_ir_tool():
-    """(the guest pass's executable, None), or (None, why there is none)."""
+def guest_ir_tool(build_tool=True):
+    """(the guest pass's executable, None), or (None, why there is none).
+    In the repository llvm_guest.py builds it, which can mean fetching
+    LLVM 21 first: only with `build_tool` (the target asked for by name, a
+    game build); otherwise only one built before is taken."""
     named = os.environ.get("MEMORIES_GUEST_IR")
     if named:
         return (named, None) if os.path.isfile(named) else (None, f"MEMORIES_GUEST_IR names {named}, which is not there")
@@ -735,8 +738,14 @@ def guest_ir_tool():
         return shipped, None
     if SHIPPED:
         return None, "the SDK has no tools/memories-guest-ir and MEMORIES_GUEST_IR is not set"
+    import llvm_guest
+    if not build_tool:
+        built = llvm_guest.OUT / ("memories-guest-ir" + (".exe" if os.name == "nt" else ""))
+        if built.is_file():
+            return str(built), None
+        return None, ("it is not built yet in this checkout (python tools/pc/llvm_guest.py builds it, or name "
+                      f"--target {TRANSLATED}, which does)")
     try:
-        import llvm_guest
         return str(llvm_guest.compiler()), None
     except (Exception, SystemExit) as error:   # no LLVM 21 libraries, no C++ compiler: said below
         return None, f"tools/pc/llvm_guest.py could not build it ({str(error).strip() or type(error).__name__})"
@@ -750,7 +759,7 @@ GUEST_IR_HELP = (
     "MEMORIES_GUEST_IR to that file, or put it in the SDK's tools folder, and run build_mod.py again.")
 
 
-def translation_problem(games):
+def translation_problem(games, build_tool=True):
     """Why aarch64-translated cannot be built here (a message), or None.
     With `games`, it also finds the game's tables (mod_translation.json and
     mod_signatures.json in the first of `games` that has them) and keeps
@@ -765,7 +774,7 @@ def translation_problem(games):
                 f"not parse there ({found}). The Android NDK r29's clang is {TRANSLATED_CLANG_MAX}: set "
                 "ANDROID_NDK_ROOT to the NDK (build_mod.py takes its clang when the other one is newer), or "
                 "MEMORIES_MOD_CC to its toolchains/llvm/prebuilt/<host>/bin/clang.")
-    tool, why = guest_ir_tool()
+    tool, why = guest_ir_tool(build_tool)
     if not tool:
         return f"build_mod: the Android object ({TRANSLATED}) needs the game's guest pass: {why}.\n{GUEST_IR_HELP}"
     if games is None:
@@ -1089,7 +1098,7 @@ def main():
         # Not asked for by name: left out, with what it needs, when this
         # machine cannot build it (clang newer than 21, no guest pass, no
         # Android game's tables), as the 64-bit targets are without clang.
-        problem = translation_problem(options.game or game_builds(TRANSLATED))
+        problem = translation_problem(options.game or game_builds(TRANSLATED), build_tool=False)
         if problem:
             print(f"{problem}\nThe other objects are built; the Android one is not.", file=sys.stderr)
             targets.remove(TRANSLATED)

@@ -8,7 +8,7 @@ the test's own).
 - It names exactly what is missing of clang, ld.lld and llvm-objcopy.
 - Without any of them, and no gcc, it builds nothing and says so; asked for
   a 64-bit target by name without them, it builds nothing either."""
-import contextlib, io, os, shutil, stat, sys, tempfile, unittest
+import contextlib, io, os, pathlib, shutil, stat, sys, tempfile, unittest
 from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -130,6 +130,20 @@ class Toolchain(unittest.TestCase):
         self.assertIn("needs the game's guest pass", text)
         self.assertIn(f"MEMORIES_GUEST_IR names {missing}", text)
         self.assertIn("python tools/pc/llvm_guest.py", text)
+
+    def test_translated_not_named_builds_no_pass(self):
+        """Not asked for by name, the target takes a guest pass built before
+        and never starts llvm_guest.py's build (which may fetch LLVM)."""
+        import llvm_guest
+        clang = self.program("clang")
+        self.program("ld.lld")
+        environment = {name: value for name, value in os.environ.items() if name != "MEMORIES_GUEST_IR"}
+        with mock.patch.object(build_mod, "translated_candidates", lambda: [(clang, 21)]), \
+                mock.patch.dict(os.environ, environment, clear=True), \
+                mock.patch.object(llvm_guest, "OUT", pathlib.Path(self.bin)), \
+                mock.patch.object(llvm_guest, "compiler", side_effect=AssertionError("built")):
+            text = build_mod.translation_problem(None, build_tool=False)
+        self.assertIn("it is not built yet in this checkout", text)
 
     def test_translated_needs_the_game_tables(self):
         clang = self.program("clang")

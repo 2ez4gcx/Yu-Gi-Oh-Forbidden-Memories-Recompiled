@@ -33,18 +33,25 @@
  * func_80041F90 has left its rotation in the GTE, and `proj` is the origin
  * it wrote, so the piece is projected (and subdivided) the way retail's
  * 0xF0000 submission projects its own; with `proj` NULL the rectangle is
- * already final screen space. */
-static void submit_back_cell(u32 rgb, s32 x, s32 y, s32 w, s32 h,
+ * already final screen space.
+ *
+ * `attribute` is the word retail's loop gives each part's sprite: as in
+ * DisplayObject_SubmitPacket's default case, its 0x40000000 makes the quad
+ * semi-transparent and its bits 28-29 are the rate in the tpage. Its color
+ * mode bits (24-25) are not taken: they describe retail's page, and the
+ * style's cell already carries its own depth. */
+static void submit_back_cell(u32 attribute, u32 rgb, s32 x, s32 y, s32 w, s32 h,
                              s32 tpage, s32 u, s32 v, s32 tex_w, s32 tex_h,
                              s32 clut, s32 flip, s32 ot, s32 depth, u8 *proj)
 {
     POLY_FT4 quad;
     setPolyFT4(&quad);
     quad.pad1 = quad.pad2 = 0;
+    if (attribute & 0x40000000) setSemiTrans(&quad, 1);
     quad.r0 = (u8)rgb;
     quad.g0 = (u8)(rgb >> 8);
     quad.b0 = (u8)(rgb >> 16);
-    quad.tpage = (u16)tpage;
+    quad.tpage = (u16)(tpage | ((attribute >> 23) & 0x60));
     quad.clut = (u16)clut;
     quad.x0 = quad.x2 = (short)x;
     quad.x1 = quad.x3 = (short)(x + w);
@@ -259,7 +266,7 @@ retry:
                  * that marks retail texels stored mirrored, while these are
                  * read from the picture's own unmirrored place. */
                 sx = state->mirror != 0 ? -(pdx + pw) : pdx;
-                submit_back_cell(rgb, x + sx, y + pdy, pw, ph,
+                submit_back_cell(work->attribute, rgb, x + sx, y + pdy, pw, ph,
                                  back_tpage, back_u + sx0, back_v + sy0, sx1 - sx0, sy1 - sy0,
                                  back_clut, state->mirror != 0, ot, depth, proj);
             }

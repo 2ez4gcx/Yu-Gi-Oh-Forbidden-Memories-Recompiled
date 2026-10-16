@@ -24,10 +24,6 @@
 #define CARD_FRAME_SCRATCH_BYTES(scratch) ((u8 *)(scratch))
 
 #ifdef MEMORIES_PC
-/* A hand card's retail art, labels and digits all have fixed texture cells.
- * A custom hand layout changes their on-screen rectangles, not the source
- * cells: changing SpritePrim's extent crops or spills into its neighbours.
- * Draw a quad with the original UV footprint instead. */
 /* A port-built quad for a hand card, sorted the way retail submits that
  * card's own pieces: `fl` is func_80016784's DisplayObject_SubmitPacket
  * mode. A clip-tested card (0xF0000: being played, flipped or otherwise
@@ -43,11 +39,17 @@ static void CardLayout_SortHandQuad(POLY_FT4 *quad, s32 ot, s32 fl, u8 *origin)
     }
 }
 
-static void CardLayout_DrawHandCell(const SpritePrim *src, s32 x, s32 y, s32 w, s32 h,
+/* A hand card's retail art, labels and digits all have fixed texture cells.
+ * A custom hand layout changes their on-screen rectangles, not the source
+ * cells: changing SpritePrim's extent crops or spills into its neighbours.
+ * Draw a quad with the original UV footprint instead. `attribute` is the
+ * object's own word (func_80016784's `t`), not `src`'s scratchpad copy: a
+ * clip-tested cell before this one may have run DivideFT4, whose work area
+ * at 0x1F800000 covers `z`'s attribute. */
+static void CardLayout_DrawHandCell(const SpritePrim *src, u32 attribute, s32 x, s32 y, s32 w, s32 h,
                                     u8 u, u8 v, u8 cell_w, u8 cell_h, s32 ot, s32 fl, u8 *origin)
 {
     POLY_FT4 quad;
-    u32 attribute = src->attribute;
 
     if (w <= 0 || h <= 0) return;
     memset(&quad, 0, sizeof(quad));
@@ -217,14 +219,14 @@ void func_80016784(DisplayObject *object, s32 arg1, s32 arg2, s32 arg3) {
                             Text_EncodeDecimalDigits((s16)d, hand_digits, sp18);
                             Text_EncodeDecimalDigits(d >> 0x10, hand_digits, sp20);
                             if (hand_atk_label.visible) {
-                                CardLayout_DrawHandCell(k, o->pos.h.x + hand_atk_label.x,
+                                CardLayout_DrawHandCell(k, t, o->pos.h.x + hand_atk_label.x,
                                                         o->pos.h.y + hand_atk_label.y,
                                                         hand_atk_label.w, hand_atk_label.h,
                                                         0x78, 0x70, 8, 8, arg1, fl,
                                                         CARD_FRAME_SCRATCH_BYTES(o));
                             }
                             if (hand_def_label.visible) {
-                                CardLayout_DrawHandCell(k, o->pos.h.x + hand_def_label.x,
+                                CardLayout_DrawHandCell(k, t, o->pos.h.x + hand_def_label.x,
                                                         o->pos.h.y + hand_def_label.y,
                                                         hand_def_label.w, hand_def_label.h,
                                                         0x78, 0x78, 8, 8, arg1, fl,
@@ -232,7 +234,7 @@ void func_80016784(DisplayObject *object, s32 arg1, s32 arg2, s32 arg3) {
                             }
                             for (i = hand_digits - 1; i >= 0; i--) {
                                 if (hand_atk.visible)
-                                    CardLayout_DrawHandCell(k,
+                                    CardLayout_DrawHandCell(k, t,
                                                             o->pos.h.x + hand_atk.x + (hand_digits - 1 - i) * hand_atk.w,
                                                             o->pos.h.y + hand_atk.y,
                                                             hand_atk.w, hand_atk.h,
@@ -241,7 +243,7 @@ void func_80016784(DisplayObject *object, s32 arg1, s32 arg2, s32 arg3) {
                             }
                             for (i = hand_digits - 1; i >= 0; i--) {
                                 if (hand_def.visible)
-                                    CardLayout_DrawHandCell(k,
+                                    CardLayout_DrawHandCell(k, t,
                                                             o->pos.h.x + hand_def.x + (hand_digits - 1 - i) * hand_def.w,
                                                             o->pos.h.y + hand_def.y,
                                                             hand_def.w, hand_def.h,
@@ -347,7 +349,7 @@ void func_80016784(DisplayObject *object, s32 arg1, s32 arg2, s32 arg3) {
                     z->uv.b.hi = (i / 5) << 5;
 #ifdef MEMORIES_PC
                     if (hand_styled && hand_art.visible) {
-                        CardLayout_DrawHandCell(z, o->pos.h.x + hand_art.x, o->pos.h.y + hand_art.y,
+                        CardLayout_DrawHandCell(z, t, o->pos.h.x + hand_art.x, o->pos.h.y + hand_art.y,
                                                 hand_art.w, hand_art.h, z->uv.b.lo, z->uv.b.hi,
                                                 40, 32, arg1, fl,
                                                 CARD_FRAME_SCRATCH_BYTES(o));

@@ -6,7 +6,8 @@
 
 Writes <dist>/fm-editor, a program that needs no Python on the player's
 machine. On Windows that is fm-editor.exe, fm-editor.pkg and
-fm-editor-files/, which stay together; elsewhere one file. The build files stay under <dist>; nothing it writes
+fm-editor-files/, which stay together; on macOS fm-editor.app; on Linux one file.
+The build files stay under <dist>; nothing it writes
 belongs in git.
 
 Windows gets no one-file build: that is a small loader with the whole
@@ -72,6 +73,9 @@ def main() -> int:
         version_file = work / "version.txt"
         version_file.write_text(version_info(arguments.version), encoding="utf-8")
         program += ["--onedir", "--contents-directory", "fm-editor-files", "--version-file", str(version_file)]
+    elif sys.platform == "darwin":
+        program += ["--onedir", "--target-arch", "arm64",
+                    "--osx-bundle-identifier", "org.yfm-redecomp.fm-editor"]
     else:
         program.append("--onefile")
     if not arguments.console:
@@ -105,7 +109,12 @@ def main() -> int:
     print(" ".join(command))
     result = subprocess.run(command, cwd=str(ROOT), env=env)
     if result.returncode == 0:
-        built = dist / "fm-editor" / "fm-editor.exe" if sys.platform == "win32" else dist / "fm-editor"
+        if sys.platform == "win32":
+            built = dist / "fm-editor" / "fm-editor.exe"
+        elif sys.platform == "darwin" and not arguments.console:
+            built = dist / "fm-editor.app"
+        else:
+            built = dist / "fm-editor"
         print(f"built {built}")
     return result.returncode
 

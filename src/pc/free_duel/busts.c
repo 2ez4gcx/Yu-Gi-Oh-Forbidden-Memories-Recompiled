@@ -731,7 +731,7 @@ static void make(Bust *one)
     static unsigned char sheet[BUST_SHEET_W * BUST_SHEET_H], bank[BUST_BANK], best_sheet[BUST_SHEET_W * BUST_SHEET_H],
         best_bank[BUST_BANK];
     const char *paths[BUST_EXPRESSIONS * (BUST_TALK_FRAMES + 2)];
-    unsigned char *pictures[BUST_EXPRESSIONS * (BUST_TALK_FRAMES + 2)], *loaded = NULL, *canvas = NULL;
+    unsigned char *pictures[BUST_EXPRESSIONS * (BUST_TALK_FRAMES + 2)] = {0}, *loaded = NULL, *canvas = NULL;
     unsigned short clut[256];
     int first[BUST_EXPRESSIONS], n = 0, e, k, pw, ph, w, h, cw, ch, done;
     char why[256];
@@ -758,6 +758,8 @@ static void make(Bust *one)
         if (w < 1) w = 1;
         if (h < 1) h = 1;
     }
+    /* Never otherwise; said so GCC 16 -O3 sees the sizes below are small. */
+    if (w < 1 || h < 1 || w > BUST_SIDE || h > BUST_SIDE || n < 1) return;
     cw = (w + 7) & ~7;
     ch = (h + 7) & ~7;
     for (k = 0; k < n; k++) {

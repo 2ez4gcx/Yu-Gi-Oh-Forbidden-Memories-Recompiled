@@ -2966,9 +2966,9 @@ bit-identical. How (details in `src/pc/guest/state.h`):
     on the commit before the fix; `tests/pc/state_load_build_deck_e2e.py`
     checks it on the Build Deck screen of the main menu and the one before
     a duel (frame hashes and pictures after the load, against a load made
-    at once; a local gate, as it needs the disc). Small-data variables are not at their retail addresses in
-    the Windows build, so `yfm_control`'s `peek` by those names reads the
-    wrong bytes there.
+    at once; a local gate, as it needs the disc). Small-data variables are
+    not at their retail addresses in the Windows build, so `yfm_control`'s
+    `peek` by those names reads the wrong bytes there.
   Not reproduced bit for bit: the SPU mixer's state (`spu`, `libspu`) and the
   sound driver's work area, which the mixer thread updates in real time (as
   between any two runs).

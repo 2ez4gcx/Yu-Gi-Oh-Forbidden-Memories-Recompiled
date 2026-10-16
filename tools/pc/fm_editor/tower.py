@@ -223,7 +223,8 @@ def canon_story(value):
 #
 # A side is none, a character's number (1-64), a duelist, "opponent", or a PNG
 # ("flip" turns it; "as Seto" says whose it is); "expression 2" after a
-# character's number or a duelist.
+# character's number or a duelist, or "expression angry" (a duelist's bust's,
+# by its name; "expression \"very angry\"" when the name has a space).
 
 # "#8 @Seto: words": a campaign portrait, a speaker, or both, then the words.
 LINE_RE = re.compile(r"^(?:#(\d+|speaker|none)\s*)?(?:@([^:]*))?:\s?(.*)$", re.I)
@@ -281,7 +282,11 @@ def _cast_text(value) -> str:
         words.append(f"duelist {who}" if who.isdigit() or who.lower() in ("none", "flip", "expression") else who)
     if cast.get("flip"):
         words.append("flip")
-    if cast.get("expression"):
+    if isinstance(cast.get("expression"), str):
+        name = cast["expression"]
+        words += ["expression", name if name and " " not in name and '"' not in name and not name.isdigit()
+                  else '"' + name.replace('"', "") + '"']
+    elif cast.get("expression"):
         words += ["expression", str(cast["expression"])]
     if "image" in cast and cast.get("duelist") not in (None, ""):
         words += ["as", str(cast["duelist"])]
@@ -303,8 +308,15 @@ def _cast_value(text: str):
     expression = flip = None
     while True:
         words = text.split()
-        if len(words) >= 2 and words[-2].lower() == "expression" and words[-1].isdigit():
+        quoted = re.search(r'\s+expression\s+"([^"]*)"\s*$', text, re.I)
+        if quoted and expression is None:
+            expression = quoted.group(1)
+            text = text[:quoted.start()].strip()
+        elif len(words) >= 2 and words[-2].lower() == "expression" and words[-1].isdigit():
             expression = int(words[-1])
+            text = " ".join(words[:-2])
+        elif len(words) >= 3 and words[-2].lower() == "expression" and not _is_png(" ".join(words[:-2])):
+            expression = words[-1]
             text = " ".join(words[:-2])
         elif len(words) >= 2 and words[-1].lower() == "flip":
             flip = True
@@ -519,12 +531,26 @@ def set_tower_only(project, key: str, on: bool) -> bool:
 
 # --- checks ---------------------------------------------------------------------------------
 
-def check(tower, duelist_named, card_named) -> list:
+class _Named:
+    """duelist_named, carrying bust_of and own for the sides' checks."""
+
+    def __init__(self, named, bust_of, own=None):
+        self.named, self.bust_of, self.own = named, bust_of, own
+
+    def __call__(self, text):
+        return self.named(text)
+
+
+def check(tower, duelist_named, card_named, bust_of=None, own=None) -> list:
     """What the game would note of a "tower" (tower_config.c): [(level,
     where, message)]. An error is something it leaves out (a floor, a deck,
     the whole tower); a warning what it reads otherwise than meant.
-    duelist_named(text) is a duelist or None, card_named(text) a card or 0."""
+    duelist_named(text) is a duelist or None, card_named(text) a card or 0,
+    bust_of(text) a duelist's bust (bust.Bust) or None, own(text) whether
+    the duelist is shown as its bust unasked (an added one with a bust, or a
+    disc one with replace_bust)."""
     out = []
+    duelist_named = _Named(duelist_named, bust_of, own)
     if tower is None:
         return out
 
@@ -622,7 +648,84 @@ def _check_scene(value, where, add):
         add("warning", f"{where}.scene", f"{number} is not a path inside the mod; the line keeps the scene before it")
 
 
-def _check_cast(value, where, duelist_named, add):
+NAME_BYTES = 31                   # a bust's expression's name at most (busts.h BUST_NAME - 1)
+BUST_NUMBERS = 16                 # a duelist's bust's expressions by number, 0-15
+
+
+def _check_expression(cast, where, duelist_named, add, opponent=None):
+    """A side's "expression" as tower_config.c reads it (read_cast,
+    bust_expression): a campaign character's 0-3; a duelist's its bust's by
+    name, or by number 0-15 -- 0-3 of a disc duelist without replace_bust its
+    campaign character's. "opponent" is checked against the floor's duelist
+    (`opponent`) when there is one."""
+    from . import bust as bustm
+    if "expression" not in cast:
+        return
+    expression = cast["expression"]
+    at = f"{where}.expression"
+    by_duelist = "duelist" in cast and "character" not in cast
+    if isinstance(expression, str):
+        if not by_duelist:
+            add("warning", at, "by name is a duelist's bust's ({\"duelist\": ..., \"expression\": ...}); a campaign "
+                               "character's is 0 to 3; left out")
+            return
+        if not expression:
+            add("warning", at, "\"\" names no expression; left out")
+            return
+        if len(expression.encode("utf-8")) > NAME_BYTES:
+            add("warning", at, f"\"{expression[:24]}...\" is longer than a bust's expression's name can be "
+                               f"({NAME_BYTES} bytes at most); left out")
+            return
+        if "image" in cast:
+            add("warning", at, "by name is the duelist's bust's; with an \"image\" the image is shown")
+            return
+        number = None
+    else:
+        number = _number(expression)
+        high = BUST_NUMBERS - 1 if by_duelist else 3
+        if number is None or not 0 <= number <= high:
+            add("warning", at, f"is the name of one of the duelist's bust's, or a number: 0 to 3 (the campaign "
+                               f"character's, or the bust's), 4 to {high} (the bust's)" if by_duelist else
+                "is 0 to 3")
+            return
+        if "image" in cast:
+            if number > 3:
+                add("warning", at, f"{number} is a bust's; with an \"image\" it is 0 to 3, and 0 is shown")
+            return
+        if not by_duelist:
+            return
+    who = cast.get("duelist")
+    opponent_side = str(who).lower() == "opponent"
+    if opponent_side:
+        if opponent is None:
+            return
+        who = opponent
+    bust_of = getattr(duelist_named, "bust_of", None)
+    own_of = getattr(duelist_named, "own", None)
+    if bust_of is None or duelist_named(who) is None:
+        return
+    b = bust_of(who)
+    own = bool(own_of(who)) if own_of is not None else False
+    shown = f"the opponent ({who})" if opponent_side else str(who)
+    if number is not None and number <= 3 and (b is None or not own):
+        return                    # the campaign character's
+    if b is None or not b.expressions:
+        asked = f"\"{expression}\"" if number is None else f"{number} (past the campaign's 0 to 3)"
+        add("warning", at, f"{shown} has no bust of its own (the Duelists tab's Bust); {asked} is left out, and "
+                           "the campaign's character is shown as it first comes in (expression 0)")
+        return
+    default = bustm.order(b)[0].name
+    if number is None:
+        if bustm.find(b, expression) is None:
+            add("warning", at, f"{shown}'s bust has no expression \"{expression}\"; its default, \"{default}\", is "
+                               "shown instead")
+    elif number >= len(b.expressions):
+        count = len(b.expressions)
+        add("warning", at, f"{shown}'s bust has {count} expression{'s' if count != 1 else ''} (0-{count - 1}); for "
+                           f"{number} its default, \"{default}\", is shown instead")
+
+
+def _check_cast(value, where, duelist_named, add, opponent=None):
     cast = _cast(value)
     if cast == "none":
         return
@@ -632,8 +735,7 @@ def _check_cast(value, where, duelist_named, add):
     for key in cast:
         if key not in CAST_KEYS:
             add("warning", where, f"unknown key \"{key}\"")
-    if "expression" in cast and (_number(cast["expression"]) is None or not 0 <= _number(cast["expression"]) <= 3):
-        add("warning", f"{where}.expression", "is 0 to 3")
+    _check_expression(cast, where, duelist_named, add, opponent)
     if "image" in cast:
         image = cast["image"]
         if not isinstance(image, str) or not image.lower().endswith(".png"):
@@ -655,7 +757,7 @@ def _check_cast(value, where, duelist_named, add):
             add("warning", f"{where}.duelist", f"names no duelist ({cast['duelist']!r}); the side stays empty")
 
 
-def _check_stage(item, where, duelist_named, add):
+def _check_stage(item, where, duelist_named, add, opponent=None):
     if "scene" in item:
         _check_scene(item["scene"], where, add)
     if "characters" in item:
@@ -667,7 +769,68 @@ def _check_stage(item, where, duelist_named, add):
                 if side not in SIDES:
                     add("warning", f"{where}.characters", f"unknown key \"{side}\"")
                 else:
-                    _check_cast(value, f"{where}.characters.{side}", duelist_named, add)
+                    _check_cast(value, f"{where}.characters.{side}", duelist_named, add, opponent)
+
+
+def _story_casts(story):
+    """Every side's object in a story: its stage's and its lines'."""
+    items = []
+    if isinstance(story, dict):
+        items.append(story)
+        lines = story.get("lines")
+        items += lines if isinstance(lines, list) else [lines]
+    elif isinstance(story, list):
+        items += story
+    for item in items:
+        if isinstance(item, dict) and isinstance(item.get("characters"), dict):
+            for cast in item["characters"].values():
+                if isinstance(cast, dict):
+                    yield cast
+
+
+def bust_casts(tower, is_duelist) -> list:
+    """The sides of a tower's stories that ask a duelist for an expression
+    -- named, or as a floor's "opponent" -- where is_duelist(text) says it
+    is the one: for the Bust page to keep them in step with its bust."""
+    if not isinstance(tower, dict):
+        return []
+    stories = [(tower.get(key), None) for key in ("intro", "ending", "lose")]
+    for floor in tower.get("floors") or []:
+        if isinstance(floor, dict):
+            stories += [(floor.get("before"), floor.get("duelist")), (floor.get("after"), floor.get("duelist"))]
+    out = []
+    for story, opponent in stories:
+        for cast in _story_casts(story):
+            if "expression" not in cast or "character" in cast or "image" in cast or cast.get("duelist") is None:
+                continue
+            who = cast["duelist"]
+            if str(who).lower() == "opponent":
+                if opponent is None:
+                    continue
+                who = opponent
+            if is_duelist(who):
+                out.append(cast)
+    return out
+
+
+def rename_expression(tower, is_duelist, old: str, new: str) -> int:
+    """The duelist's sides naming expression `old` name `new` instead; how
+    many."""
+    count = 0
+    for cast in bust_casts(tower, is_duelist):
+        if isinstance(cast["expression"], str) and cast["expression"].lower() == str(old).lower():
+            cast["expression"] = new
+            count += 1
+    return count
+
+
+def numbered_expressions(tower, is_duelist, own: bool) -> int:
+    """How many of the duelist's sides ask for its bust by number (any for a
+    duelist shown as its bust unasked, past 3 otherwise: 0-3 are then its
+    campaign character's): those follow the bust's order, not a name."""
+    return sum(1 for cast in bust_casts(tower, is_duelist)
+               if isinstance(cast["expression"], int) and not isinstance(cast["expression"], bool) and
+               (own or cast["expression"] > 3))
 
 
 def story_pictures(value) -> tuple:
@@ -684,7 +847,7 @@ def story_pictures(value) -> tuple:
     return scenes, characters
 
 
-def _check_story(value, where, duelist_named, add, floor=False):
+def _check_story(value, where, duelist_named, add, floor=False, opponent=None):
     if value is None:
         return
     scenes, characters = story_pictures(value)
@@ -703,7 +866,7 @@ def _check_story(value, where, duelist_named, add, floor=False):
         for key in value:
             if key not in STORY_KEYS:
                 add("warning", where, f"unknown key \"{key}\"")
-        _check_stage(value, where, duelist_named, add)
+        _check_stage(value, where, duelist_named, add, opponent)
         items = value["lines"]
     items = items if isinstance(items, list) else [items]
     letters = 0
@@ -728,7 +891,7 @@ def _check_story(value, where, duelist_named, add, floor=False):
                         (_number(face) is not None and 0 <= _number(face) < CAMPAIGN_PORTRAITS)):
                     add("warning", at, f"\"portrait\" is one of the campaign's portraits (0 to "
                                        f"{CAMPAIGN_PORTRAITS - 1}), \"speaker\" or \"none\"")
-            _check_stage(item, at, duelist_named, add)
+            _check_stage(item, at, duelist_named, add, opponent)
             pan = item.get("pan")
             if pan is not None:
                 if not isinstance(pan, dict):
@@ -824,8 +987,10 @@ def _check_floor(floor, where, duelist_named, card_named, add) -> bool:
             for name in duelists:
                 if duelist_named(name) is None:
                     add("warning", f"{where}.reward.unlock_duelist", f"names no duelist {name!r}; left out")
-    _check_story(floor.get("before"), f"{where}.before", duelist_named, add, floor=True)
-    _check_story(floor.get("after"), f"{where}.after", duelist_named, add, floor=True)
+    _check_story(floor.get("before"), f"{where}.before", duelist_named, add, floor=True,
+                 opponent=floor["duelist"])
+    _check_story(floor.get("after"), f"{where}.after", duelist_named, add, floor=True,
+                 opponent=floor["duelist"])
     return True
 
 

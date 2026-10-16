@@ -300,6 +300,18 @@ jobs:
         run: |
           python3 tools/pc/package_macos.py --binary tmp/pc/macos/memories-arm64 --out tmp/pc-release/macos-arm64 --version "$PACKAGE_VERSION"
           python3 tools/pc/test_package_macos.py --archive "tmp/pc-release/macos-arm64/yfm-redecomp-$PACKAGE_VERSION-macos-arm64.zip"
+      - name: FM Editor (macOS)
+        run: |
+          python -c 'import tkinter; assert tkinter.TkVersion == 8.6'
+          python -m pip install pyinstaller==6.18.0
+          python tools/pc/fm_editor/build_exe.py --dist tmp/fm-editor --version "$PACKAGE_VERSION"
+          folder="tmp/fm-editor-release/yfm-redecomp-$PACKAGE_VERSION"
+          mkdir -p "$folder"
+          ditto tmp/fm-editor/fm-editor.app "$folder/fm-editor.app"
+          cp tools/pc/fm_editor/README.md "$folder/fm-editor-README.md"
+          ditto -c -k --norsrc --keepParent "$folder" "tmp/pc-release/macos-arm64/fm-editor-$PACKAGE_VERSION-macos-arm64.zip"
+      - name: Test shipped FM Editor (macOS)
+        run: python tools/pc/test_editor_package.py "tmp/pc-release/macos-arm64/fm-editor-$PACKAGE_VERSION-macos-arm64.zip" --version "$PACKAGE_VERSION"
       - name: Upload installable macOS application
         uses: actions/upload-artifact@v4
         with:
@@ -307,6 +319,7 @@ jobs:
           path: |
             tmp/pc-release/macos-arm64/yfm-redecomp-*.zip
             tmp/pc-release/macos-arm64/yfm-redecomp-*.zip.sha256
+            tmp/pc-release/macos-arm64/fm-editor-*-macos-arm64.zip
           if-no-files-found: error
           retention-days: 14
 
@@ -466,7 +479,7 @@ jobs:
 
   draft-release:
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-    needs: [package, android]
+    needs: [package, android, package-macos]
     runs-on: ubuntu-24.04
     permissions:
       contents: write

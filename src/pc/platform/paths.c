@@ -53,18 +53,48 @@ static int make_dir(const char *path)
     return -1;
 }
 
+#ifdef _WIN32
+#define SEPARATOR(c) ((c) == '/' || (c) == '\\')
+#else
+#define SEPARATOR(c) ((c) == '/')
+#endif
+
+/* Where the folders to make begin: past a leading separator and, on
+ * Windows, past a drive ("C:", "C:/") or a share ("//server/share/"), which
+ * mkdir cannot make. A folder named in the environment may spell its drive
+ * "C:/..." (mkdir and stat both refuse a bare "C:", so the whole call
+ * failed), or use backslashes throughout (no parent was made before them). */
+static size_t root_length(const char *path)
+{
+#ifdef _WIN32
+    size_t at = 2;
+    int part;
+    if (isalpha((unsigned char)path[0]) && path[1] == ':') return SEPARATOR(path[2]) ? 3 : 2;
+    if (SEPARATOR(path[0]) && SEPARATOR(path[1])) {
+        for (part = 0; part < 2; part++) {
+            while (path[at] && !SEPARATOR(path[at])) at++;
+            if (path[at]) at++;
+        }
+        return at;
+    }
+#endif
+    return SEPARATOR(path[0]) ? 1 : 0;
+}
+
 int Paths_MakeDirs(const char *path)
 {
     char work[PATH_MAX_];
-    size_t length = strlen(path), i;
+    size_t length = strlen(path), root, i;
     if (length >= sizeof(work)) return -1;
     memcpy(work, path, length + 1);
-    while (length > 1 && work[length - 1] == '/') work[--length] = '\0';
-    for (i = 1; i < length; i++) {
-        if (work[i] != '/') continue;
+    root = root_length(work);
+    while (length > 1 && length > root && SEPARATOR(work[length - 1])) work[--length] = '\0';
+    for (i = root > 1 ? root : 1; i < length; i++) {
+        char separator = work[i];
+        if (!SEPARATOR(separator) || SEPARATOR(work[i - 1])) continue;
         work[i] = '\0';
         if (make_dir(work)) return -1;
-        work[i] = '/';
+        work[i] = separator;
     }
     if (make_dir(work)) return -1;
     return 0;

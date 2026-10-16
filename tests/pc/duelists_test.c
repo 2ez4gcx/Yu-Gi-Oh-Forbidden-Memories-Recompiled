@@ -89,6 +89,16 @@ int CardArt_PortraitFromImage(const char *path, unsigned char *record, char *why
     (void)path; (void)record; (void)why; (void)size;
     return 0;
 }
+/* A bust is not made here (busts.c has its own cases): each "bust" read is
+ * the next number, so a case sees which entry kept which. */
+static int busts_read;
+int Busts_Read(const char *mod, const char *directory, const JsonValue *value, const char *where)
+{
+    (void)mod; (void)directory; (void)where;
+    return Json_TypeOf(value) == JSON_OBJECT || Json_TypeOf(value) == JSON_STRING ? busts_read++ : -1;
+}
+void Busts_Make(void) {}
+void Busts_Clear(void) { busts_read = 0; }
 /* The rules a duelist's file gave, by duelist and rule. */
 static short set_rows[DUELIST_TABLE_COUNT][TABLES_RANK_RULE_COUNT][TABLES_RANK_STEPS * 2];
 static int set_count;
@@ -586,7 +596,27 @@ int main(void)
     Duelists_Frame();                    /* the same save: nothing is cleared */
     assert(Duelists_RecordSlot(save, 40)[1] == 5);
 
+    /* A bust (busts.h): an added duelist's is its own; a disc duelist's is
+     * the campaign's only with "replace_bust" on a "replace" entry, which
+     * leaves its name, face and play the disc's. */
+    build("{\"duelists\":[{\"id\":\"x\",\"copy\":\"Heishin\",\"bust\":\"busts/x.png\"},"
+          "{\"replace\":\"Seto\",\"bust\":{\"expressions\":[]}},"
+          "{\"replace\":\"Teana\",\"bust\":\"busts/t.png\",\"replace_bust\":true}]}", NULL);
+    assert(Duelists_Bust(40) == 0 && !Duelists_ReplacesBust(40));
+    assert(Duelists_Bust(7) == 1 && !Duelists_ReplacesBust(7));
+    assert(Duelists_Bust(2) == 2 && Duelists_ReplacesBust(2));
+    assert(!strcmp(Duelists_Name(2), "Teana") && !Duelists_Portrait(2) && notes == 0);
+    assert(Duelists_Bust(1) == -1 && !Duelists_ReplacesBust(1));
+    /* "replace_bust" on an added duelist, without a bust, or not a bool:
+     * each said, none taking hold. */
+    build("{\"duelists\":[{\"id\":\"x\",\"copy\":\"Heishin\",\"bust\":\"busts/x.png\",\"replace_bust\":true},"
+          "{\"replace\":\"Seto\",\"replace_bust\":true},"
+          "{\"replace\":\"Teana\",\"bust\":\"busts/t.png\",\"replace_bust\":\"yes\"}]}", NULL);
+    assert(notes == 3);
+    assert(!Duelists_ReplacesBust(40) && !Duelists_ReplacesBust(7) && !Duelists_ReplacesBust(2));
+    assert(Duelists_Bust(40) == 0 && Duelists_Bust(7) == -1 && Duelists_Bust(2) == 1);
+
     Duelists_Clear();
-    puts("duelists: places, replacements, borrowed rows and unlock conditions passed");
+    puts("duelists: places, replacements, borrowed rows, unlock conditions and busts passed");
     return 0;
 }

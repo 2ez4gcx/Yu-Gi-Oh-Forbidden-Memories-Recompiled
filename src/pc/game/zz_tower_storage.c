@@ -12,6 +12,7 @@
  * zeroed variables (as after drops.c or free_duel_storage.c came in). */
 #include "types.h"
 #include "pc/tower/tower_state.h"
+#include "pc/free_duel/busts.h"
 #include "game/func_8003B6AC.h"
 #include "game/text_box_lifecycle.h"
 #include "game/file_transfer.h"
@@ -144,21 +145,31 @@ s32 Tower_UploadScene(s32 id)
 }
 
 /* func_8003A560, before it reads character `id` off the disc: one the disc
- * keeps empty that a story gave a mod's picture (gTower.pool) is put in a
- * cache slot of D_80010000's, as the disc's are kept once read (the image,
- * the two palette rows, the parts bank), so the game finds it there and
- * draws it as it draws its own. A slot of a character on neither side is
- * the one taken. */
+ * keeps empty that a story gave a mod's picture (gTower.pool: a tower's
+ * PNG, or a duelist's bust record), or a campaign character a duelist's
+ * "replace_bust" took over (busts.h), is put in a cache slot of
+ * D_80010000's, as the disc's are kept once read (the image, the two
+ * palette rows, the parts bank), so the game finds it there and draws it
+ * as it draws its own. A slot of a character on neither side is the one
+ * taken. Without a replacing bust and a story on the screen it does
+ * nothing, and the game reads the disc as it always has. */
 void Tower_FillCharacter(s32 id)
 {
     DisplayEffectVramSlot *slots;
     const u16 *clut;
     const u8 *texels, *bank;
-    s32 k, i, chosen = -1;
-    if (!gTower.scene_on) return;
-    for (k = 0; k < TOWER_POOL_SIZE && pool_ids[k] != id; k++) {}
-    if (k == TOWER_POOL_SIZE || !gTower.pool[k]) return;
-    texels = Tower_ArtCharacter(gTower.pool[k] - 1, &clut, &bank);
+    s32 k, i, chosen = -1, record = Busts_Replacing(id);
+    if (record >= 0) {
+        /* A campaign character a duelist's bust took over ("replace_bust"):
+         * the campaign's scenes and a tower's stories alike. */
+        texels = Busts_Record(record, &clut, &bank);
+    } else {
+        if (!gTower.scene_on) return;
+        for (k = 0; k < TOWER_POOL_SIZE && pool_ids[k] != id; k++) {}
+        if (k == TOWER_POOL_SIZE || !gTower.pool[k]) return;
+        if (gTower.pool[k] >= TOWER_POOL_BUST) texels = Busts_Record(gTower.pool[k] - TOWER_POOL_BUST, &clut, &bank);
+        else texels = Tower_ArtCharacter(gTower.pool[k] - 1, &clut, &bank);
+    }
     if (!texels) return;
     for (i = 0; i < DISPLAY_EFFECT_VRAM_SLOT_COUNT; i++) {
         if (D_8015C410[i] == id) return;                     /* there already */

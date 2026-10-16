@@ -53,9 +53,12 @@ typedef struct {
 #define TOWER_SCENE_ART 0x0A0
 #define TOWER_SCENE_ARTS 0x60         /* 0x0A0-0x0FF */
 
-/* The characters the disc keeps empty, which carry a mod's pictures. */
+/* The characters the disc keeps empty, which carry a mod's pictures: a
+ * pool entry is 1 + a tower's art, or TOWER_POOL_BUST + a duelist's bust
+ * record (busts.h). */
 #define TOWER_POOL_SIZE 5
 #define TOWER_POOL_IDS {0x27, 0x28, 0x29, 0x0B, 0x05}
+#define TOWER_POOL_BUST 0x80
 
 extern TowerState gTower;
 
@@ -78,7 +81,9 @@ s32 Tower_SceneBusy(void);
  * whether `id` is a mod's scene and puts it in VRAM itself when it is (1);
  * func_8003A560 asks for character `id`'s cache slot to be filled from a
  * mod's picture before it would read the disc. Both do nothing without a
- * tower's story on the screen. */
+ * tower's story on the screen -- but for a campaign character a duelist's
+ * "replace_bust" takes over (busts.h, Busts_Replacing), filled from its
+ * bust wherever it is asked for. */
 s32 Tower_UploadScene(s32 id);
 void Tower_FillCharacter(s32 id);
 /* The host side of those (tower_art.c): art `art`'s scene picture (320 x

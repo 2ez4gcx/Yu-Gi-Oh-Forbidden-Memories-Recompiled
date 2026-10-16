@@ -9,6 +9,7 @@ import json
 import os
 from pathlib import Path, PurePosixPath
 import subprocess
+import sys
 import tarfile
 import tempfile
 import zipfile
@@ -28,13 +29,21 @@ def check(archive: Path, version=None, commit=None):
     with tempfile.TemporaryDirectory(prefix="fm-editor-package-", ignore_cleanup_errors=True) as temporary:
         folder = Path(temporary) / "Editor space-é"
         folder.mkdir()
+        macos = False
         if archive.suffix == ".zip":
             with zipfile.ZipFile(archive) as package:
                 require(package.testzip() is None, "corrupt ZIP")
                 names = package.namelist()
                 validate_names(names)
-                package.extractall(folder)
-            program = "fm-editor.exe"
+                macos = any(name.endswith("/fm-editor.app/Contents/Info.plist") for name in names)
+                if macos:
+                    require(sys.platform == "darwin", "test a macOS app on macOS")
+                else:
+                    package.extractall(folder)
+            if macos:
+                # ditto preserves the Python/Tk framework symlinks.
+                subprocess.run(["ditto", "-x", "-k", str(archive), str(folder)], check=True)
+            program = "fm-editor.app/Contents/MacOS/fm-editor" if macos else "fm-editor.exe"
         else:
             with tarfile.open(archive) as package:
                 members = package.getmembers()
@@ -49,6 +58,8 @@ def check(archive: Path, version=None, commit=None):
         executable = root / program
         require(executable.is_file(), "missing editor executable")
         require((root / "fm-editor-README.md").is_file(), "missing guide")
+        if macos:
+            subprocess.run(["codesign", "--verify", "--deep", "--strict", str(root / "fm-editor.app")], check=True)
         if program.endswith(".exe"):
             require((root / "fm-editor.pkg").is_file(), "missing Python archive")
             require((root / "fm-editor-files").is_dir(), "missing editor dependencies")

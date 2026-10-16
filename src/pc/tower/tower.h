@@ -91,13 +91,17 @@ typedef struct {
 #define TOWER_PORTRAIT_AUTO (-2)      /* the speaker's face only when it has no character on stage */
 
 enum { TOWER_SIDE_LEFT, TOWER_SIDE_RIGHT, TOWER_SIDES };
-/* What stands on a side. */
-enum { TOWER_CAST_KEEP, TOWER_CAST_NONE, TOWER_CAST_RETAIL, TOWER_CAST_ART, TOWER_CAST_OPPONENT };
+/* What stands on a side. TOWER_CAST_DUELIST: a duelist with a bust of its
+ * own (busts.h), its expression found when the story is told. */
+enum { TOWER_CAST_KEEP, TOWER_CAST_NONE, TOWER_CAST_RETAIL, TOWER_CAST_ART, TOWER_CAST_OPPONENT, TOWER_CAST_DUELIST };
+#define TOWER_EXPRESSION_NAME 32      /* busts.h, BUST_NAME */
 typedef struct {
     int kind;                         /* TOWER_CAST_* */
     int id;                           /* the retail character (1-0x40), or the art's index */
-    int expression;                   /* 0-3: the retail sheet's expression (F6 flags 0x10/0x40) */
+    int expression;                   /* 0-3: the retail sheet's expression (F6 flags 0x10/0x40), or a
+                                       * bust's by the codes' number (0 its default) */
     int duelist;                      /* the duelist it was named by, 0 none: a speaker finds it */
+    char expression_name[TOWER_EXPRESSION_NAME];   /* a bust's expression by its name, "" none */
 } TowerCast;
 
 /* A mod's PNG, made into the game's kind of picture when the tower is

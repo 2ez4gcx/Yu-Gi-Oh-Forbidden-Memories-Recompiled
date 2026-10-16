@@ -80,6 +80,26 @@ int main(int argc, char **argv)
     snprintf(directory, sizeof(directory), "%s/%s", root, NAME);
     assert(!Paths_MakeDirs(directory));
     exact_file(directory);
+#ifdef _WIN32
+    {
+        /* A folder named in the environment, spelled "C:/..." (the drive is
+         * no folder to make) or with backslashes throughout, parents and a
+         * trailing one included. */
+        size_t at;
+        snprintf(path, sizeof(path), "%s/forward/\u00e9", directory);
+        for (at = 0; path[at]; at++) if (path[at] == '\\') path[at] = '/';
+        assert(!Paths_MakeDirs(path)); exact_file(path);
+        assert(!Paths_MakeDirs(path)); /* already there */
+        assert(!remove_folder(path));
+        snprintf(path, sizeof(path), "%s/forward", directory); assert(!remove_folder(path));
+        snprintf(path, sizeof(path), "%s\\back\\\u00e9\\", directory);
+        for (at = 0; path[at]; at++) if (path[at] == '/') path[at] = '\\';
+        assert(!Paths_MakeDirs(path));
+        path[strlen(path) - 1] = '\0';
+        exact_file(path); assert(!remove_folder(path));
+        snprintf(path, sizeof(path), "%s/back", directory); assert(!remove_folder(path));
+    }
+#endif
     assert(!setenv("MEMORIES_USER_DIR", directory, 1));
     kept = getenv("MEMORIES_USER_DIR");
     assert(kept && !strcmp(kept, directory));

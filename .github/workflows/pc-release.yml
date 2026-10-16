@@ -306,12 +306,12 @@ jobs:
           python -m pip install pyinstaller==6.18.0
           python tools/pc/fm_editor/build_exe.py --dist tmp/fm-editor --version "$PACKAGE_VERSION"
           folder="tmp/fm-editor-release/yfm-redecomp-$PACKAGE_VERSION"
-          mkdir -p "$folder" dist
+          mkdir -p "$folder"
           ditto tmp/fm-editor/fm-editor.app "$folder/fm-editor.app"
           cp tools/pc/fm_editor/README.md "$folder/fm-editor-README.md"
-          ditto -c -k --norsrc --keepParent "$folder" "dist/fm-editor-$PACKAGE_VERSION-macos-arm64.zip"
+          ditto -c -k --norsrc --keepParent "$folder" "tmp/pc-release/macos-arm64/fm-editor-$PACKAGE_VERSION-macos-arm64.zip"
       - name: Test shipped FM Editor (macOS)
-        run: python tools/pc/test_editor_package.py "dist/fm-editor-$PACKAGE_VERSION-macos-arm64.zip" --version "$PACKAGE_VERSION"
+        run: python tools/pc/test_editor_package.py "tmp/pc-release/macos-arm64/fm-editor-$PACKAGE_VERSION-macos-arm64.zip" --version "$PACKAGE_VERSION"
       - name: Upload installable macOS application
         uses: actions/upload-artifact@v4
         with:
@@ -319,7 +319,7 @@ jobs:
           path: |
             tmp/pc-release/macos-arm64/yfm-redecomp-*.zip
             tmp/pc-release/macos-arm64/yfm-redecomp-*.zip.sha256
-            dist/fm-editor-*-macos-arm64.zip
+            tmp/pc-release/macos-arm64/fm-editor-*-macos-arm64.zip
           if-no-files-found: error
           retention-days: 14
 

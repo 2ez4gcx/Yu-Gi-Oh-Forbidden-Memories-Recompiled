@@ -855,6 +855,28 @@ key across frames (a `key` is pressed and released in one pump, before the
 game reads the pad; `s` is Circle and `x` Cross by default), which is how
 Japanese buttons was checked through the keyboard; `f8` is one of the names.
 
+### Screenshots
+
+**F12** (and File > Screenshot) saves the source picture, **Shift+F12** the
+composed window (menu and HUD included), as `<yyyy-mm-dd-hhmmss>-<frame>.bmp`
+in `MEMORIES_SCREENSHOT_DIR` or the user folder's `screenshots/`. The
+picture is the frame at the internal scale (320x240 at 1x, 640x480 at 2x,
+1280x960 at 4x; the widened picture in widescreen), before the filter, the
+colour settings and the menu. At 1x and on the software GPU the frame is in
+`picture_pixels`, which F12 saves as it was presented. With the OpenGL pass
+(`gl_picture.c`, internal scale 2x and up) the picture lives only in GPU
+textures and `picture_pixels` is never filled, so F12 read it black at 2x
+and 4x until `Platform_Screenshot` read the shown area back from the texture
+(`GlPicture_ReadShown`, the picture's or the widescreen target's) when the
+key is pressed. Nothing is read per frame: each present only notes which
+texture and area it showed (`pass_shown`). Shift+F12 is taken by the next
+`show()` from the back buffer before the swap, so it was always right at
+every scale. `tests/pc/screenshot_scales_runtime.py` drives the game in a
+window at 1x, 2x and 4x (the OpenGL pass and `MEMORIES_GL_PICTURE=0`) and in
+widescreen at 2x, presses F12 and the script's `shot` at one frame, and
+checks each file against the control channel's own picture of that frame
+(size, not black, 40x30 thumbnail within a few levels).
+
 ### Rewind (removed)
 
 Rewind (hold F8, `rewind=1`) was taken out on 2026-09-28. It wrote the

@@ -39,6 +39,13 @@ int GlPicture_Behind(void);
 /* Pixels x,y,w,h of the picture as 0x00RRGGBB, after a Replay. Returns 0
  * when the pass is off. */
 int GlPicture_Read(int x, int y, int w, int h, uint32_t *out);
+/* Pixels x,y,w,h of what the presenter showed, as 0x00RRGGBB, row 0 the top
+ * (the screenshot's read-back; nothing is read per frame): of the picture
+ * (GlPicture_Texture's) with `wide_texture` 0, else of that widescreen
+ * target's (GlPicture_WideTexture). Past the edges the edge pixels, as the
+ * presenter's clamp shows them. 0 when the pass is off or has no such
+ * texture (the picture was replaced since). */
+int GlPicture_ReadShown(unsigned wide_texture, int x, int y, int w, int h, uint32_t *out);
 /* Widescreen: the widened picture of the display area x,y,w,h (words), when
  * the pass drew a target for it (soft_gpu.h, SoftGpu_WideFrame), after a
  * Replay: its texture, picture_w x picture_h texels, row 0 the area's top,

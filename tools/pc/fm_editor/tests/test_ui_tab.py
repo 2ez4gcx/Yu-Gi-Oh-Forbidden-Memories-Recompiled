@@ -656,6 +656,7 @@ class UiTabTest(GuiCase):
             "default_style": "remove-me",
             "default_styles": {"kinds": {"monster": "remove-me"},
                                "types": {"Dragon": "remove-me"}},
+            "frame_for": [{"class": "trap", "style": "remove-me"}, {"class": "spell", "style": "keep-me"}],
         })
         self.app.project.card_extra[1] = {"frame_style": "remove-me", "art": "images/keep.png"}
         self.app.project.card_extra[999] = {"frame_style": "remove-me"}  # stale project data is still editable
@@ -669,10 +670,13 @@ class UiTabTest(GuiCase):
         self.assertTrue(ask.called)
         self.assertIn("Card:", ask.call_args.args[1])
         self.assertIn("Card: 999", ask.call_args.args[1])
+        self.assertIn("Rule: class trap", ask.call_args.args[1])
 
         with mock.patch.object(ui_frames.messagebox, "askyesno", return_value=True):
             page.delete_style()
         self.assertNotIn("remove-me", layout["frame_styles"])
+        self.assertIn("keep-me", layout["frame_styles"])   # an empty style is still a style
+        self.assertEqual(layout["frame_for"], [{"class": "spell", "style": "keep-me"}])
         self.assertNotIn("default_style", layout)
         self.assertNotIn("default_styles", layout)
         self.assertEqual(self.app.project.card_extra[1], {"art": "images/keep.png"})

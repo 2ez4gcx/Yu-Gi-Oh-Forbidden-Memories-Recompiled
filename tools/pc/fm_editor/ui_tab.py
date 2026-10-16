@@ -43,12 +43,14 @@ def ensure(project, *path) -> dict:
 
 
 def prune(project, key: str):
-    """Empty objects under `key` taken out, then `key` itself if empty."""
-    def tidy(value: dict):
+    """Empty objects under `key` taken out, then `key` itself if empty.
+    A frame style is kept even when empty: {} named for a color is a usable
+    palette-only style, and cards or rules may still name it."""
+    def tidy(value: dict, keep_empty=False):
         for k in list(value):
             if isinstance(value[k], dict):
-                tidy(value[k])
-                if not value[k]:
+                tidy(value[k], keep_empty=k == "frame_styles")
+                if not value[k] and not keep_empty:
                     del value[k]
     value = project.other.get(key)
     if isinstance(value, dict):

@@ -834,6 +834,11 @@ class FramesPage(ttk.Frame):
                 for key, value in values.items():
                     if value == name:
                         references.append((f"{label}: {key}", values, key))
+        rules = layout.get("frame_for")
+        for rule in rules if isinstance(rules, list) else ():
+            if isinstance(rule, dict) and rule.get("style") == name:
+                limits = ", ".join(f"{k} {rule[k]}" for k in ("class", "tag", "setting") if k in rule)
+                references.append((f"Rule: {limits or 'every card'}", rule, "style"))
         def card_label(cid):
             card = self.project.cards.get(cid)
             return card.name if card is not None else str(cid)
@@ -873,6 +878,12 @@ class FramesPage(ttk.Frame):
                         defaults.pop(group, None)
                 if not defaults:
                     layout.pop("default_styles", None)
+            # A frame_for rule is nothing without its style: drop it whole.
+            rules = layout.get("frame_for")
+            if isinstance(rules, list):
+                rules[:] = [r for r in rules if not isinstance(r, dict) or "style" in r]
+                if not rules:
+                    layout.pop("frame_for", None)
             for cid, entry in list(self.project.card_extra.items()):
                 if not entry:
                     self.project.card_extra.pop(cid, None)

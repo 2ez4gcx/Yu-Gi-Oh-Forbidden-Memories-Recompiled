@@ -574,6 +574,41 @@ def generate_mod_exports(
     return export_object
 
 
+def write_mod_translation(build, address_tables):
+    """mod_translation.json: what build_mod.py --target aarch64-translated
+    puts a mod through the guest pass with, as build_mod_arm64.py does for
+    macOS from this folder: the names it renames (the game's aliases, the
+    host renames, rand to the mods' own generator, the C library to the
+    runtime's guest-pointer wrappers), the guest addresses of the game's
+    pinned data, and the pointer-free math the C library may lend
+    directly. With mod_signatures.json and exports.txt it is all a mod build
+    needs of the game; the SDK carries the three (build_game32.write_sdk)."""
+    from build_mod_arm64 import SYSTEM_MATH_IMPORTS, mod_pins
+
+    summary = json.loads((build / "summary.json").read_text())
+    aliases = dict(summary["aliases"])
+    aliases.update(
+        dict(
+            line.split()
+            for line in (ROOT / "config/pc/host_symbol_renames.txt").read_text().splitlines()
+            if line.strip()
+        )
+    )
+    aliases.update(rand="Mods_ModRand", srand="Mods_ModSrand")
+    runtime = sorted(HOST_LIBC | CHECKED_LIBC | {"malloc", "calloc", "realloc", "free"})
+    table = {
+        "format": 1,
+        "game_fingerprint": (build / "build-fingerprint.txt").read_text().strip(),
+        "aliases": aliases,
+        "runtime": {name: "GuestRuntime_" + name for name in runtime},
+        "pins": mod_pins(summary, address_tables.values()),
+        # abs and labs too: a mod is compiled freestanding, where clang
+        # calls them instead of expanding them as macOS's builtins.
+        "system_math": sorted(SYSTEM_MATH_IMPORTS | {"abs", "labs"}),
+    }
+    (build / "mod_translation.json").write_text(json.dumps(table, indent=1, sort_keys=True) + "\n")
+
+
 def link_game(
     build, jobs, path_for, tables, export_object, cc, sdk, flags, dependencies
 ):
@@ -879,6 +914,8 @@ def main():
     export_object = generate_mod_exports(
         build, jobs, path_for, raw_text, aliases, linked_defs, pin_maps, cc, flags
     )
+    if ANDROID_BIN:
+        write_mod_translation(build, address_tables)
     status = link_game(
         build, jobs, path_for, tables, export_object, cc, sdk, flags, dependencies
     )

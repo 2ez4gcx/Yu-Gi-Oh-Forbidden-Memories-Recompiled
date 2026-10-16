@@ -75,8 +75,7 @@ def darwin_flags(sdk):
     if sdk is None:
         # Code mods stay off: an app cannot load a library from its data
         # folder (targetSdk 29+), and no translated ELF mod format exists yet.
-        return [f"--target=aarch64-linux-android{ANDROID_API}", "-fPIC", "-fsigned-char",
-                "-DMEMORIES_NO_CODE_MODS"]
+        return [f"--target=aarch64-linux-android{ANDROID_API}", "-fPIC", "-fsigned-char"]
     return ["-isysroot", str(sdk), f"-mmacosx-version-min={MACOS_MINIMUM}"]
 
 

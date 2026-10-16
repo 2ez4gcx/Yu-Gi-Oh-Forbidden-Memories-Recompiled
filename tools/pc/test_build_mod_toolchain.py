@@ -109,6 +109,38 @@ class Toolchain(unittest.TestCase):
         with mock.patch.dict(os.environ, {"MEMORIES_MOD_CC": os.path.join(self.bin, "nowhere", "clang" + EXE)}):
             self.assertIn("which is not there", build_mod.toolchain_help(build_mod.missing_64bit()))
 
+    def test_translated_needs_clang_21(self):
+        """aarch64-translated: a clang newer than the guest pass's LLVM is
+        named with its version, with the NDK's as the way out."""
+        clang = self.program("clang")
+        self.program("ld.lld")
+        with mock.patch.object(build_mod, "translated_candidates", lambda: [(clang, 22)]):
+            text = build_mod.translation_problem(None)
+        self.assertIn("needs clang 21 or older", text)
+        self.assertIn(f"{clang} is clang 22", text)
+        self.assertIn("ANDROID_NDK_ROOT", text)
+
+    def test_translated_needs_the_guest_pass(self):
+        clang = self.program("clang")
+        self.program("ld.lld")
+        missing = os.path.join(self.bin, "nowhere", "memories-guest-ir" + EXE)
+        with mock.patch.object(build_mod, "translated_candidates", lambda: [(clang, 21)]), \
+                mock.patch.dict(os.environ, {"MEMORIES_GUEST_IR": missing}):
+            text = build_mod.translation_problem(None)
+        self.assertIn("needs the game's guest pass", text)
+        self.assertIn(f"MEMORIES_GUEST_IR names {missing}", text)
+        self.assertIn("python tools/pc/llvm_guest.py", text)
+
+    def test_translated_needs_the_game_tables(self):
+        clang = self.program("clang")
+        self.program("ld.lld")
+        tool = self.program("memories-guest-ir")
+        with mock.patch.object(build_mod, "translated_candidates", lambda: [(clang, 21)]), \
+                mock.patch.dict(os.environ, {"MEMORIES_GUEST_IR": tool}):
+            text = build_mod.translation_problem([self.bin])
+        self.assertIn("mod_translation.json, mod_signatures.json", text)
+        self.assertIn("--target android-arm64-v8a", text)
+
 
 if __name__ == "__main__":
     unittest.main()

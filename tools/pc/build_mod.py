@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
 """Build a code mod: every .c in its directory, merged into one object per
-target (--target, default all three):
+target (--target, default the first three):
 
-  i386            <library>.o, the 32-bit games' (Linux and Windows)
-  x86_64-windows  <library>.x86_64-windows.o, the 64-bit Windows game's
-  aarch64         <library>.aarch64.o, the arm64 (Android) game's
+  i386                <library>.o, the 32-bit games' (Linux and Windows)
+  x86_64-windows      <library>.x86_64-windows.o, the 64-bit Windows game's
+  aarch64-translated  <library>.aarch64-translated.o, the Android app's
+                      (the translated game: its section below)
+  aarch64             <library>.aarch64.o, the fixed-memory Android game's
+                      (build_game32.py --android-memory fixed; not shipped,
+                      built only when named)
 
 ("library": "x" in mod.json; "x.o" names the same three. A "libraries"
 object, {"x86_64-windows": "file.o", ...}, names a target's file outright,
@@ -48,6 +52,8 @@ The 64-bit targets need clang (the same one builds all three) and differ:
                   its flags), through tools/pc/ptr32_stores.py as every game
                   unit is (LLVM's AArch64 back end mis-sizes stores through a
                   4-byte pointer)
+  aarch64-translated  through the game's guest pass (aarch64-translated,
+                  below), which needs clang 21 or older and the pass itself
   both            -fms-extensions: the game's stored pointers stay 4 bytes
                   (G32, src/port_ptr.h); src/pc/mods/prelude64.h first, which
                   also declares the guest tables mods reach most, so a mod
@@ -84,11 +90,18 @@ SHIPPED = not os.path.isdir(os.path.join(ROOT, "src/pc/mods/sdk"))
 SDK = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LLVM_MINGW = os.path.join(ROOT, "tmp/pc/llvm-mingw/bin")
 CACHE = os.path.join(ROOT, "tmp", "pc", "mod-build")
-TARGETS = ("i386", "x86_64-windows", "aarch64")
+# aarch64-translated: the Android app's game, the translated one (below).
+TRANSLATED = "aarch64-translated"
+TARGETS = ("i386", "x86_64-windows", "aarch64", TRANSLATED)
+# What is built when no --target names one: the 32-bit games', the 64-bit
+# Windows game's and the Android app's. aarch64, the fixed-memory Android
+# game's (build_game32.py --android-memory fixed, not shipped), only when
+# named.
+DEFAULT_TARGETS = ("i386", "x86_64-windows", TRANSLATED)
 # The game builds a target's names are checked against (--game overrides);
 # beside a game, the lists its SDK was shipped with.
 TARGET_BUILDS = {"i386": ["tmp/pc/game32", "tmp/pc/win32"], "x86_64-windows": ["tmp/pc/win64"],
-                 "aarch64": ["tmp/pc/android-arm64-v8a"]}
+                 "aarch64": ["tmp/pc/android-arm64-v8a"], TRANSLATED: ["tmp/pc/android-arm64-v8a"]}
 GAME_BUILDS = [SDK] if SHIPPED else [os.path.join(ROOT, path) for path in TARGET_BUILDS["i386"]]
 
 
@@ -121,7 +134,26 @@ TARGET_FLAGS = {
     # thunks, no fused multiply-add, MIPS's signed char.
     "aarch64": ["--target=aarch64-linux-android24", "-mharden-sls=blr", "-fno-optimize-sibling-calls",
                 "-mno-outline-atomics", "-ffp-contract=off", "-fsigned-char"],
+    # The translated Android game's (tools/pc/guest_build.py's Android
+    # flags): position-independent, so the code reaches the game through
+    # GOT entries wherever the loader puts it; no outlined atomics, which
+    # would call helpers the game does not lend.
+    TRANSLATED: ["--target=aarch64-linux-android24", "-fPIC", "-fsigned-char", "-mno-outline-atomics"],
 }
+# aarch64-translated: the C as the translated game's own units are compiled
+# for the guest pass (guest_build.guest_frontend_flags, and build_mod_arm64.py
+# for macOS): unoptimized, the PS1's layouts kept (MEMORIES_TRANSLATED), no
+# fused multiply-add, wrapping arithmetic. Freestanding with the SDK's C
+# library, as the other targets, so any clang up to 21 builds it.
+TRANSLATED_FLAGS = ["-std=gnu11", "-O0", "-fno-common", "-fno-stack-protector", "-fno-asynchronous-unwind-tables",
+                    "-fno-unwind-tables", "-ffreestanding", "-nostdinc", "-fms-extensions", "-fno-strict-aliasing",
+                    "-ffp-contract=off", "-fwrapv", "-DMEMORIES_PC", "-DMEMORIES_MOD", "-DMEMORIES_TRANSLATED",
+                    "-D_LANGUAGE_C", "-DLANGUAGE_C", "-Wall", "-Wno-unused-function", "-Wno-missing-braces",
+                    "-Wno-gnu-folding-constant", "-Wno-pointer-to-int-cast"]
+# The newest LLVM whose IR the guest pass reads: it is built against
+# LLVM 21 (tools/pc/macos_toolchain.json), and a newer clang's IR may not
+# parse there.
+TRANSLATED_CLANG_MAX = 21
 
 
 # The toolchain the game itself is built with, which has clang, ld.lld and
@@ -136,7 +168,7 @@ LLVM_MINGW_DOWNLOADS = {
     "linux": "https://github.com/mstorsjo/llvm-mingw/releases/download/20260922/"
              "llvm-mingw-20260922-ucrt-ubuntu-22.04-x86_64.tar.xz",
 }
-WIDE_TARGETS = ("x86_64-windows", "aarch64")
+WIDE_TARGETS = ("x86_64-windows", "aarch64", TRANSLATED)
 
 
 def tool(name):
@@ -204,7 +236,7 @@ def toolchain_help(missing, built=None, wanted=WIDE_TARGETS, compiler=True, outc
     not_found = "Not found: " + ", ".join(missing)
     if named and "clang" in missing:
         not_found += f" (MEMORIES_MOD_CC names {named}, which is {'not clang' if resolve(named) else 'not there'})"
-    games = {"x86_64-windows": "the 64-bit Windows game", "aarch64": "Android"}
+    games = {"x86_64-windows": "the 64-bit Windows game", "aarch64": "Android", TRANSLATED: "Android"}
     named_objects = ", ".join(f"{target}: {games[target]}" for target in wanted)
     if not compiler:
         lines = ["build_mod: nothing was built: no compiler found.",
@@ -238,6 +270,9 @@ def toolchain_help(missing, built=None, wanted=WIDE_TARGETS, compiler=True, outc
 def compiler(target="i386"):
     """(command, the compiler's own flags and headers for `target`, linker
     command); target_flags adds the rest."""
+    if target == TRANSLATED:
+        path = translated_clang()
+        return [path], TARGET_FLAGS[target] + ["-isystem", builtin_headers(path, True)], [linker_for(path), "-r"]
     path, clang, linker = programs()
     if target == "i386":
         return [path], (CLANG_FLAGS if clang else GCC_FLAGS) + ["-isystem", builtin_headers(path, clang)], list(linker)
@@ -252,6 +287,8 @@ def target_flags(target, cc_flags):
     (-I <its directory>): the i386 list exactly as it has always been."""
     if target == "i386":
         return FLAGS + cc_flags + headers()
+    if target == TRANSLATED:
+        return TRANSLATED_FLAGS + cc_flags + headers(system=True)
     return FLAGS64 + cc_flags + headers(system=True) + [
         "-include", os.path.join(include_root(), "pc", "mods", "prelude64.h")]
 
@@ -319,7 +356,7 @@ def provided(build, target="i386"):
     if os.path.exists(table):
         with open(table) as handle:
             names = set(re.findall(r'^    \{"([^"]+)"', handle.read(), re.M))
-        return names | libc_names(target)
+        return names | (translated_libc(build) if target == TRANSLATED else libc_names(target))
     for shipped in [os.path.join(build, f"exports.{target}.txt")] + \
             ([os.path.join(build, "exports.txt")] if target == "i386" else []):
         if os.path.exists(shipped):
@@ -416,7 +453,11 @@ def settings_digest(directory, extra_flags, target="i386"):
     """What both of an object's digests start from: this script, the
     compiler and linker, the target, the flags and the library name, and for
     aarch64 the IR pass every unit goes through."""
-    path, clang, linker = programs()
+    if target == TRANSLATED:
+        (path,), _, linker = compiler(target)
+        clang = True
+    else:
+        path, clang, linker = programs()
     if target == "i386":
         flags = FLAGS + (CLANG_FLAGS if clang else GCC_FLAGS) + headers() + list(extra_flags)
     else:
@@ -435,6 +476,9 @@ def settings_digest(directory, extra_flags, target="i386"):
     if target == "aarch64":
         parts.append(("pass", script_digest(os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                                          "ptr32_stores.py"))))
+    if target == TRANSLATED:   # the guest pass and the game's tables it is given
+        context = translation_context()
+        parts.append(("translation", identity(context["tool"]) + " " + context["digest"]))
     for label, text in parts:
         digest.update(f"{label}\0{text}\0".encode("utf-8", "surrogateescape"))
     return digest
@@ -562,8 +606,9 @@ def compile_object(sources, output, objects_dir, extra_flags=(), target="i386"):
     objects = []
     os.makedirs(objects_dir, exist_ok=True)
     os.makedirs(os.path.dirname(os.path.abspath(output)), exist_ok=True)
-    clang = programs()[1]
-    for source in sources:
+    clang = True if target == TRANSLATED else programs()[1]
+    entry = False
+    for index, source in enumerate(sources):
         obj = os.path.join(objects_dir, os.path.basename(source) + ".o")
         # clang names the compile unit after the file it compiles, here the
         # preprocessed copy in a staging folder that is gone a moment later
@@ -573,9 +618,16 @@ def compile_object(sources, output, objects_dir, extra_flags=(), target="i386"):
         named = ["-Xclang", "-main-file-name", "-Xclang", source] if clang and "cpp-output" in extra_flags else []
         if target == "aarch64":
             through_pass(cc + flags + [*extra_flags, *named], source, obj)
+        elif target == TRANSLATED:
+            if translate_unit(cc + flags + [*extra_flags, *named], source, obj, index):
+                entry = True
         else:
             run(cc + flags + [*extra_flags, *named, "-c", source, "-o", obj])
         objects.append(obj)
+    if target == TRANSLATED:
+        if not entry:
+            sys.exit(f"build_mod: {output}: the mod's sources do not define MemoriesModInit")
+        objects.append(registration_object(cc[0], len(sources), objects_dir))
     run(linker + ["-o", output] + objects)
     if target != "i386":
         tag_abi(output, target)
@@ -603,9 +655,243 @@ def through_pass(command, source, obj):
     run([command[0], *flags, "-Wno-unused-command-line-argument", "-x", "ir", "-c", ir, "-o", obj])
 
 
+# --- aarch64-translated: the Android app's game ---------------------------
+#
+# The Android app runs the translated game (notes/pc-build.md, "Android
+# arm64"): no guest memory at a fixed host address, every guest access of
+# the game's code lowered by the guest pass (tools/pc/llvm/guest_ir.cpp,
+# through tools/pc/llvm_guest.py). A mod's code goes through the same pass,
+# as on macOS (build_mod_arm64.py): each unit to LLVM IR at -O0, its names
+# renamed as the game's are (the game's aliases, rand to the mods' own
+# generator, the C library to the runtime's wrappers that take guest
+# pointers), checked against the game's signatures, translated with the
+# game's pinned data and a registration routine for its own globals, then
+# compiled at -O2. MemoriesModRegisterGlobals and
+# MemoriesModUnregisterGlobals call those routines, and the loader
+# (src/pc/mods/object_loader.c) calls the pair. What the pass is given comes
+# from the game build (mod_translation.json and mod_signatures.json, which
+# build_arm64.py writes and the SDK carries), and the pass itself from
+# MEMORIES_GUEST_IR, the SDK's tools/memories-guest-ir, or in the repository
+# llvm_guest.py, which builds it.
+
+_translation = {}   # translation_problem's findings, for the games being built for
+
+
+def clang_major(path):
+    """The major version of the clang at `path`, or None."""
+    try:
+        text = subprocess.run([path, "--version"], capture_output=True, text=True, encoding="utf-8",
+                              errors="replace").stdout
+    except OSError:
+        return None
+    match = re.search(r"clang version (\d+)", text)
+    return int(match.group(1)) if match else None
+
+
+def ndk_clang():
+    """The Android NDK's clang (ANDROID_NDK_ROOT, ANDROID_NDK_HOME), or None."""
+    for variable in ("ANDROID_NDK_ROOT", "ANDROID_NDK_HOME"):
+        root = os.environ.get(variable)
+        if not root:
+            continue
+        for found in sorted(glob.glob(os.path.join(root, "toolchains", "llvm", "prebuilt", "*", "bin", "clang*"))):
+            if os.path.splitext(os.path.basename(found))[0] == "clang":
+                return found
+    return None
+
+
 @functools.lru_cache(maxsize=None)
-def find_objcopy():
+def translated_candidates():
+    """[(clang, its major version)] build_mod.py tries for aarch64-translated,
+    in order: MEMORIES_MOD_CC alone when it is set; else the clang the other
+    targets use, then the Android NDK's."""
+    named = os.environ.get("MEMORIES_MOD_CC")
+    if named:
+        paths = [resolve(named)]
+    else:
+        found = find_programs(None)
+        paths = [found[0] if found and found[1] else None, ndk_clang()]
+    return [(path, clang_major(path))
+            for path in dict.fromkeys(path for path in paths if path and "clang" in os.path.basename(path))]
+
+
+def translated_clang():
+    """The clang for aarch64-translated: the first candidate no newer than
+    TRANSLATED_CLANG_MAX, with ld.lld beside it or on PATH."""
+    for path, major in translated_candidates():
+        if major is not None and major <= TRANSLATED_CLANG_MAX and linker_for(path):
+            return path
+    sys.exit(translation_problem(None) or "build_mod: no clang for aarch64-translated")
+
+
+def guest_ir_tool():
+    """(the guest pass's executable, None), or (None, why there is none)."""
+    named = os.environ.get("MEMORIES_GUEST_IR")
+    if named:
+        return (named, None) if os.path.isfile(named) else (None, f"MEMORIES_GUEST_IR names {named}, which is not there")
+    shipped = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                           "memories-guest-ir" + (".exe" if os.name == "nt" else ""))
+    if os.path.isfile(shipped):
+        return shipped, None
+    if SHIPPED:
+        return None, "the SDK has no tools/memories-guest-ir and MEMORIES_GUEST_IR is not set"
+    try:
+        import llvm_guest
+        return str(llvm_guest.compiler()), None
+    except (Exception, SystemExit) as error:   # no LLVM 21 libraries, no C++ compiler: said below
+        return None, f"tools/pc/llvm_guest.py could not build it ({str(error).strip() or type(error).__name__})"
+
+
+GUEST_IR_HELP = (
+    "The guest pass is memories-guest-ir: tools/pc/llvm/guest_ir.cpp of the game's source, built against "
+    "LLVM 21.1.8. In a checkout of the source, `python tools/pc/llvm_guest.py` builds it and prints where it "
+    "is (on Windows with MEMORIES_GUEST_LLVM naming an LLVM 21.1.8 build and MEMORIES_GUEST_CXX the C++ "
+    "compiler it was built with; on Linux and macOS it uses the official LLVM 21.1.8 release). Set "
+    "MEMORIES_GUEST_IR to that file, or put it in the SDK's tools folder, and run build_mod.py again.")
+
+
+def translation_problem(games):
+    """Why aarch64-translated cannot be built here (a message), or None.
+    With `games`, it also finds the game's tables (mod_translation.json and
+    mod_signatures.json in the first of `games` that has them) and keeps
+    them, with the pass, for the build."""
+    candidates = translated_candidates()
+    if not any(major is not None and major <= TRANSLATED_CLANG_MAX and linker_for(path)
+               for path, major in candidates):
+        found = "; ".join(f"{path} is clang {major}" if major is not None else f"{path} gives no version"
+                          for path, major in candidates) or "no clang was found"
+        return (f"build_mod: the Android object ({TRANSLATED}) needs clang {TRANSLATED_CLANG_MAX} or older, with "
+                f"ld.lld: the game's guest pass reads LLVM {TRANSLATED_CLANG_MAX}'s IR, and a newer clang's may "
+                f"not parse there ({found}). The Android NDK r29's clang is {TRANSLATED_CLANG_MAX}: set "
+                "ANDROID_NDK_ROOT to the NDK (build_mod.py takes its clang when the other one is newer), or "
+                "MEMORIES_MOD_CC to its toolchains/llvm/prebuilt/<host>/bin/clang.")
+    tool, why = guest_ir_tool()
+    if not tool:
+        return f"build_mod: the Android object ({TRANSLATED}) needs the game's guest pass: {why}.\n{GUEST_IR_HELP}"
+    if games is None:
+        return None
+    for build in games:
+        table = os.path.join(build, "mod_translation.json")
+        signatures = os.path.join(build, "mod_signatures.json")
+        if os.path.isfile(table) and os.path.isfile(signatures):
+            with open(table, "rb") as handle:
+                table_bytes = handle.read()
+            with open(signatures, "rb") as handle:
+                signature_bytes = handle.read()
+            data = json.loads(table_bytes)
+            if data.get("format") != 1:
+                return f"build_mod: {table} is of another version of build_mod.py; use the SDK it came with"
+            _translation.update(data, tool=tool, signatures=json.loads(signature_bytes),
+                                digest=hashlib.sha256(table_bytes + b"\0" + signature_bytes).hexdigest())
+            return None
+    where = ", ".join(games) or "none named"
+    return (f"build_mod: the Android object ({TRANSLATED}) is translated with the game's tables "
+            f"(mod_translation.json, mod_signatures.json), and no game build has them ({where}). Build the "
+            "Android game first (python tools/pc/build_game32.py --target android-arm64-v8a), use the SDK of an "
+            "Android release, or name a build with --game.")
+
+
+def translation_context():
+    if not _translation:
+        sys.exit("build_mod: the aarch64-translated tables were not read (translation_problem)")
+    return _translation
+
+
+def translated_libc(build):
+    """What the C library lends an aarch64-translated mod directly: the
+    pointer-free math only (mod_translation.json); everything that takes a
+    pointer goes through the runtime's wrappers, in the export table."""
+    try:
+        with open(os.path.join(build, "mod_translation.json"), encoding="utf-8") as handle:
+            return set(json.load(handle).get("system_math", ()))
+    except (OSError, ValueError):
+        return set()
+
+
+def guest_pass(operation, text, **options):
+    """One operation of the guest pass (llvm_guest.process, without its cache)."""
+    tool = translation_context()["tool"]
+    with tempfile.TemporaryDirectory() as folder:
+        source, output, config = (os.path.join(folder, name) for name in ("input.ll", "output", "options.json"))
+        with open(source, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(text)
+        with open(config, "w", encoding="utf-8") as handle:
+            json.dump(options, handle)
+        result = subprocess.run([tool, operation, source, output, config], capture_output=True, text=True,
+                                encoding="utf-8", errors="replace")
+        if result.returncode:
+            sys.exit(f"build_mod: the guest pass ({operation}) failed:\n{result.stderr.strip()}")
+        with open(output, encoding="utf-8") as handle:
+            result = handle.read()
+    return json.loads(result) if operation == "inspect" else result
+
+
+def check_signatures(found, expected, source):
+    """The checks build_mod_arm64.validate_imports makes for macOS: the
+    entry's ABI, and each game function the unit calls as the game defines
+    it. Returns whether the unit defines MemoriesModInit."""
+    has_entry = False
+    for name, signature in found.items():
+        entry = name == "MemoriesModInit" and signature["definition"]
+        if not entry and (signature["definition"] or name not in expected):
+            continue
+        if signature["calling_convention"] != 0 or signature["unsupported_abi_attributes"]:
+            sys.exit(f"build_mod: {source}: {name} has a calling convention or ABI attributes the game does not use")
+        if entry:
+            pointer = {"kind": "ptr", "signext": False}
+            if signature["result"] != "i32" or signature["variadic"] or signature["parameters"] != [pointer, pointer]:
+                sys.exit("build_mod: MemoriesModInit must return int and accept "
+                         "(const MemoriesModHost *, MemoriesMod *)")
+            has_entry = True
+            continue
+        for key in ("result", "result_signext", "parameters", "variadic", "calling_convention"):
+            if signature[key] != expected[name][key]:
+                sys.exit(f"build_mod: {source}: {name} is not declared as the game defines it ({key} differs)")
+    return has_entry
+
+
+def translate_unit(command, source, obj, index):
+    """An aarch64-translated unit (above): to IR, through the guest pass,
+    then to the object with the translated game's own object flags.
+    Returns whether it defines MemoriesModInit."""
+    context = translation_context()
+    raw = obj[:-2] + ".raw.ll"
+    run(command + ["-S", "-emit-llvm", source, "-o", raw])
+    with open(raw, encoding="utf-8") as handle:
+        text = handle.read()
+    text = guest_pass("normalize", text, renames=context["aliases"], drop_definitions=[], export_functions=[])
+    entry = check_signatures(guest_pass("inspect", text)["signatures"], context["signatures"], source)
+    text = guest_pass("normalize", text, renames=context["runtime"], drop_definitions=[], export_functions=[])
+    text = guest_pass("translate", text, pins=context["pins"], registration=f"MemoriesModRegisterUnit_{index}",
+                      mod_unit=True)
+    ir = obj[:-2] + ".ll"
+    with open(ir, "w", encoding="utf-8", newline="\n") as handle:
+        handle.write(text)
+    run([command[0], *TARGET_FLAGS[TRANSLATED], "-O2", "-fno-strict-aliasing", "-Wno-unused-command-line-argument",
+         "-x", "ir", "-c", ir, "-o", obj])
+    return entry
+
+
+def registration_object(clang, count, folder):
+    """MemoriesModRegisterGlobals and MemoriesModUnregisterGlobals: each
+    unit's routine, and each one's _Unregister in the other order."""
+    routines = [f"MemoriesModRegisterUnit_{index}" for index in range(count)]
+    source = os.path.join(folder, "registration.c")
+    with open(source, "w", encoding="utf-8", newline="\n") as handle:
+        handle.write("".join(f"extern void {name}(void); extern void {name}_Unregister(void);\n" for name in routines)
+                     + "void MemoriesModRegisterGlobals(void) {\n" + "".join(f"    {name}();\n" for name in routines)
+                     + "}\nvoid MemoriesModUnregisterGlobals(void) {\n"
+                     + "".join(f"    {name}_Unregister();\n" for name in reversed(routines)) + "}\n")
+    obj = os.path.join(folder, "registration.o")
+    run([clang, *TARGET_FLAGS[TRANSLATED], "-O2", "-ffreestanding", "-nostdinc", "-c", source, "-o", obj])
+    return obj
+
+
+@functools.lru_cache(maxsize=None)
+def find_objcopy(target=None):
     """llvm-objcopy for the compiler in use (objcopy_for), or None."""
+    if target == TRANSLATED:
+        return objcopy_for(translated_clang())
     path, clang, _ = programs()
     return objcopy_for(path if clang else None)
 
@@ -613,7 +899,7 @@ def find_objcopy():
 def tag_abi(output, target):
     """The `.memories.abi` section: the target's name, NUL-terminated, which
     the game's loader holds against its own (object_loader.c)."""
-    objcopy = find_objcopy()
+    objcopy = find_objcopy(target if target == TRANSLATED else None)
     if not objcopy:
         sys.exit("build_mod: llvm-objcopy (beside clang, or on PATH) is needed for the 64-bit targets\n" +
                  toolchain_help(["llvm-objcopy"], wanted=(target,), outcome=False))
@@ -639,6 +925,10 @@ def build(directory, out_dir=None, objects_dir=None, extra_flags=(), games=None,
     prune()
     if games is None:
         games = game_builds(target)
+    if target == TRANSLATED:
+        problem = translation_problem(games)
+        if problem:
+            sys.exit(problem)
     name = library_name(directory, target)
     output = os.path.join(out_dir or directory, name)
     extra_flags = ["-I", directory, *extra_flags]
@@ -774,9 +1064,10 @@ def main():
     parser.add_argument("directory", help="the mod's directory (its mod.json and .c files)")
     parser.add_argument("--out", help="where the objects go (default: the mod's directory)")
     parser.add_argument("--target", action="append", choices=TARGETS + ("macos",),
-                        help="a target to build for (repeatable; default: all three ELF targets, or i386 alone "
-                             "when the compiler is gcc). macos is the translated macOS ARM64 dylib "
-                             "(build_mod_arm64.py), built only when named")
+                        help="a target to build for (repeatable; default: i386, x86_64-windows and "
+                             "aarch64-translated, the Android app's, or i386 alone when the compiler is gcc). "
+                             "aarch64 (the fixed-memory Android game, not shipped) and macos (the translated "
+                             "macOS ARM64 dylib, build_mod_arm64.py) are built only when named")
     parser.add_argument("--game", action="append",
                         help="a game build directory to check the mod's names against (repeatable, for one "
                              "--target; default: the target's builds in tmp/pc when they exist)")
@@ -791,9 +1082,17 @@ def main():
     asked = [target for target in options.target or () if target in WIDE_TARGETS]
     if asked and not wide:
         sys.exit(toolchain_help(missing_64bit() or ["llvm-objcopy"], wanted=asked))
-    targets = options.target or (list(TARGETS) if wide else ["i386"])
+    targets = options.target or (list(DEFAULT_TARGETS) if wide else ["i386"])
     if options.game and len(targets) != 1:
         parser.error("--game checks one target's names: name it with --target")
+    if TRANSLATED in targets and TRANSLATED not in (options.target or ()):
+        # Not asked for by name: left out, with what it needs, when this
+        # machine cannot build it (clang newer than 21, no guest pass, no
+        # Android game's tables), as the 64-bit targets are without clang.
+        problem = translation_problem(options.game or game_builds(TRANSLATED))
+        if problem:
+            print(f"{problem}\nThe other objects are built; the Android one is not.", file=sys.stderr)
+            targets.remove(TRANSLATED)
     for target in targets:
         if target == "macos":
             from build_mod_arm64 import build as build_arm64_mod

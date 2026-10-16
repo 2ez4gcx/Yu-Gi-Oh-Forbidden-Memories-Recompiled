@@ -307,3 +307,9 @@ def validate_c_abi(name, signature):
             f"Unsupported native ABI attributes: {name}: "
             + ", ".join(signature["unsupported_abi_attributes"])
         )
+
+
+if __name__ == "__main__":
+    # The guest pass, built when it is not up to date, for build_mod.py's
+    # aarch64-translated target outside this checkout (MEMORIES_GUEST_IR).
+    print(compiler())

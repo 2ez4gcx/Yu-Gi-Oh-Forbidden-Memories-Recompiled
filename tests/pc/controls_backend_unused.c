@@ -39,6 +39,7 @@ UNUSED_GAME_FUNCTION(GlPicture_Stop)
 UNUSED_GAME_FUNCTION(Platform_NotifyPresent)
 UNUSED_GAME_FUNCTION(Platform_SetVSync)
 UNUSED_GAME_FUNCTION(GlPicture_Read)
+UNUSED_GAME_FUNCTION(GlPicture_ReadShown)
 UNUSED_GAME_FUNCTION(GlPicture_Behind)
 /* The software-controls fixture has no GL core presenter; as on the
  * unsupported backend, report unavailable so SDL can keep its plain path. */

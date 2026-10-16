@@ -28,8 +28,23 @@
  * A custom hand layout changes their on-screen rectangles, not the source
  * cells: changing SpritePrim's extent crops or spills into its neighbours.
  * Draw a quad with the original UV footprint instead. */
+/* A port-built quad for a hand card, sorted the way retail submits that
+ * card's own pieces: `fl` is func_80016784's DisplayObject_SubmitPacket
+ * mode. A clip-tested card (0xF0000: being played, flipped or otherwise
+ * turned) was projected by func_80041F90 into the GTE and CardFrameScratch's
+ * origin, so its pieces go through that projection too; any other card's
+ * corners are already the flat screen rectangle. */
+static void CardLayout_SortHandQuad(POLY_FT4 *quad, s32 ot, s32 fl, u8 *origin)
+{
+    if ((fl & 0xF0000) == 0xF0000) {
+        DisplayObject_SubmitProjectedQuad((u8 *)quad, ot, fl, origin);
+    } else {
+        GsSortPoly(quad, (GsOT *G32)ot, (u16)fl);
+    }
+}
+
 static void CardLayout_DrawHandCell(const SpritePrim *src, s32 x, s32 y, s32 w, s32 h,
-                                    u8 u, u8 v, u8 cell_w, u8 cell_h, s32 ot, s32 depth)
+                                    u8 u, u8 v, u8 cell_w, u8 cell_h, s32 ot, s32 fl, u8 *origin)
 {
     POLY_FT4 quad;
     u32 attribute = src->attribute;
@@ -52,7 +67,7 @@ static void CardLayout_DrawHandCell(const SpritePrim *src, s32 x, s32 y, s32 w, 
     quad.u1 = quad.u3 = (u8)(u + cell_w);
     quad.v0 = quad.v1 = v;
     quad.v2 = quad.v3 = (u8)(v + cell_h);
-    GsSortPoly(&quad, (GsOT *G32)ot, (u16)depth);
+    CardLayout_SortHandQuad(&quad, ot, fl, origin);
 }
 #endif
 
@@ -205,13 +220,15 @@ void func_80016784(DisplayObject *object, s32 arg1, s32 arg2, s32 arg3) {
                                 CardLayout_DrawHandCell(k, o->pos.h.x + hand_atk_label.x,
                                                         o->pos.h.y + hand_atk_label.y,
                                                         hand_atk_label.w, hand_atk_label.h,
-                                                        0x78, 0x70, 8, 8, arg1, fl);
+                                                        0x78, 0x70, 8, 8, arg1, fl,
+                                                        CARD_FRAME_SCRATCH_BYTES(o));
                             }
                             if (hand_def_label.visible) {
                                 CardLayout_DrawHandCell(k, o->pos.h.x + hand_def_label.x,
                                                         o->pos.h.y + hand_def_label.y,
                                                         hand_def_label.w, hand_def_label.h,
-                                                        0x78, 0x78, 8, 8, arg1, fl);
+                                                        0x78, 0x78, 8, 8, arg1, fl,
+                                                        CARD_FRAME_SCRATCH_BYTES(o));
                             }
                             for (i = hand_digits - 1; i >= 0; i--) {
                                 if (hand_atk.visible)
@@ -219,7 +236,8 @@ void func_80016784(DisplayObject *object, s32 arg1, s32 arg2, s32 arg3) {
                                                             o->pos.h.x + hand_atk.x + (hand_digits - 1 - i) * hand_atk.w,
                                                             o->pos.h.y + hand_atk.y,
                                                             hand_atk.w, hand_atk.h,
-                                                            sp18[i] * 8, 0x58, 8, 8, arg1, fl);
+                                                            sp18[i] * 8, 0x58, 8, 8, arg1, fl,
+                                                            CARD_FRAME_SCRATCH_BYTES(o));
                             }
                             for (i = hand_digits - 1; i >= 0; i--) {
                                 if (hand_def.visible)
@@ -227,7 +245,8 @@ void func_80016784(DisplayObject *object, s32 arg1, s32 arg2, s32 arg3) {
                                                             o->pos.h.x + hand_def.x + (hand_digits - 1 - i) * hand_def.w,
                                                             o->pos.h.y + hand_def.y,
                                                             hand_def.w, hand_def.h,
-                                                            sp20[i] * 8, 0x58, 8, 8, arg1, fl);
+                                                            sp20[i] * 8, 0x58, 8, 8, arg1, fl,
+                                                            CARD_FRAME_SCRATCH_BYTES(o));
                             }
                             break;
                         }
@@ -330,7 +349,8 @@ void func_80016784(DisplayObject *object, s32 arg1, s32 arg2, s32 arg3) {
                     if (hand_styled && hand_art.visible) {
                         CardLayout_DrawHandCell(z, o->pos.h.x + hand_art.x, o->pos.h.y + hand_art.y,
                                                 hand_art.w, hand_art.h, z->uv.b.lo, z->uv.b.hi,
-                                                40, 32, arg1, fl);
+                                                40, 32, arg1, fl,
+                                                CARD_FRAME_SCRATCH_BYTES(o));
                     } else if (!hand_styled)
 #endif
                         DisplayObject_SubmitPacket(z, POLY_FT4_BYTES(y), arg1, fl,
@@ -367,11 +387,12 @@ void func_80016784(DisplayObject *object, s32 arg1, s32 arg2, s32 arg3) {
                      * its own bank at 8bpp, whose bank and depth bits that
                      * mask silently drops -- the same limit func_80029EC4.c's
                      * Library icon hits. Submitted as its own textured quad
-                     * instead (not through `k`, whose scratchpad address always
-                     * has DisplayObject_SubmitPacket's own 0x04000000
-                     * "projected" bit set, which would misroute a case-5-style
-                     * dispatch into a perspective transform this flat sprite
-                     * never wants), whose tpage field is a full word. */
+                     * instead, whose tpage field is a full word. A
+                     * clip-tested card (fl's 0xF0000: being played, flipped
+                     * or otherwise turned) is where retail projects `k`
+                     * below; CardLayout_SortHandQuad projects this quad
+                     * the same way then, so the frame turns and scales with
+                     * the card. */
                     POLY_FT4 quad;
                     setPolyFT4(&quad);
                     /* pad1/pad2 are the upper half of a bank-sampling
@@ -395,7 +416,7 @@ void func_80016784(DisplayObject *object, s32 arg1, s32 arg2, s32 arg3) {
                     quad.u1 = quad.u3 = (u8)(hand_u + hand_w);
                     quad.v0 = quad.v1 = (u8)hand_v;
                     quad.v2 = quad.v3 = (u8)(hand_v + hand_h);
-                    GsSortPoly(&quad, (GsOT *G32)arg1, (u16)fl);
+                    CardLayout_SortHandQuad(&quad, arg1, fl, CARD_FRAME_SCRATCH_BYTES(o));
                     return;
                 }
                 /* The mirror case: the card is face down (or mid-flip,
@@ -422,7 +443,7 @@ void func_80016784(DisplayObject *object, s32 arg1, s32 arg2, s32 arg3) {
                     quad.u1 = quad.u3 = (u8)(back_u + back_w);
                     quad.v0 = quad.v1 = (u8)back_v;
                     quad.v2 = quad.v3 = (u8)(back_v + back_h);
-                    GsSortPoly(&quad, (GsOT *G32)arg1, (u16)fl);
+                    CardLayout_SortHandQuad(&quad, arg1, fl, CARD_FRAME_SCRATCH_BYTES(o));
                     return;
                 }
 #endif

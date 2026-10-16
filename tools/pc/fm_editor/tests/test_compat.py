@@ -194,6 +194,40 @@ class FeatureTest(unittest.TestCase):
                 self.assertEqual(self.needs(value), 17)
         self.assertIn("newer than v0.3.0", compat.release_text(17))
 
+    def test_api_18(self):
+        """The card frames' keys (notes/modding.md, "Frame styles"): a game of
+        API 17 reads none of them, so it would draw the retail frame or the
+        style's palette alone and play the mod half-loaded."""
+        style = lambda **keys: {"card_layout": {"frame_styles": {"s": {"image": "a.png", **keys}}}}  # noqa: E731
+        for value in ({"cards": [{"replace": 1, "frame_style": "god"}]},
+                      {"card_layout": {"default_styles": {"kinds": {"monster": "gold"}}}},
+                      {"card_layout": {"atk_label": {"x": 1, "y": 2}}},
+                      {"card_layout": {"dfd_label": {"hide": True}}},
+                      {"card_layout": {"type_label": {"trap": {"image": "t.png"}}}},
+                      {"card_layout": {"atk": {"hide": True}}},
+                      {"card_layout": {"stars": {"x": 1, "y": 2, "color": {"r": 255, "g": 96, "b": 96}}}},
+                      {"card_layout": {"digits": {"image": "d.png", "atk": {"x": 38, "y": 179}}}},
+                      style(hand_image="h.png"), style(field_image="f.png"), style(field_back_image="b.png"),
+                      style(back_image="b.png"), style(library_icon="l.png"), style(hand={"art": {"x": 1}}),
+                      style(full_bleed=False), style(atk_label={"x": 1}), style(type_label={}),
+                      style(digits={"image": "d.png"}), style(title={"x": 12, "y": 14}),
+                      style(atk={"hide": True}), style(art={"x": 3})):
+            with self.subTest(value=value):
+                self.assertEqual(self.needs(value), 18)
+        # What a game of API 11 reads stays at 11.
+        for value in ({"card_layout": {"frame_styles": {"g": {"image": "a.png", "hand_color": "gold",
+                                                                   "width": 140, "height": 196}},
+                                       "frame_for": [{"style": "g", "class": "monster"}], "default_style": "g",
+                                       "art": {"x": 3}, "atk": {"x": 38, "y": 179}, "stars": {"x": 59, "y": 153},
+                                       "digits": {"image": "d.png", "width": 10, "height": 12, "step": 10}}},
+                      {"card_layout": {"frame_styles": "not a table"}},
+                      {"cards": [{"replace": 1, "frame": "Gold"}]}):
+            with self.subTest(value=value):
+                self.assertEqual(self.needs(value), 11)
+        api, reasons = compat.required(style(hand_image="h.png", library_icon="l.png"))
+        self.assertEqual((api, len(reasons)), (18, 2))
+        self.assertIn("newer than v0.3.0", compat.release_text(18))
+
     def test_reasons_are_the_highest_apis(self):
         api, reasons = compat.required({"card_text_colors": {}, "ui": {}, "limits": {"swords_turns": 5}})
         self.assertEqual(api, 11)

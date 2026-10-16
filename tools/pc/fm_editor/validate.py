@@ -611,12 +611,10 @@ def shipped_folder():
     editor's own program, beside the game files the port was last pointed at
     (disc-path.txt, in the game's folder or its game/ folder), or the source
     tree's mods/. None when none of them is there."""
-    import sys
     from pathlib import Path
     from . import disc
     places = []
-    program = Path(sys.executable if getattr(sys, "frozen", False) else (sys.argv[0] or ".")).resolve().parent
-    places.append(program / "mods")
+    places.append(disc.program_dir() / "mods")
     try:
         text = (disc.user_dir() / "disc-path.txt").read_text(encoding="utf-8", errors="replace").strip()
         if text:

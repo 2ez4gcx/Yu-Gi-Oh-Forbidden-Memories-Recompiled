@@ -42,6 +42,14 @@ where the pictures and links below work.
    carries it as `fm-editor-<version>-windows.zip`,
    `fm-editor-<version>-linux.tar.gz` and `fm-editor-<version>-macos-arm64.zip`.
    On Apple Silicon, unpack and open `fm-editor.app`; Python and Tk are included.
+   The app is ad-hoc signed, not notarized, so macOS may refuse the first
+   open: open **System Settings > Privacy & Security** and press **Open
+   Anyway** (the game's own steps are in
+   [notes/macos-build.md](../../../notes/macos-build.md); right-click >
+   **Open** only works on older macOS). Move the app out of Downloads with
+   Finder first: a quarantined app opened where it was unzipped runs from a
+   temporary copy (App Translocation) and cannot see the folder beside it.
+   Keep `game/` in the folder that holds `fm-editor.app`, not inside it.
    Unpack it where you unpacked the game:
    `fm-editor.exe` (with `fm-editor.pkg` and `fm-editor-files/`, which stay
    together) or `fm-editor` lands beside `memories-pc.exe` or `memories-pc`.
@@ -61,6 +69,7 @@ where the pictures and links below work.
    applied or not saved yet. **Ctrl+Z** undoes.
 5. **Save it into the game.** **File > Export mod...** and choose the game's
    mods folder: `Documents\My Games\YFM Re-Decomp\mods` on Windows,
+   `~/Library/Application Support/YFM Re-Decomp/mods` on macOS,
    `~/.local/share/YFM Re-Decomp/mods` on Linux (the dialog opens there when
    it exists). The editor makes a folder named after the mod's id in it. From
    then on **File > Save** (Ctrl+S) writes that same folder.
@@ -1235,8 +1244,9 @@ but probably not what you meant.
 
 **I saved the mod but nothing changed in the game.** The game reads mods
 when it starts. Check three things: the mod's folder is in a mods folder the
-game reads (`Documents\My Games\YFM Re-Decomp\mods`, `~/.local/share/YFM Re-Decomp/mods`,
-or `mods/` beside the game; **File > Export mod...** puts it there), it is
+game reads (`Documents\My Games\YFM Re-Decomp\mods`,
+`~/Library/Application Support/YFM Re-Decomp/mods` on macOS,
+`~/.local/share/YFM Re-Decomp/mods`, or `mods/` beside the game; **File > Export mod...** puts it there), it is
 ticked in **Game > Mods** (F10 shows the menu bar), and the game was
 restarted after the save. The Mods window lists the mod even when it cannot
 load it, and says why.
@@ -1320,7 +1330,12 @@ in the File menu.
 The editor looks for the game where the port does: `MEMORIES_DISC`, the disc
 the port was last pointed at (`disc-path.txt` in the user directory),
 `game/` beside the program, the program's folder, `game/` in the user
-directory, and `./game`. It takes a raw `.bin` image (the one the port runs
+directory, and `./game`. The program's folder (`disc.program_dir()`) is the
+executable's, except for the macOS app, where it is the folder holding
+`fm-editor.app`. The user directory is the port's (`disc.user_dir()`):
+`MEMORIES_USER_DIR`, else `Documents\My Games\YFM Re-Decomp` on Windows,
+`~/Library/Application Support/YFM Re-Decomp` on macOS, and
+`$XDG_DATA_HOME` or `~/.local/share` on Linux. It takes a raw `.bin` image (the one the port runs
 from), an ISO, or a folder holding `SLUS_014.11` and `DATA/WA_MRG.MRG`.
 
 What it reads (layouts in `gamedata.py`):
@@ -1730,9 +1745,13 @@ builds the editor with no Python needed to run it. On Windows that is
 `fm-editor-files/` folder, which stay together. On macOS it is
 `tmp/pc/fm-editor/fm-editor.app` (ARM64); on Linux it is one file,
 `tmp/pc/fm-editor/fm-editor`. Put them beside `memories-pc.exe` and the
-editor finds the game's `game/` folder there. Build outputs never go in git.
+editor finds the game's `game/` folder there (for the Mac app, beside
+`fm-editor.app`). Build outputs never go in git.
 Windows gets no one-file build because virus scanners took it for a dropper.
-The Mac bundle uses PyInstaller's ad-hoc signature and is not notarized.
+The Mac bundle uses PyInstaller's ad-hoc signature and is not notarized: a
+downloaded copy needs **Open Anyway** in System Settings > Privacy &
+Security the first time (right-click > **Open** on older macOS), and moving
+out of Downloads with Finder so it is not run from a translocated copy.
 
 Each release carries it as `fm-editor-<version>-windows.zip`,
 `fm-editor-<version>-linux.tar.gz` and `fm-editor-<version>-macos-arm64.zip`
@@ -2022,7 +2041,7 @@ installed in `folders`, in the order the game would load them with the
 player's Load order from the port's settings file (`MEMORIES_SETTINGS`, else
 the user directory's `settings.txt`). `validate.mod_folders(project)` is
 where the game finds mods: `MEMORIES_MODS_DIR` when set, else the mods
-beside the game (`validate.shipped_folder()`: beside the editor's program,
+beside the game (`validate.shipped_folder()`: beside the editor's program (`disc.program_dir()`),
 beside the game files the port was last pointed at, or the source tree's
 `mods/`) and the user directory's `mods`; and the folder the mod was opened
 from, which is this mod whatever its id now. Every installed mod counts,

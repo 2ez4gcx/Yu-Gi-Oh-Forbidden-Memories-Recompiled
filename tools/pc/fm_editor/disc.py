@@ -170,17 +170,34 @@ def _windows_documents():
 
 def user_dir() -> Path:
     """The port's user directory (src/pc/platform/paths.c): MEMORIES_USER_DIR,
-    else Documents/My Games on Windows, else an absolute XDG_DATA_HOME or
-    ~/.local/share. (A portable build's user/ is beside the game, which
-    candidates() looks in anyway.)"""
+    else Documents/My Games on Windows, ~/Library/Application Support on macOS,
+    else an absolute XDG_DATA_HOME or ~/.local/share. (A portable build's
+    user/ is beside the game, which candidates() looks in anyway.)"""
     named = os.environ.get("MEMORIES_USER_DIR")
     if named:
         return Path(named)
     if sys.platform == "win32":
         return _windows_documents() / "My Games" / "YFM Re-Decomp"
+    if sys.platform == "darwin":
+        return Path(os.path.expanduser("~")) / "Library" / "Application Support" / "YFM Re-Decomp"
     xdg = os.environ.get("XDG_DATA_HOME", "")
     base = xdg if xdg.startswith("/") else os.path.join(os.path.expanduser("~"), ".local", "share")
     return Path(base) / "YFM Re-Decomp"
+
+
+def program_dir() -> Path:
+    """The folder the program lives in, which is where the game's files sit
+    beside it. A packed program is its executable's folder, except in a macOS
+    app (X.app/Contents/MacOS/exe), where it is the folder holding X.app: the
+    app's inside is no place a player puts game/ or mods/. From the source it
+    is the script's folder."""
+    if not getattr(sys, "frozen", False):
+        return Path(sys.argv[0] or ".").resolve().parent
+    folder = Path(sys.executable).resolve().parent
+    if (sys.platform == "darwin" and folder.name == "MacOS" and folder.parent.name == "Contents"
+            and folder.parent.parent.suffix == ".app"):
+        return folder.parent.parent.parent
+    return folder
 
 
 def candidates(extra=()) -> list:
@@ -198,7 +215,7 @@ def candidates(extra=()) -> list:
             found.append(Path(text))
     except OSError:
         pass
-    program = Path(sys.executable if getattr(sys, "frozen", False) else (sys.argv[0] or ".")).resolve().parent
+    program = program_dir()
     found += [program / "game", program, user_dir() / "game", Path.cwd() / "game"]
     here = Path(__file__).resolve()
     if len(here.parents) > 3:

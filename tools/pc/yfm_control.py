@@ -70,12 +70,13 @@ JUMP_MODES = {"title": MODE["menu"], "debug": MODE["debug"], "duel": MODE["duel"
               "build_deck": MODE["build_deck"], "library": MODE["library"], "password": MODE["password"],
               "map": MODE["campaign_map"], "credits": MODE["credits"], "options": MODE["options"]}
 
-# Guest addresses by name. config/pc/guest_addresses.txt has every global the
-# build pins to its retail address, and is read when present (a checkout);
-# these are the fallbacks, from the headers named. The symbol table beside
-# the executable (symbols/<build id>.txt, for carrying states between builds)
-# holds only host addresses (functions and the game objects' own variables),
-# none of these.
+# Guest addresses by name. config/pc/guest_addresses.txt has the retail
+# address of every global, and is read when present (a checkout); these are
+# the fallbacks, from the headers named. A name is only found there when the
+# running game does not know it as a variable of its own: a variable a game
+# unit defines (all of the small data, .sdata and .sbss: gGraphics_sViewportX)
+# is not at its retail address in a build, only a pinned one is, so peek and
+# poke ask the game first (Game.locate; the build's symbols/<id>.vars.txt).
 FALLBACK = {
     "D_8009B26C": 0x8009B26C,             # main_mode_state.h: the active mode and its flags
     "gDuel_bOpponentID": 0x8009B361,      # the duellist the next duel is against
@@ -171,6 +172,7 @@ class Game:
         self.out = Path(out).resolve()
         self.out.mkdir(parents=True, exist_ok=True)
         self.symbols = guest_addresses()
+        self._located: dict[str, int | str] = {}
         self.frame = self.vblank = 0
         self._buffer = b""
         settings_file = self.out / "settings.txt"
@@ -556,35 +558,69 @@ class Game:
         """FNV-1a of VRAM, as MEMORIES_FRAME_HASHES writes it."""
         return int(self.command("hash"), 16)
 
-    def address(self, where: int | str) -> int:
-        if isinstance(where, str):
-            if where not in self.symbols:
-                raise KeyError(f"no guest address named {where!r}: not in config/pc/guest_addresses.txt nor in "
-                               "yfm_control.FALLBACK")
-            return self.symbols[where]
-        return where
+    def locate(self, where: int | str) -> int | str:
+        """What peek and poke send for `where`: a guest address as it is, and
+        a name as its retail guest address when it is a pinned global, or as
+        "@name" when the game keeps the variable itself (its own data: the
+        small data, which is not at its retail address in a build). A name
+        neither the game nor the retail table knows is a KeyError, and a game
+        with no variable table (a build without symbols/<id>.vars.txt) a
+        ControlError: neither falls back to a guess."""
+        if not isinstance(where, str):
+            return where
+        if where not in self._located:
+            try:
+                self.command(f"peek @{where} 1")
+                self._located[where] = f"@{where}"
+            except ControlError as error:
+                reason = str(error)
+                if "no variable table" in reason:
+                    raise ControlError(f"{where}: {reason}; its retail address would be a guess") from None
+                if "usage: peek" in reason:   # an executable from before @NAME
+                    print(f"yfm_control: this game cannot look up {where} (older than @NAME): using its retail "
+                          "address, wrong for small data", file=sys.stderr)
+                elif f"no variable {where} in this build" not in reason:
+                    raise
+                if where not in self.symbols:
+                    raise KeyError(f"no variable named {where!r}: not in the game's symbols/<id>.vars.txt, "
+                                   "config/pc/guest_addresses.txt nor yfm_control.FALLBACK") from None
+                self._located[where] = self.symbols[where]
+        return self._located[where]
 
-    def peek(self, where: int | str, length: int) -> bytes:
-        """Guest memory (KSEG0, KSEG1 or physical; or a symbol's name)."""
-        address, data = self.address(where), b""
+    def address(self, where: int | str) -> int:
+        """The guest address of `where`; a ControlError for a variable the game
+        keeps itself (peek and poke reach it, and it has no guest address)."""
+        located = self.locate(where)
+        if isinstance(located, str):
+            raise ControlError(f"{where} is a variable of the game's own memory: it has no guest address; "
+                               "use peek and poke")
+        return located
+
+    def _spell(self, located: int | str, at: int) -> str:
+        return f"@{located[1:]}+{at:x}" if isinstance(located, str) else f"{located + at:08x}"
+
+    def peek(self, where: int | str, length: int, offset: int = 0) -> bytes:
+        """Guest memory (KSEG0, KSEG1 or physical; or a variable's name), from
+        `offset` bytes on."""
+        located, data = self.locate(where), b""
         while len(data) < length:
             count = min(16384, length - len(data))
-            data += bytes.fromhex(self.command(f"peek {address + len(data):08x} {count}"))
+            data += bytes.fromhex(self.command(f"peek {self._spell(located, offset + len(data))} {count}"))
         return data
 
-    def poke(self, where: int | str, data: bytes) -> None:
-        address = self.address(where)
+    def poke(self, where: int | str, data: bytes, offset: int = 0) -> None:
+        located = self.locate(where)
         for at in range(0, len(data), 16384):
-            self.command(f"poke {address + at:08x} {data[at:at + 16384].hex()}")
+            self.command(f"poke {self._spell(located, offset + at)} {data[at:at + 16384].hex()}")
 
     def u8(self, where: int | str, offset: int = 0) -> int:
-        return self.peek(self.address(where) + offset, 1)[0]
+        return self.peek(where, 1, offset)[0]
 
     def u16(self, where: int | str, offset: int = 0) -> int:
-        return struct.unpack("<H", self.peek(self.address(where) + offset, 2))[0]
+        return struct.unpack("<H", self.peek(where, 2, offset))[0]
 
     def u32(self, where: int | str, offset: int = 0) -> int:
-        return struct.unpack("<I", self.peek(self.address(where) + offset, 4))[0]
+        return struct.unpack("<I", self.peek(where, 4, offset))[0]
 
     def save(self, path: Path | str) -> Path:
         """A save state, here (relative paths go in the run's folder)."""

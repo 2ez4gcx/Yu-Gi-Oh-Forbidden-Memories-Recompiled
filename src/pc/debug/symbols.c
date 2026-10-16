@@ -12,6 +12,55 @@ typedef struct RuntimeSymbol {
 
 static RuntimeSymbol *symbols;
 static size_t symbol_count;
+static RuntimeSymbol *variables;   /* by address, like symbols: the game's data and bss */
+static size_t variable_count;
+
+/* symbols/<id>.vars.txt beside the table at `table`: "address size name". */
+static void load_variables(const char *table)
+{
+    char path[660];
+    FILE *file;
+    size_t length = strlen(table), room = 0;
+    if (length < 4 || length + 6 >= sizeof(path)) return;
+    snprintf(path, sizeof(path), "%.*s.vars.txt", (int)(length - 4), table);
+    file = fopen(path, "r");
+    if (!file) return;
+    while (!feof(file)) {
+        RuntimeSymbol symbol;
+        unsigned address, size;
+        if (fscanf(file, "%x %x %71s", &address, &size, symbol.name) != 3) break;
+        symbol.address = address;
+        symbol.size = size;
+        if (variable_count == room) {
+            RuntimeSymbol *grown;
+            room = room ? room * 2 : 1024;
+            grown = realloc(variables, room * sizeof(*variables));
+            if (!grown) {
+                free(variables);
+                variables = NULL;
+                variable_count = 0;
+                break;
+            }
+            variables = grown;
+        }
+        variables[variable_count++] = symbol;
+    }
+    fclose(file);
+}
+
+int Symbols_FindVariable(const char *name, uintptr_t *address, uintptr_t *size)
+{
+    size_t at;
+    if (!variable_count) return -2;
+    for (at = 0; at < variable_count; at++) {
+        if (!strcmp(variables[at].name, name)) {
+            *address = variables[at].address;
+            *size = variables[at].size;
+            return 0;
+        }
+    }
+    return -1;
+}
 
 int Symbols_Load(void)
 {
@@ -19,6 +68,7 @@ int Symbols_Load(void)
     FILE *file;
     size_t room = 0;
     if (Memories_SymbolTablePath(path, sizeof(path))) return -1;
+    load_variables(path);
     file = fopen(path, "r");
     if (!file) return -1;
     while (!feof(file)) {

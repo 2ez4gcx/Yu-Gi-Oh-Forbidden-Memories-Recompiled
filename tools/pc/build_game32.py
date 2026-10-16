@@ -287,6 +287,30 @@ def run(command):
         sys.exit(f"{' '.join(command[:6])} ...\n{result.stderr}")
     return result.stdout
 
+def variable_table(rows):
+    """The "address size name" lines of the game's variables, from nm's rows
+    (address, size, type, C name): those in game_data and game_bss, between
+    the markers the link provides. PE symbols carry no sizes: a variable runs
+    to the next one, or to the end of its section."""
+    by_name = {name: address for address, _, _, name in rows}
+    variables, seen = [], {}
+    for section in ("game_data", "game_bss"):
+        start, stop = by_name.get(f"__start_{section}"), by_name.get(f"__stop_{section}")
+        if start is None or stop is None:
+            continue
+        inside = sorted(row for row in rows if row[2] in "DdBb" and start <= row[0] < stop
+                        and not row[3].startswith(("__start_", "__stop_")))
+        ends, next_address = [], stop
+        for address, _, _, _ in reversed(inside):   # the next higher address, for each
+            ends.append(next_address)
+            if address < next_address:
+                next_address = address
+        for (address, size, _, name), end in zip(inside, reversed(ends)):
+            size = size or end - address
+            seen[name] = seen.get(name, 0) + 1
+            variables.append(f"{address:08x} {size:08x} {name if seen[name] == 1 else f'{name}#{seen[name]}'}\n")
+    return variables
+
 def flags_changed(path, flags):
     """When these flags were last different: path keeps them, rewritten
     only when they change, so its time is when they did (--release adds or
@@ -1395,9 +1419,13 @@ def main():
     # "address size name"; repeats of a static name get #2, #3... in address
     # order, which follows the link order. The table's hash is the build id.
     os.makedirs(f"{options.build}/symbols", exist_ok=True)
-    seen, table = {}, []
+    seen, table, nm_rows = {}, [], []
     for line in run([NM, "-n", "-S", output]).splitlines():
         parts = line.split()
+        if len(parts) == 4 and c_name(parts[3]):
+            nm_rows.append((int(parts[0], 16), int(parts[1], 16), parts[2], c_name(parts[3])))
+        elif len(parts) == 3 and parts[2].startswith(("__start_game_", "__stop_game_")):   # the link's markers: no size
+            nm_rows.append((int(parts[0], 16), 0, parts[1], parts[2]))
         if len(parts) != 4 or not c_name(parts[3]):
             continue
         parts[3] = c_name(parts[3])
@@ -1421,6 +1449,16 @@ def main():
     for name in (build_id, digest.hexdigest()[:8]):  # the second serves states saved before build ids
         with open(f"{options.build}/symbols/{name}.txt", "w") as handle:
             handle.writelines(table)
+    # The game's variables by name, where this build keeps them
+    # (symbols/<id>.vars.txt, src/pc/debug/symbols.c): every data and bss
+    # symbol between the game_data and game_bss markers, which holds the
+    # small data (.sdata/.sbss) whatever the target places at fixed addresses.
+    # config/pc/guest_addresses.txt has the retail address of all of them, and
+    # that is where only a pinned variable is. Kept apart from the table
+    # above, whose hash is the build id and whose data entries a state
+    # carried between builds must find in the same place.
+    with open(f"{options.build}/symbols/{build_id}.vars.txt", "w") as handle:
+        handle.writelines(variable_table(nm_rows))
     with open(f"{options.build}/buildid", "w") as handle:
         handle.write(build_id + "\n")
     # The commit, for crash reports (src/pc/debug/monitor.c): "unknown" in

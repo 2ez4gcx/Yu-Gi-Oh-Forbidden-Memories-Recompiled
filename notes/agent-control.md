@@ -25,8 +25,8 @@ with Game() as game:                    # its own settings, user folder and log;
 ```
 
 `step(n)`, `press("cross")`, `press_until(predicate, keys)`, `wait_until(predicate)`,
-`peek`/`poke`/`u8` (addresses or names from `config/pc/guest_addresses.txt`) are
-the primitives under it. Replays: `python3 tools/pc/replay.py run` before a PR.
+`peek`/`poke`/`u8` (addresses, or the names of game variables: the game itself
+says where a name is, see "Symbols" below) are the primitives under it. Replays: `python3 tools/pc/replay.py run` before a PR.
 
 Gotchas:
 - One client at a time; another is answered `err busy`. A client that leaves
@@ -95,7 +95,7 @@ build with the old combination; the eight smoke cases unchanged.
 | `pad P BITS` | hold pad P's active-high bits from now on, read at each VBlank |
 | `shot PATH` | write the presented picture as PNG, and keep running |
 | `hash` | the VRAM hash of the last presented frame |
-| `peek ADDR LEN` / `poke ADDR HEX` | guest memory |
+| `peek ADDR LEN` / `poke ADDR HEX` | guest memory; ADDR may be `@NAME[+OFF]`, a game variable by name (see below) |
 | `save PATH` / `load PATH` | a save state |
 | `info` | frame, VBlank, mode, build id |
 | `quit` | exit |
@@ -185,6 +185,18 @@ build with the old combination; the eight smoke cases unchanged.
     the scratchpad is `1F800000`-`1F8003FF`; anything else, or a range past
     an end, is refused. A poke into RAM tells the module registry
     (`Memories_GuestWritten`).
+  - `@NAME[+OFF]` in place of ADDR (OFF hex) is the game variable NAME
+    wherever this process keeps it, found in the build's own
+    `symbols/<build id>.vars.txt` (below). It is for the variables the game
+    units define, the small data (`.sdata`, `.sbss`: `gGraphics_sViewportX`)
+    among them: those are in the executable's `game_data`/`game_bss`, not at
+    the retail address of `config/pc/guest_addresses.txt`, which only a
+    *pinned* global (one the units leave undefined) has. The range is the
+    variable's own: a peek or poke past its end is `err` (never the next
+    variable), a name the build does not have is `err no variable NAME in this
+    build`, a build without a variable table `err no variable table`. A
+    recording keeps the line with the name, so a replay finds the variable in
+    any build.
   - `save PATH`; `load PATH` resumes the state and answers at the next stop,
     one frame into it (`ok frame F vblank V`), or `err` with the reason
     (no notice on screen). The frame count is the run's own and is not in a
@@ -401,12 +413,25 @@ CI can hold retail inputs.
   keys)` (a press every so many VBlanks until something holds: dialogue
   and menus without counting frames), `shot`, `hash`, `peek`/`poke`/`u8`/
   `u16`/`u32` by address or symbol, `save`/`load`, `quit`.
-- **Symbols:** deviation from the plan: the table shipped for state
-  relocation (`symbols/<build id>.txt`) holds only host addresses (every
-  function, and the variables of the game's own sections), none of the
-  guest globals a test reads. The client reads names from
-  `config/pc/guest_addresses.txt`, the table the build pins those globals
-  with, and falls back to constants, each with the header it comes from.
+- **Symbols:** two kinds of name. A *pinned* global (a game unit declares it
+  and nothing defines it: `D_8009B26C`, `gDuel_aDeckCardRecords`) is at its
+  retail guest address, read from `config/pc/guest_addresses.txt` with
+  constants as fallbacks, each with the header it comes from. A variable a
+  game unit *defines* (all of the small data, `.sdata` and `.sbss`, and some
+  `.data`: `gGraphics_sViewportX`, `D_800907D8`) is in the executable at an
+  address of the build's own, and its retail address reads the guest RAM
+  beside it (0, with the Deck on screen; a poke there did nothing). The
+  build writes those to `symbols/<build id>.vars.txt` (`address size name`,
+  every data and bss symbol between the `game_data`/`game_bss` markers, on
+  every target; a separate file, since the table state relocation reads
+  would have to find them in the same place in two builds), and the client
+  (`Game.locate`) asks the game first with `peek @NAME 1`: the game answers
+  from that file, and only a name it does not know falls back to the retail
+  table. A name neither has is a `KeyError`; a game with no variable table
+  (an Android APK does not carry the file) a `ControlError` naming the
+  variable, not a guess. Module-owned (`ovl_*`) variables are not in the
+  file and resolve by retail address as before.
+  `tests/pc/control_small_data_runtime.py` is the gate.
 - **`state()`:** the mode (and its flags), the opponent
   (`gDuel_bOpponentID`), the starchips, the deck (`gDuel_awPlayerDeck`),
   the chest (`gLibrary_abCardChest`) and, in the story or a duel, both sides

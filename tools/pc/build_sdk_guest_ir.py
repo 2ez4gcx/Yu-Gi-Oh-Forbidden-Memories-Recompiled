@@ -4,7 +4,8 @@ the SDK's own clang (release workflow: tools/pc/package.py --guest-ir).
 
 The pass reads the IR a mod's clang writes and the clang compiles the IR the
 pass writes back (tools/pc/build_mod.py, aarch64-translated), and LLVM reads
-the IR of its own version or an older one, never a newer. The SDK's toolchain
+the IR of its own version or an older one, never a newer: only a clang of the
+pass's own LLVM is certain to do both. The SDK's toolchain
 is llvm-mingw (clang 23), so its pass is built against LLVM 23, where the game
 itself is translated with LLVM 21 (tools/pc/llvm_guest.py, untouched: the
 two meet through the game's tables, mod_translation.json, not through a
@@ -24,16 +25,21 @@ Every download is checked against the SHA-256 in sdk_llvm.json, which
 `--pin` fills in from the release's published digests (one GitHub API call,
 no download). An archive without the headers or the libraries stops the
 build with what it does hold. The result is checked by running it
-(--llvm-major, and the three operations on a small unit).
+(--llvm-major, and the three operations on a small unit) and by its imports
+(only the system's libraries on Windows, no NEEDED entry on Linux). It ships
+as memories-pc.exe does (notes/pc-release.md, "VirusTotal"): without
+symbols, and on Windows with version information.
 
   python tools/pc/build_sdk_guest_ir.py [--out DIR]       build for this host
+  python tools/pc/build_sdk_guest_ir.py --llvm-only       just the LLVM libraries
+        (the release workflow caches them before the pass is linked)
   python tools/pc/build_sdk_guest_ir.py --pin             fill in sha256
   python tools/pc/build_sdk_guest_ir.py --llvm DIR        use an LLVM build or
         install folder (bin/llvm-config) instead of the pinned one, for a
         local check; --source-dir DIR the same with llvm-project's sources;
         --expect-major N then names the version it holds
 """
-import argparse, hashlib, json, os, shlex, shutil, subprocess, sys, tarfile, tempfile, urllib.request
+import argparse, hashlib, json, os, re, shlex, shutil, subprocess, sys, tarfile, tempfile, urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
@@ -268,30 +274,114 @@ def source_llvm(entry, config, work, source=None, jobs=None):
 
 
 def cleaned(flags):
-    """llvm-config's flags with an archive's absolute paths to the system's
-    libraries (zlib, zstd of the machine that built it) spelled -l."""
+    """llvm-config's flags with the absolute paths it gives to the system's
+    libraries (the machine that built the archive: /usr/lib/.../libz.so,
+    libzstd.a, ...) spelled -l<name>, for this machine's linker to find the
+    static library (missing_static says when there is none)."""
     result = []
     for flag in flags:
         name = os.path.basename(flag)
-        if os.path.isabs(flag) and name.startswith(("libz.", "libzstd.")):
+        if os.path.isabs(flag) and flag.endswith((".so", ".a", ".dylib")) and not name.startswith("libLLVM"):
             result.append("-l" + name[3:].split(".")[0])
-        elif os.path.isabs(flag) and flag.endswith((".so", ".a", ".dylib")) and "libLLVM" not in name:
-            sys.exit(f"build_sdk_guest_ir: llvm-config asks for {flag}, a library of the machine that built "
-                     "that LLVM; the pass would not link statically")
         else:
             result.append(flag)
     return result
 
 
-def compile_pass(llvm, cxx, output):
-    """memories-guest-ir from guest_ir.cpp, linked statically against the LLVM
-    in `llvm` (a folder with bin/llvm-config)."""
+def missing_static(cxx, flags):
+    """The -l<name> of `flags` that have no static library (lib<name>.a) for
+    `cxx` to link: a -static link cannot use the shared one."""
+    missing = []
+    for flag in flags:
+        if flag.startswith("-l") and not flag.startswith("-lLLVM"):
+            found = subprocess.run([cxx, f"-print-file-name=lib{flag[2:]}.a"], capture_output=True, text=True).stdout.strip()
+            if not os.path.isabs(found):   # the driver gives the bare name back when it finds nothing
+                missing.append(flag)
+    return missing
+
+
+def version_resource(folder):
+    """The Windows program's version information, as memories-pc.exe's
+    (build_game32.py exe_resources): virus scanners hold a program that says
+    nothing about itself against it. Returns the resource object."""
+    windres = next((found for found in map(shutil.which, ("x86_64-w64-mingw32-windres", "llvm-windres", "windres"))
+                    if found), None)
+    if not windres:
+        sys.exit("build_sdk_guest_ir: no windres (llvm-mingw's) to give memories-guest-ir.exe version information")
+    label = os.environ.get("MEMORIES_VERSION", "")
+    match = re.match(r"v(\d+)\.(\d+)\.(\d+)", label)
+    number = ",".join([*match.groups(), "0"] if match else ["0", "0", "0", "0"])
+    text = label or "development build"
+    strings = {"CompanyName": "Yu-Gi-Oh! Forbidden Memories Recompiled",
+               "FileDescription": "Yu-Gi-Oh! Forbidden Memories Recompiled mod build tool (guest pass)",
+               "FileVersion": text, "InternalName": "memories-guest-ir", "OriginalFilename": "memories-guest-ir.exe",
+               "ProductName": "Yu-Gi-Oh! Forbidden Memories Recompiled", "ProductVersion": text,
+               "Comments": "https://github.com/Unchiga/Yu-Gi-Oh-Forbidden-Memories-Recompiled"}
+    rc = ["1 VERSIONINFO", f"FILEVERSION {number}", f"PRODUCTVERSION {number}", "FILEOS 0x40004", "FILETYPE 0x1",
+          "BEGIN", '  BLOCK "StringFileInfo"', "  BEGIN", '    BLOCK "040904B0"', "    BEGIN",
+          *[f'      VALUE "{key}", "{value}"' for key, value in strings.items()],
+          "    END", "  END", '  BLOCK "VarFileInfo"', "  BEGIN", '    VALUE "Translation", 0x409, 1200', "  END",
+          "END"]
+    source = os.path.join(folder, "guest-ir-resources.rc")
+    with open(source, "w", encoding="utf-8", newline="\n") as handle:
+        handle.write("\n".join(rc) + "\n")
+    output = os.path.join(folder, "guest-ir-resources.o")
+    run([windres, source, "-O", "coff", "-o", output])
+    return output
+
+
+def compile_pass(llvm, cxx, output, resources=()):
+    """memories-guest-ir from guest_ir.cpp, linked statically (and without
+    symbols) against the LLVM in `llvm` (a folder with bin/llvm-config)."""
     config_tool = os.path.join(llvm, "bin", "llvm-config" + EXE)
     flags = subprocess.check_output([config_tool, "--cxxflags", "--ldflags", "--libs", *COMPONENTS,
                                      "--system-libs"], text=True)
-    command = [cxx, SOURCE, *cleaned(shlex.split(flags.replace("\\", "/"))), "-O2", "-static", "-o", output]
+    flags = cleaned(shlex.split(flags.replace("\\", "/")))
+    if sys.platform.startswith("linux"):
+        missing = missing_static(cxx, flags)
+        if missing:
+            sys.exit(f"build_sdk_guest_ir: llvm-config asks the link for {' '.join(missing)}, and {cxx} finds no "
+                     "static library (lib<name>.a) for it, which the static pass needs: install the package that "
+                     "has it (Debian: zlib1g-dev, libzstd-dev, libncurses-dev for -ltinfo), or take it out of "
+                     "the link if the pass does not use it")
+    command = [cxx, SOURCE, *flags, *resources, "-O2", "-static", "-s", "-o", output]
     os.makedirs(os.path.dirname(output), exist_ok=True)
     run(command)
+
+
+# What a program built with llvm-mingw may import and still run on a clean
+# Windows: the system's libraries (the C runtime comes as api-ms-win-crt-*).
+WINDOWS_DLLS = {"kernel32.dll", "ntdll.dll", "advapi32.dll", "shell32.dll", "ole32.dll", "oleaut32.dll", "ws2_32.dll",
+                "psapi.dll", "user32.dll", "bcrypt.dll", "version.dll", "shlwapi.dll", "ucrtbase.dll", "msvcrt.dll"}
+
+
+def foreign_imports(names):
+    """The DLLs among `names` a clean Windows does not have."""
+    return sorted({name for name in names
+                   if name.lower() not in WINDOWS_DLLS and not name.lower().startswith("api-ms-win-")})
+
+
+def check_static(program):
+    """Stop unless `program` stands alone: on Windows imports only the system's
+    libraries (not libc++.dll, libunwind.dll ...), on Linux has no NEEDED
+    entry (a libstdc++ or glibc of the build machine's)."""
+    if sys.platform == "win32":
+        tool = shutil.which("llvm-objdump")
+        if not tool:
+            sys.exit("build_sdk_guest_ir: llvm-objdump (llvm-mingw's) is not on PATH to read the imports of " + program)
+        text = subprocess.run([tool, "-p", program], capture_output=True, text=True).stdout
+        found = foreign_imports(re.findall(r"DLL Name: (\S+)", text))
+        if found:
+            sys.exit(f"build_sdk_guest_ir: {program} imports {', '.join(found)}, which a clean Windows has not: "
+                     "it was not linked statically")
+    else:
+        tool = shutil.which("readelf") or shutil.which("llvm-readelf")
+        if not tool:
+            sys.exit("build_sdk_guest_ir: readelf is not on PATH to read the dynamic section of " + program)
+        text = subprocess.run([tool, "-d", program], capture_output=True, text=True).stdout
+        found = re.findall(r"\(NEEDED\)\s+Shared library: \[([^\]]+)\]", text)
+        if found:
+            sys.exit(f"build_sdk_guest_ir: {program} needs {', '.join(found)} at run time: it was not linked statically")
 
 
 def smoke(program, major):
@@ -319,7 +409,8 @@ def smoke(program, major):
                 sys.exit(f"build_sdk_guest_ir: {program} inspect does not list the check unit's function")
             if operation == "translate" and "Memories_ResolveDataFast" not in text:
                 sys.exit(f"build_sdk_guest_ir: {program} translate did not route the guest load through the resolver")
-    print(f"{program}: LLVM {major}, inspect/normalize/translate ran")
+    check_static(program)
+    print(f"{program}: LLVM {major}, inspect/normalize/translate ran, stands alone")
 
 
 def clang_major(path):
@@ -339,6 +430,8 @@ def main():
     parser.add_argument("--expect-major", type=int, help="the LLVM major --llvm or --source-dir hold (default: the pinned)")
     parser.add_argument("--cxx", help="the C++ compiler (default: MEMORIES_GUEST_CXX; Windows: llvm-mingw's clang++; else c++)")
     parser.add_argument("--jobs", type=int, help="build jobs for the source build")
+    parser.add_argument("--llvm-only", action="store_true",
+                        help="only get the LLVM libraries (unpack or build them), for the workflow to cache them")
     options = parser.parse_args()
     if options.pin:
         pin()
@@ -371,8 +464,13 @@ def main():
         else (None, None)
     if found is not None and found != major:
         sys.exit(f"build_sdk_guest_ir: {llvm} is LLVM {found}, expected {major}")
+    if options.llvm_only:
+        print(llvm)
+        return
     output = os.path.join(options.out, "memories-guest-ir" + EXE)
-    compile_pass(llvm, cxx, output)
+    os.makedirs(options.out, exist_ok=True)
+    with tempfile.TemporaryDirectory() as resources:
+        compile_pass(llvm, cxx, output, [version_resource(resources)] if system == "windows" else [])
     smoke(output, major)
     print(output)
 

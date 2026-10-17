@@ -318,6 +318,8 @@ def stage(system, label, exports=None, guest_ir=None):
         os.makedirs(os.path.dirname(target), exist_ok=True)
         shutil.copyfile(guest_ir, target)
         os.chmod(target, 0o755)
+        if system.startswith("windows"):   # as the game's: stripped, with the PE checksum
+            strip(target)
     # The other targets' export lists, beside this game's own (sdk_exports).
     for target, path in (exports or {}).items():
         shutil.copyfile(path, os.path.join(folder, "sdk", f"exports.{target}.txt"))
@@ -426,6 +428,9 @@ def main():
     parser.add_argument("--exports-from", action="append", default=[], metavar="BUILD",
                         help="another target's game build folder (its sdk/exports.<target>.txt and source) to take "
                              "that target's export list from for the SDK (repeatable; default: tmp/pc's builds)")
+    parser.add_argument("--no-guest-ir", action="store_true",
+                        help="pack the SDKs without the guest pass (the release workflow, on a pull request that "
+                             "does not touch it and has no cached LLVM to build it from; never for a release)")
     parser.add_argument("--guest-ir", action="append", default=[], metavar="FILE",
                         help="a memories-guest-ir for the SDKs (tools/pc/build_sdk_guest_ir.py makes it, for the "
                              "system it runs on; repeatable, each SDK takes the one of its system; default: the "
@@ -455,7 +460,7 @@ def main():
         print(f"package: windows-x64 skipped: {missing}; the other archives are packed", file=sys.stderr)
         systems = [system for system in systems if system != "windows-x64"]
     unavailable = (exports_unavailable(systems, options.exports_from, missing) or
-                   guest_ir_unavailable(systems, options.guest_ir))
+                   (None if options.no_guest_ir else guest_ir_unavailable(systems, options.guest_ir)))
     if unavailable:
         sys.exit(f"package: {unavailable}; nothing was packed")
     if not options.no_build:
@@ -466,7 +471,7 @@ def main():
     exports = {system: sdk_exports(system, options.exports_from) for system in systems if system != "android-arm64"}
     made = []
     for system in systems:
-        made.append(pack_apk(label) if system == "android-arm64" else pack(system, stage(system, label, exports[system], guest_ir_for(system, options.guest_ir))))
+        made.append(pack_apk(label) if system == "android-arm64" else pack(system, stage(system, label, exports[system], None if options.no_guest_ir else guest_ir_for(system, options.guest_ir))))
     shutil.rmtree(os.path.join(DIST, "stage"), ignore_errors=True)
     for path in made:
         print(f"{os.path.relpath(path, ROOT)}: {os.path.getsize(path) / 1e6:.1f} MB")

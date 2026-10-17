@@ -3,7 +3,7 @@
 LLVM release archive (what it holds, what it lacks), the partial unpacking,
 and the flags cleaned of the machine that built the archive. Nothing is
 downloaded and no compiler starts."""
-import io, json, os, shutil, sys, tarfile, tempfile, unittest
+import io, json, os, shutil, subprocess, sys, tarfile, tempfile, unittest
 from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -140,14 +140,74 @@ class Archive(unittest.TestCase):
         self.assertIn("no published digest", str(stopped.exception.code))
 
     def test_flags_of_the_machine_that_built_the_archive(self):
-        flags = ["-L/opt/llvm/lib", "-lLLVMCore", "/usr/lib/x86_64-linux-gnu/libz.so", "/usr/lib/libzstd.a", "-lm"]
+        """llvm-config names the system's libraries by the path they had on the
+        machine that built the archive; they are asked of this one by name."""
+        flags = ["-L/opt/llvm/lib", "-lLLVMCore", "/usr/lib/x86_64-linux-gnu/libz.so", "/usr/lib/libzstd.a",
+                 "/usr/lib/x86_64-linux-gnu/libxml2.so.2", "-lm"]
         if os.name != "nt":   # an absolute path is only one where the system says so
-            self.assertEqual(sdk.cleaned(flags), ["-L/opt/llvm/lib", "-lLLVMCore", "-lz", "-lzstd", "-lm"])
-            with self.assertRaises(SystemExit) as stopped:
-                sdk.cleaned(["/usr/lib/libxml2.so"])
-            self.assertIn("libxml2.so", str(stopped.exception.code))
+            self.assertEqual(sdk.cleaned(flags), ["-L/opt/llvm/lib", "-lLLVMCore", "-lz", "-lzstd", "-lxml2", "-lm"])
+            self.assertEqual(sdk.cleaned(["/opt/llvm/lib/libLLVMCore.a"]), ["/opt/llvm/lib/libLLVMCore.a"])
         self.assertEqual(sdk.cleaned(["-lLLVMCore", "-lpsapi"]), ["-lLLVMCore", "-lpsapi"])
 
+    def test_a_system_library_without_a_static_one_is_named(self):
+        have = {"libz.a": "/usr/lib/x86_64-linux-gnu/libz.a", "libm.a": "/usr/lib/x86_64-linux-gnu/libm.a"}
+        def driver(command, **options):
+            name = command[1].split("=", 1)[1]
+            return subprocess.CompletedProcess(command, 0, have.get(name, name) + "\n", "")
+        with mock.patch.object(sdk.subprocess, "run", driver):
+            self.assertEqual(sdk.missing_static("c++", ["-lLLVMCore", "-lz", "-ltinfo", "-lm", "-lxml2", "-pthread"]),
+                             ["-ltinfo", "-lxml2"])
+            self.assertEqual(sdk.missing_static("c++", ["-lz", "-lm"]), [])
+
+    def test_a_static_pass_imports_only_the_systems_libraries(self):
+        names = ["KERNEL32.dll", "ntdll.dll", "api-ms-win-crt-runtime-l1-1-0.dll", "ADVAPI32.dll", "SHELL32.dll",
+                 "WS2_32.dll", "ole32.dll", "PSAPI.DLL"]
+        self.assertEqual(sdk.foreign_imports(names), [])
+        self.assertEqual(sdk.foreign_imports(names + ["libc++.dll", "libunwind.dll", "libc++.dll"]),
+                         ["libc++.dll", "libunwind.dll"])
+
+    def test_check_static_reads_the_imports(self):
+        windows = "The Import Tables:\n  DLL Name: KERNEL32.dll\n  DLL Name: libc++.dll\n"
+        elf = "Dynamic section:\n 0x0000000000000001 (NEEDED)             Shared library: [libc.so.6]\n"
+        def tool(text):
+            return lambda command, **options: subprocess.CompletedProcess(command, 0, text, "")
+        with mock.patch.object(sdk.sys, "platform", "win32"), mock.patch.object(sdk.shutil, "which", lambda name: name):
+            with mock.patch.object(sdk.subprocess, "run", tool(windows)), self.assertRaises(SystemExit) as stopped:
+                sdk.check_static("pass.exe")
+            self.assertIn("libc++.dll", str(stopped.exception.code))
+            with mock.patch.object(sdk.subprocess, "run", tool("DLL Name: KERNEL32.dll\n")):
+                sdk.check_static("pass.exe")
+        with mock.patch.object(sdk.sys, "platform", "linux"), mock.patch.object(sdk.shutil, "which", lambda name: name):
+            with mock.patch.object(sdk.subprocess, "run", tool(elf)), self.assertRaises(SystemExit) as stopped:
+                sdk.check_static("pass")
+            self.assertIn("libc.so.6", str(stopped.exception.code))
+            with mock.patch.object(sdk.subprocess, "run", tool("There is no dynamic section in this file.\n")):
+                sdk.check_static("pass")
+
+    def test_the_windows_pass_has_version_information(self):
+        """As memories-pc.exe's (build_game32.py exe_resources): virus
+        scanners hold a program that says nothing about itself against it."""
+        compiled = []
+        def windres(command, **options):
+            compiled.append(command)
+            return subprocess.CompletedProcess(command, 0)
+        for label, number, text in (("v1.2.3", "1,2,3,0", "v1.2.3"), ("", "0,0,0,0", "development build"),
+                                    ("dev-abc123", "0,0,0,0", "dev-abc123")):
+            with mock.patch.dict(os.environ, {"MEMORIES_VERSION": label}), \
+                    mock.patch.object(sdk.shutil, "which", lambda name: name), \
+                    mock.patch.object(sdk.subprocess, "run", windres):
+                result = sdk.version_resource(self.folder)
+            self.assertTrue(result.endswith(".o"))
+            with open(os.path.join(self.folder, "guest-ir-resources.rc"), encoding="utf-8") as handle:
+                rc = handle.read()
+            self.assertIn(f"FILEVERSION {number}", rc)
+            self.assertIn(f'VALUE "FileVersion", "{text}"', rc)
+            self.assertIn('VALUE "InternalName", "memories-guest-ir"', rc)
+            self.assertIn('VALUE "OriginalFilename", "memories-guest-ir.exe"', rc)
+            self.assertIn('VALUE "ProductName", "Yu-Gi-Oh! Forbidden Memories Recompiled"', rc)
+            self.assertEqual(compiled[-1][1:], [os.path.join(self.folder, "guest-ir-resources.rc"), "-O", "coff", "-o", result])
+        with mock.patch.object(sdk.shutil, "which", lambda name: None), self.assertRaises(SystemExit):
+            sdk.version_resource(self.folder)
 
 class Packing(unittest.TestCase):
     """package.py puts the pass of the archive's system in its SDK."""

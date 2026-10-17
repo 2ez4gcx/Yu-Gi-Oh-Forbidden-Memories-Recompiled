@@ -739,6 +739,7 @@ def guest_ir_tool(build_tool=True):
     if SHIPPED:
         return None, "the SDK has no tools/memories-guest-ir and MEMORIES_GUEST_IR is not set"
     import llvm_guest
+    llvm_guest.FETCH = False   # a mod build never downloads: it says what to get
     if not build_tool:
         built = llvm_guest.OUT / ("memories-guest-ir" + (".exe" if os.name == "nt" else ""))
         if built.is_file():
@@ -920,7 +921,8 @@ def tag_abi(output, target):
         os.remove(handle.name)
 
 
-def build(directory, out_dir=None, objects_dir=None, extra_flags=(), games=None, quiet=False, target="i386"):
+def build(directory, out_dir=None, objects_dir=None, extra_flags=(), games=None, quiet=False, target="i386",
+          build_tool=True):
     """Build the mod in `directory` for `target`; returns the path of its
     object, or None when it has no C (a data-only mod). The object is built
     once per inputs_key, into tmp/pc/mod-build/<mod>-<key>, and copied to
@@ -935,7 +937,7 @@ def build(directory, out_dir=None, objects_dir=None, extra_flags=(), games=None,
     if games is None:
         games = game_builds(target)
     if target == TRANSLATED:
-        problem = translation_problem(games)
+        problem = translation_problem(games, build_tool)
         if problem:
             sys.exit(problem)
     name = library_name(directory, target)
@@ -1031,7 +1033,8 @@ def prune():
 
 def undefined_names(output):
     """The names the object leaves for the game to lend."""
-    reader = tool("llvm-readelf") or tool("readelf")
+    reader = tool("llvm-readelf") or tool("readelf") or next(
+        (found for path, _ in translated_candidates() if (found := beside(path, "llvm-readelf"))), None)
     undefined = set()
     for line in run([reader, "-sW", output]).splitlines():
         parts = line.split()
@@ -1087,8 +1090,16 @@ def main():
     # The 64-bit targets need clang with ld.lld and llvm-objcopy. Not asked
     # for by name, they are left out without them: the i386 object is built,
     # as before there were others, and the modder told what to get.
-    wide = programs()[1] and find_objcopy()
-    asked = [target for target in options.target or () if target in WIDE_TARGETS]
+    # aarch64-translated alone, asked for by name, needs none of that: its
+    # own clang (the NDK's will do) and the guest pass (translation_problem).
+    if options.target and set(options.target) == {TRANSLATED}:
+        problem = translation_problem(options.game or game_builds(TRANSLATED))
+        if problem:
+            sys.exit(problem)
+        wide = True
+    else:
+        wide = programs()[1] and find_objcopy()
+    asked = [target for target in options.target or () if target in WIDE_TARGETS and target != TRANSLATED]
     if asked and not wide:
         sys.exit(toolchain_help(missing_64bit() or ["llvm-objcopy"], wanted=asked))
     targets = options.target or (list(DEFAULT_TARGETS) if wide else ["i386"])
@@ -1108,7 +1119,8 @@ def main():
             build_arm64_mod(options.directory, options.out,
                             game=options.game[0] if options.game else None)
             continue
-        output = build(options.directory, options.out, games=options.game, target=target)
+        output = build(options.directory, options.out, games=options.game, target=target,
+                       build_tool=target in (options.target or ()))
         if not output:
             print(f"{options.directory}: no C sources; a data-only mod needs no build")
             break

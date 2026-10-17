@@ -20,6 +20,18 @@ class TranslationError(ValueError):
     pass
 
 
+# Whether a missing LLVM 21 may be fetched (linux_llvm, the macOS archive).
+# A game build and `python tools/pc/llvm_guest.py` may; build_mod.py sets it
+# false: building a mod never downloads anything (it says what to get).
+FETCH = True
+
+
+def no_fetch(folder):
+    raise RuntimeError(
+        f"LLVM {json.loads(CONFIG.read_text())['version']} is not in {folder}; `python tools/pc/llvm_guest.py` "
+        "fetches it (or set MEMORIES_GUEST_LLVM to a build of it)")
+
+
 def host_llvm():
     """A pinned LLVM built on this host (MEMORIES_GUEST_LLVM: a build or install
     folder with bin/llvm-config), for hosts without an official archive
@@ -44,6 +56,8 @@ def linux_llvm(version):
         raise RuntimeError(f"{LINUX_CONFIG.name} pins LLVM {config['version']}, {CONFIG.name} {version}")
     top = config["archive"][: -len(".tar.xz")]
     folder = ROOT / "tmp/pc/llvm-linux" / top
+    if not (folder / "bin/llvm-config").is_file() and not FETCH:
+        no_fetch(folder)
     if not (folder / "bin/llvm-config").is_file():
         import shutil
         import tarfile
@@ -84,7 +98,13 @@ def toolchain():
         return folder
     if sys.platform.startswith("linux"):
         return linux_llvm(config["version"])
+    if sys.platform != "darwin":
+        # No official archive has the libraries for this host (Windows).
+        raise RuntimeError(f"no LLVM {config['version']} for this host: set MEMORIES_GUEST_LLVM to a build of it "
+                           "(and MEMORIES_GUEST_CXX to its C++ compiler)")
     folder = ROOT / "tmp/pc/llvm-macos" / ("LLVM-" + config["version"] + "-macOS-ARM64")
+    if not (folder / "bin/llvm-config").is_file() and not FETCH:
+        no_fetch(folder)
     if not (folder / "bin/llvm-config").is_file():
         from fetch_tools import download, unpack
 
@@ -105,6 +125,16 @@ def compiler():
     OUT.mkdir(parents=True, exist_ok=True)
     binary = OUT / ("memories-guest-ir" + (".exe" if sys.platform == "win32" else ""))
     source = ROOT / "tools/pc/llvm/guest_ir.cpp"
+    if not FETCH:
+        # Before anything that could fetch: without the toolchain here, a
+        # pass built before in this checkout is taken as it is (its stamp
+        # cannot be checked without llvm-config), else the reason.
+        try:
+            toolchain()
+        except RuntimeError:
+            if binary.is_file() and (OUT / "compiler.fingerprint").is_file():
+                return binary
+            raise
     if host_llvm() or sys.platform.startswith("linux"):
         return host_compiler(binary, source)
     deps_source = Path(__file__).with_name("macos_deps.py")

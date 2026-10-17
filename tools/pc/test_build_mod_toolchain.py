@@ -145,6 +145,35 @@ class Toolchain(unittest.TestCase):
             text = build_mod.translation_problem(None, build_tool=False)
         self.assertIn("it is not built yet in this checkout", text)
 
+    def test_translated_never_downloads(self):
+        """No path of build_mod.py fetches LLVM: neither the default one
+        nor the target named, where llvm_guest.py would build the pass."""
+        import llvm_guest, types
+        attempts = []
+        stub = types.ModuleType("fetch_tools")
+        stub.download = lambda url, digest: attempts.append(url) or (_ for _ in ()).throw(RuntimeError("download"))
+        stub.unpack = lambda *arguments: None
+        clang = self.program("clang")
+        self.program("ld.lld")
+        environment = {name: value for name, value in os.environ.items()
+                       if name not in ("MEMORIES_GUEST_IR", "MEMORIES_GUEST_LLVM")}
+        empty = tempfile.mkdtemp(prefix="build-mod-guest-")
+        self.addCleanup(shutil.rmtree, empty, ignore_errors=True)
+        llvm_guest.toolchain.cache_clear()
+        llvm_guest.compiler.cache_clear()
+        self.addCleanup(llvm_guest.toolchain.cache_clear)
+        self.addCleanup(llvm_guest.compiler.cache_clear)
+        with mock.patch.dict(sys.modules, {"fetch_tools": stub}), \
+                mock.patch.object(build_mod, "translated_candidates", lambda: [(clang, 21)]), \
+                mock.patch.dict(os.environ, environment, clear=True), \
+                mock.patch.object(llvm_guest, "OUT", pathlib.Path(empty)), \
+                mock.patch.object(llvm_guest, "ROOT", pathlib.Path(empty)), \
+                mock.patch.object(llvm_guest, "FETCH", True):
+            for build_tool in (False, True):
+                text = build_mod.translation_problem(None, build_tool=build_tool)
+                self.assertIn("needs the game's guest pass", text)
+        self.assertEqual(attempts, [])
+
     def test_translated_needs_the_game_tables(self):
         clang = self.program("clang")
         self.program("ld.lld")

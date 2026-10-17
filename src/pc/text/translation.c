@@ -132,7 +132,7 @@ static void pin(TextUnit *unit)
     unit->data = moved; /* not freed again: a unit, once added, stays */
 }
 
-static void note_results(TextUnit *unit);
+static void note_results(TextUnit *unit, const char *mod, const char *name);
 
 /* The startup text's layout (Text_Layout), once Text_Build is done. A
  * state holds addresses inside it: the same language and mods give the
@@ -245,7 +245,7 @@ static void add_unit(int mod, const char *path, const char *name)
     units = bigger;
     units[unit_count++] = unit;
     pin(unit);
-    note_results(unit);
+    note_results(unit, Mods_Id(mod), name);
     /* A later file, or a later mod, has the last word on a string. */
     for (i = 0; i < unit->string_count; i++) overrides[unit->strings[i].id] = unit->data + unit->strings[i].offset;
     LOG(LOG_MODS, "text: %s: %s: %d strings, %lu bytes, %d jumps, at %p", Mods_Id(mod), name, unit->string_count,
@@ -274,7 +274,7 @@ static void add_language(void)
         return;
     }
     pin(language_unit);
-    note_results(language_unit);
+    note_results(language_unit, NULL, NULL);
     for (i = 0; i < language_unit->string_count; i++) {
         overrides[language_unit->strings[i].id] = language_unit->data + language_unit->strings[i].offset;
     }
@@ -576,24 +576,35 @@ static int own_letters(const unsigned char *at)
         1, 1, 1, 5, 1, 2, 2, 2, 0, 0, 1, 1, 1, 6, 2, -1,
         -1, 1, 0, 0, 1, 1, 0, -1, -1, 1, 0, 1, 1, 1, 1, 1,
         1, 2, 1, -1, -1, 0, -1, 2, 2, 0, 0};
+    size_t offset;
+    const TextUnit *unit = unit_at(text_address(at), &offset);
     int letters = 0, steps;
+    /* A malformed code at the unit's end must not be read past it. */
+    if (!unit) return -1;
     for (steps = 0; steps < 256; steps++) {
-        int code = *at;
+        const unsigned char *end = unit->data + unit->size;
+        int code;
+        if (at >= end) return -1;
+        code = *at;
         if (code == 0xFF || code == 0xFE || code == 0xFA) return letters;
         if (code < 0xF0) {
             letters++;
             at++;
         } else if (code < 0xF6) {
+            if (at + 2 > end) return -1;
             letters++;
             at += 2;
-        } else if (code == 0xF8 && (at[1] == 0x17 || at[1] == 0x18)) {
-            size_t offset;
-            const TextUnit *unit = unit_at(text_address(at), &offset);
+        } else if (code == 0xF8 && at + 2 <= end && (at[1] == 0x17 || at[1] == 0x18)) {
             int pick = at[1] == 0x18 && gDuel_bWinnerSide ? 1 : 0;
-            unsigned operand = at[2 + 2 * pick] | at[3 + 2 * pick] << 8;
-            if (!unit || operand >= (unsigned)unit->target_count) return -1;
+            unsigned operand;
+            if (at + 4 + 2 * pick > end) return -1;
+            operand = at[2 + 2 * pick] | at[3 + 2 * pick] << 8;
+            if (operand >= (unsigned)unit->target_count) return -1;
             at = unit->targets[operand];
-        } else if (code == 0xF8 && at[1] <= 0x2A && operands[at[1]] >= 0) {
+            unit = unit_at(text_address(at), &offset);
+            if (!unit) return -1;
+        } else if (code == 0xF8 && at + 2 <= end && at[1] <= 0x2A && operands[at[1]] >= 0) {
+            if (at + 2 + operands[at[1]] > end) return -1;
             at += 2 + operands[at[1]];
         } else {
             return -1;
@@ -669,9 +680,11 @@ static int control_before(const TextUnit *unit, uint32_t at)
 /* step_before for a unit's copy `r`: the call at `call` (an offset of the
  * unit's data) has the {f8 02 NN} that is the last control code before it
  * step `shift` less; else four spaces before it become one. 0 if neither
- * can. It reads the unit's control codes rather than the bytes: a letter
- * past the game's (F1 F8, say) is no code. */
-static int unit_step_before(UnitResults *r, uint32_t call, int shift)
+ * can. With `apply` 0 it only says so: a side's calls move together or not
+ * at all (the label would be drawn shifted by the ones that did). It reads
+ * the unit's control codes rather than the bytes: a letter past the game's
+ * (F1 F8, say) is no code. */
+static int unit_step_before(UnitResults *r, uint32_t call, int shift, int apply)
 {
     const unsigned char *original = r->unit->data;
     int last = control_before(r->unit, call), step;
@@ -680,7 +693,7 @@ static int unit_step_before(UnitResults *r, uint32_t call, int shift)
     if (last >= 0 && at >= r->from && at + 3 <= call && original[at] == 0xF8 && original[at + 1] == 0x02) {
         step = r->data[at + 2 - r->from] - shift;
         if (step < 0 || step > 0xFF) return 0;
-        r->data[at + 2 - r->from] = (unsigned char)step;
+        if (apply) r->data[at + 2 - r->from] = (unsigned char)step;
         return 1;
     }
     step = 3 * TEXT_RESULTS_CELL - shift;
@@ -688,9 +701,11 @@ static int unit_step_before(UnitResults *r, uint32_t call, int shift)
         original[call - 1] || step < 0 || step > 0xFF) {
         return 0;
     }
-    r->data[call - 3 - r->from] = 0xF8;
-    r->data[call - 2 - r->from] = 0x02;
-    r->data[call - 1 - r->from] = (unsigned char)step;
+    if (apply) {
+        r->data[call - 3 - r->from] = 0xF8;
+        r->data[call - 2 - r->from] = 0x02;
+        r->data[call - 1 - r->from] = (unsigned char)step;
+    }
     return 1;
 }
 
@@ -714,8 +729,11 @@ static UnitResults *unit_results_at(uintptr_t address)
     return NULL;
 }
 
-/* The span of `unit`'s data that its result strings take. */
-static void note_results(TextUnit *unit)
+/* The span of `unit`'s data that its result strings take; said once, as the
+ * unit is added (from `mod`'s file `name`, if it has them), when it is more
+ * than a copy holds: the duel results then keep the translation's own
+ * words in place of the names. */
+static void note_results(TextUnit *unit, const char *mod, const char *name)
 {
     size_t from = (size_t)-1, last = 0, to = unit->size;
     int i;
@@ -732,6 +750,14 @@ static void note_results(TextUnit *unit)
     }
     unit->results_from = from;
     unit->results_to = to;
+    if (to - from > TEXT_UNIT_RESULTS) {
+        LOG(LOG_MODS, "text: %s: %s: the result strings 40-45 span %lu bytes, more than %d: the duel results show no names",
+            mod ? mod : "language", name ? name : "", (unsigned long)(to - from), TEXT_UNIT_RESULTS);
+        if (mod) {
+            Mods_Note(mod, "%s: the result strings 40-45 span %lu bytes (the most is %d): list them together to show "
+                           "the names there", name, (unsigned long)(to - from), TEXT_UNIT_RESULTS);
+        }
+    }
 }
 
 /* A unit's result strings with the names fitted in, as results_copy does for
@@ -783,10 +809,21 @@ static const unsigned char *unit_results_copy(const unsigned char *own)
         } else if (id == TEXT_YOU || id == TEXT_YOU_FIRST) {
             shift = name_shift(unit_side_name(id), base);
             if (shift) {
-                int moved = unit_step_before(r, call, shift);
+                int moved = unit_step_before(r, call, shift, 0);
                 if (id == TEXT_YOU) r->you &= moved;
                 else r->won &= moved;
             }
+        }
+    }
+    /* A side whose calls can all move does; else none of them does. */
+    for (i = 0; i < unit->target_count; i++) {
+        uint32_t call = unit->target_calls[i];
+        int base, id;
+        if (call == TEXT_NO_CALL || call < r->from || call >= r->from + r->size) continue;
+        id = side_of(unit->targets[i], &base);
+        if ((id == TEXT_YOU && r->you) || (id == TEXT_YOU_FIRST && r->won)) {
+            int shift = name_shift(unit_side_name(id), base);
+            if (shift) unit_step_before(r, call, shift, 1);
         }
     }
     return r->room >= r->need ? r->data + (at - r->from) : NULL;
@@ -922,7 +959,7 @@ const unsigned char *Text_CompileOwn(const char *listing, int id, size_t *size)
     units = bigger;
     units[unit_count++] = unit;
     pin(unit);
-    note_results(unit);
+    note_results(unit, NULL, "the port's own listing");
     LOG(LOG_MODS, "text: the port's own listing: %d strings, %lu bytes, at %p", unit->string_count,
         (unsigned long)unit->size, (void *)unit->data);
     for (i = 0; i < unit->string_count; i++) {

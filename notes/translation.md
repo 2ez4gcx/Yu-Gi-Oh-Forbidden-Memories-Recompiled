@@ -277,7 +277,11 @@ step that moves; a string that builds YOU or COM in a way it cannot measure
 (a call or a flag first) keeps its word. The translation's own word also
 stays for what the small font cannot show, and when the player gave no name.
 Strings `40`-`45` should be listed together: the copy takes up to 16 KB
-of the file, from `40`'s first to the string after the last of them.
+of the file, from `40`'s first to the string after the last of them; a
+longer span is said once (the log and the mod's notes) and has no names.
+No shipped language (`languages/`) defines `40`-`45`, so with them the
+results are the game's own strings, named as before; only a mod (the pt-BR
+one) gives them words of its own.
 
 | Id | Duelist | Id | Duelist | Id | Duelist |
 |---|---|---|---|---|---|

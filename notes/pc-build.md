@@ -2451,8 +2451,13 @@ and up without the picture pass ("needs OpenGL 3 or 1x").
   taking the second byte of an added letter, F1 F8, for a step). A name that
   cannot be shown (a letter the small font has no plain one of, no room
   before COM, a player with no name of their own, a step that cannot move)
-  leaves the translation's own word, not You or COM. With the setting off
-  nothing here runs: Text_Resolve and Text_Retarget return what they did.
+  leaves the translation's own word, not You or COM. The steps before a
+  side's calls move together or not at all. With the setting off these
+  functions are still called but answer as before (the same string, the same
+  jump), so the screen is the translation's, pixel for pixel. A span past
+  16 KB is said once in the log and the Mods window, and shows no names. No
+  shipped language redefines `40`-`45` (only the pt-BR mod does), so the
+  shipped languages are unchanged by construction.
 
 Not covered yet: the sword and shield icons (pictures, not lettering).
 

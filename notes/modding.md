@@ -2072,7 +2072,7 @@ What it needs:
 | Targets | Tools |
 |---|---|
 | `i386`, `x86_64-windows` | clang, with `ld.lld` beside it or on PATH, and `llvm-objcopy` (beside clang, beside the file a `clang` link points to, or on PATH) |
-| `aarch64-translated` | the same, with a clang **no newer than the LLVM of the game's guest pass**, `memories-guest-ir`, which a release's SDK carries (built for llvm-mingw's clang 22: [Android code mods](#android-code-mods-aarch64-translated)); left out with what is missing when not named |
+| `aarch64-translated` | the same, with a clang **of the same LLVM as the guest pass**, `memories-guest-ir`, which a release's SDK carries (built for llvm-mingw's clang 23: [Android code mods](#android-code-mods-aarch64-translated)); left out with what is missing when not named |
 | `i386` only | the above, or on Linux gcc with 32-bit support |
 
 The simplest way to have the i386 and x86_64-windows objects is the
@@ -2396,22 +2396,24 @@ the game's export table.
 
 What it needs, besides `ld.lld` and `llvm-objcopy`:
 
-* **A clang no newer than the LLVM the guest pass is built against.** The
-  clang writes the IR the pass reads and compiles the IR the pass writes
-  back, and LLVM reads the IR of its own version or an older one, never a
-  newer. A release's SDK carries a pass built against LLVM 23, the LLVM of
-  its toolchain's clang (llvm-mingw 20260922): that clang goes with it, and
-  so does an older one (the Android NDK r29's is 21; a distribution's, e.g.
-  18, may do, though a clang older than the pass has to read the IR it
-  writes: if it cannot, the error says so and llvm-mingw's is the way out).
-  A pass built from a source checkout is built against the game's own LLVM
-  21.1.8 and wants clang 21 or older: llvm-mingw's 23 is refused there, and
-  `build_mod.py` takes the Android NDK's when `ANDROID_NDK_ROOT` (or
-  `ANDROID_NDK_HOME`) names one, or `MEMORIES_MOD_CC` names the compiler
-  outright. `memories-guest-ir --llvm-major` prints which LLVM a pass is
-  built against. Apple's clang numbers its versions its own way, so
-  `build_mod.py` cannot compare it: it tries it, and if the IR does not
-  parse it says so and points to Homebrew's LLVM clang.
+* **A clang of the same LLVM as the guest pass.** The clang writes the IR the
+  pass reads and compiles the IR the pass writes back, and LLVM reads the IR
+  of its own version or an older one, never a newer: the pass cannot read a
+  newer clang's IR, and an older clang cannot be counted on to read the
+  pass's. Only the same LLVM does both. A release's SDK carries a pass built
+  against LLVM 23, the LLVM of its toolchain's clang (llvm-mingw 20260922):
+  that clang, and no other, goes with it (the Android NDK r29's clang 21 does
+  not, nor does a distribution's 18). A pass built from a source checkout is
+  built against the game's own LLVM 21.1.8 and wants a clang 21: the NDK's
+  (`build_mod.py` takes it when `ANDROID_NDK_ROOT` or `ANDROID_NDK_HOME` names
+  one), not llvm-mingw's 23. `MEMORIES_MOD_CC` names the compiler outright.
+  `memories-guest-ir --llvm-major` prints which LLVM a pass is built against.
+  At your own risk, `MEMORIES_MOD_ALLOW_OTHER_CLANG=1` also takes an older
+  clang (never a newer), with a warning, for a modder who knows his clang
+  reads what the pass writes; the pass's own LLVM is still preferred. Apple's
+  clang numbers its versions its own way, so `build_mod.py` cannot compare
+  it: it tries it, and if the IR does not parse it says so and points to
+  Homebrew's LLVM clang.
 * **The guest pass**, `memories-guest-ir`. Every release's SDK carries it in
   its `tools` folder (`memories-guest-ir.exe` in the Windows SDK), where
   `build_mod.py` looks: a Windows modder needs the SDK and its llvm-mingw

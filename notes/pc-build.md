@@ -4711,7 +4711,11 @@ or 0xC0000000 starts the game all the same.
   the SDK's own clang (llvm-mingw 20260922: clang 23.1.2 -> LLVM 23), where the
   game stays translated with LLVM 21 (`llvm_guest.py`, untouched): the game
   and a mod meet through `mod_translation.json`/`mod_signatures.json`, not a
-  compiler version. `tools/pc/build_sdk_guest_ir.py` builds it, pinned by
+  compiler version. Only a clang of the pass's own LLVM both has its IR read
+  by the pass and reads the pass's (an older one reads a newer IR by luck, a
+  newer one is refused by the pass), so that is what `build_mod.py` demands
+  (`MEMORIES_MOD_ALLOW_OTHER_CLANG=1` lets an older one through, warning).
+  `tools/pc/build_sdk_guest_ir.py` builds it, pinned by
   `tools/pc/sdk_llvm.json` (version, URL and SHA-256 per system; `--pin` fills
   the digests from the release's published ones): on Linux from the official
   release archive (headers, `llvm-config` and the static libraries unpacked
@@ -4721,9 +4725,15 @@ or 0xC0000000 starts the game all the same.
   `LLVMIRReader`, `LLVMSupport`) are built with the SDK's llvm-mingw (the
   official Windows archive is built for the MSVC C++ ABI, which llvm-mingw
   cannot link), `-static` too. It runs the result (`--llvm-major`, then the
-  three operations on a unit) before it counts. `memories-guest-ir
-  --llvm-major` is what `build_mod.py` holds the modder's clang against
-  (no newer than that). `package.py --guest-ir` puts it in each SDK
+  three operations on a unit) and reads its imports (only the system's DLLs
+  on Windows, no NEEDED entry on Linux) before it counts. Like `memories-pc.exe`
+  (notes/pc-release.md, "VirusTotal") it ships without symbols, on Windows
+  with version information (`windres`, the game's fields) and the PE
+  checksum `package.py` fills in; `test_package.py` holds it to the same
+  checks, and the release's VirusTotal step scans it too. `memories-guest-ir
+  --llvm-major` is what `build_mod.py` holds the modder's clang against; a
+  pass that cannot be started at all (a quarantined file) is named as that,
+  not taken for an older one. `package.py --guest-ir` puts it in each SDK
   (`sdk/tools/memories-guest-ir[.exe]`; `test_package.py` requires it), and
   the release workflow's `sdk-guest-ir` job builds one per system. The
   `package` job then builds `mods/hand-camera` for Android from the packed

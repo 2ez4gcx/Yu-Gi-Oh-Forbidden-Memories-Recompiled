@@ -101,7 +101,10 @@ a mod you turn off stays off on later launches and after updates.
 To install someone else's mod, put its folder in the "mods" folder of your
 user folder. A mod that contains code runs as part of the game, so only
 install mods from people you trust. Mod authors: see sdk/notes/modding.md,
-sdk/examples/mods and sdk/tools (build_mod.py builds a code mod;
+sdk/examples/mods and sdk/tools. To build a code mod with nothing installed,
+double-click sdk/build-mod.bat (Windows) or run sdk/build-mod.sh (Linux, with
+python3) and give it the mod's folder: it fetches its compiler once and makes
+every object the mod needs (build_mod.py is what it runs;
 extract_images.py and upscale_pack.py make texture packs). A code mod for
 the Android app is built through the game's guest pass (build_mod.py
 --target aarch64-translated: sdk/tools/memories-guest-ir is in this SDK, and

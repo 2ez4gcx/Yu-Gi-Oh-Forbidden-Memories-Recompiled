@@ -68,7 +68,11 @@ static int parse(Table *table, const char *text, size_t length, uint64_t image_s
         if (end - at < sizeof(line)) {
             memcpy(line, text + at, end - at);
             line[end - at] = '\0';
-            if (sscanf(line, "%llx %llx %71s", &start, &size, symbol.name) == 3) {
+            /* Not ld.lld's Cortex-A53 erratum veneers: their names are
+             * their addresses, so no other build has them, and an address
+             * after one goes by the symbol before it instead. */
+            if (sscanf(line, "%llx %llx %71s", &start, &size, symbol.name) == 3 &&
+                strncmp(symbol.name, "__CortexA53843419_", 18)) {
                 if (start >= image_size || (table->count && start < table->symbols[table->count - 1].start)) {
                     clear(table);
                     return -1;   /* not offsets in order: not this format */

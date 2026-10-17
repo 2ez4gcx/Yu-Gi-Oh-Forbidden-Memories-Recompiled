@@ -113,7 +113,10 @@ Windows no Python and no clang; on Linux the system `python3` the script
 requires), runs the launcher on `examples/mods/gameplay-rules` twice (the
 second run must download nothing), and `tools/pc/check_one_click.py` checks
 the objects (i386, x86_64-windows, and the Android one when the SDK has the guest
-pass). A new Python or llvm-mingw pin goes in `tools/pc/sdk/toolchain-pins.json`
+pass). The download is the proof and about 300 MB, so a pull request runs it
+only when it touches `tools/pc/sdk/`, `package.py`, `build_mod.py`,
+`check_one_click.py` or the workflow (the job is green with its steps skipped,
+which `draft-release` needs); pushes, tags and manual runs always do. A new Python or llvm-mingw pin goes in `tools/pc/sdk/toolchain-pins.json`
 and in the two scripts (`test_sdk_launchers.py` says which differs).
 
 *The guest pass's LLVM in CI.* Its libraries are the costly part (a Windows

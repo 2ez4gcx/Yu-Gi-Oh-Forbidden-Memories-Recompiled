@@ -531,7 +531,7 @@ jobs:
       # NDK added; ANDROID_NDK_ROOT is set to it, over the image's default.
       - name: Android SDK and NDK
         run: |
-          sudo apt-get update && sudo apt-get install --yes --no-install-recommends cmake ninja-build zlib1g-dev libzstd-dev
+          sudo apt-get update && sudo apt-get install --yes --no-install-recommends cmake ninja-build zlib1g-dev libzstd-dev libxml2-dev
           sdkmanager="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
           # Its progress bars fill the log: kept aside, and shown when it fails.
           if ! "$sdkmanager" --install "ndk;$ANDROID_NDK_VERSION" "build-tools;$ANDROID_BUILD_TOOLS" "platforms;$ANDROID_PLATFORM" > "$RUNNER_TEMP/sdkmanager.log" 2>&1; then
@@ -551,9 +551,10 @@ jobs:
             tmp/pc/android-deps/arm64-v8a
             tmp/pc/android-deps/java
           key: release-android-${{ env.ANDROID_NDK_VERSION }}-${{ hashFiles('tools/pc/build_android_deps.py', 'tools/pc/build_linux_sysroot.py', 'tools/pc/build_win32_deps.py', 'tools/pc/fetch_tools.py') }}
-      # LLVM 21.1.8's libraries and llvm-config, which the translated game's
-      # guest pass is built against (tools/pc/llvm_guest.py, linux_llvm: the
-      # official archive's parts it needs, about 440 MB of its 2 GB).
+      # LLVM 21.1.8's libraries, llvm-config and lld, which the translated
+      # game's guest pass is built and linked with (tools/pc/llvm_guest.py,
+      # linux_llvm: the official archive's parts it needs, about 620 MB of its
+      # 2 GB; linux_toolchain.json names them, so the key changes with them).
       - name: Cache LLVM for the guest pass
         uses: actions/cache@v4
         with:

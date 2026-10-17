@@ -4697,9 +4697,13 @@ or 0xC0000000 starts the game all the same.
 - **Toolchain.** The pass is built against LLVM 21.1.8, the version of
   `macos_toolchain.json`. On Linux (CI) `llvm_guest.py` fetches the official
   `LLVM-21.1.8-Linux-X64.tar.xz` (`linux_toolchain.json`, SHA-256 checked)
-  and unpacks only `llvm-config`, the headers and the static libraries
-  (about 440 MB of 2 GB) into `tmp/pc/llvm-linux`; the system's `g++`
-  builds the pass (zlib1g-dev and libzstd-dev for `--system-libs`). On
+  and unpacks only `llvm-config`, the headers, the static libraries and
+  `lld` (about 620 MB of 2 GB; the `parts` of `linux_toolchain.json`) into
+  `tmp/pc/llvm-linux`; the system's `g++` compiles the pass (zlib1g-dev,
+  libzstd-dev and libxml2-dev for `--system-libs`). The archive's static
+  libraries are ThinLTO bitcode, not objects, which GNU ld cannot read
+  ("file format not recognized"), so the link is the archive's own `lld`
+  (`-B<llvm>/bin -fuse-ld=lld`), which compiles them with LLVM 21. On
   Windows there is no official archive with the libraries:
   `MEMORIES_GUEST_LLVM` names a local LLVM 21.1.8 build or install folder
   (one whose `llvm-config` finds its headers under `include/` and its

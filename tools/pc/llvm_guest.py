@@ -1,5 +1,6 @@
 """Versioned LLVM guest compiler; Python orchestrates, LLVM owns IR semantics."""
 
+import fnmatch
 import functools
 import hashlib
 import json
@@ -41,24 +42,30 @@ def host_llvm():
 
 
 # What the pass (host_compiler) is built from in the official Linux x86-64
-# archive (linux_toolchain.json): llvm-config, the headers and the static
-# libraries, about 440 MB of its 2 GB; the rest (clang, lld, the tools) is
-# never unpacked.
-LINUX_PARTS = ("bin/llvm-config", "include/llvm/", "include/llvm-c/", "lib/libLLVM")
+# archive is linux_toolchain.json's "parts" (patterns; a * also spans
+# folders): llvm-config, the headers, the static libraries and lld, about
+# 620 MB of its 2 GB; the rest (clang, the other tools) is never unpacked.
+# The parts are in that file, not here, so that the release workflow's
+# cache of them (keyed by its hash) changes with them.
+# The archive's static libraries are ThinLTO bitcode, not objects (the
+# release is built so): only an LTO linker reads them, lld of the same LLVM.
 
 
 def linux_llvm(version):
     """The official LLVM release for Linux x86-64 (the release workflow's
     Android job), fetched and checked by its SHA-256 the first time, of which
-    only LINUX_PARTS is unpacked, into tmp/pc/llvm-linux."""
+    only the "parts" of linux_toolchain.json are unpacked, into
+    tmp/pc/llvm-linux (unpacked again if one of them is missing)."""
     config = json.loads(LINUX_CONFIG.read_text())
     if config["version"] != version:
         raise RuntimeError(f"{LINUX_CONFIG.name} pins LLVM {config['version']}, {CONFIG.name} {version}")
+    parts = tuple(config["parts"])
     top = config["archive"][: -len(".tar.xz")]
     folder = ROOT / "tmp/pc/llvm-linux" / top
-    if not (folder / "bin/llvm-config").is_file() and not FETCH:
+    complete = all((folder / name).exists() for name in config["unpacked"])
+    if not complete and not FETCH:
         no_fetch(folder)
-    if not (folder / "bin/llvm-config").is_file():
+    if not complete:
         import shutil
         import tarfile
         from fetch_tools import download
@@ -70,7 +77,8 @@ def linux_llvm(version):
         with tarfile.open(archive, "r|xz") as bundle:
             for member in bundle:
                 head, _, relative = member.name.partition("/")
-                if head != top or not (member.isfile() or member.issym()) or not relative.startswith(LINUX_PARTS):
+                if head != top or not (member.isfile() or member.issym()) or not any(
+                        fnmatch.fnmatchcase(relative, part) for part in parts):
                     continue
                 member.name = relative
                 if hasattr(tarfile, "data_filter"):
@@ -228,8 +236,11 @@ def host_compiler(binary, source):
     c++: on Linux the system's g++, whose libstdc++ the official archive's
     libraries are built against) and MEMORIES_GUEST_LLVM or the official
     Linux archive (linux_llvm): the same source and LLVM version as on macOS.
-    On Linux the archive's --system-libs want zlib and zstd (zlib1g-dev,
-    libzstd-dev)."""
+    The archive's libraries are ThinLTO bitcode, which GNU ld cannot read
+    ("file format not recognized"): the link is the archive's own lld
+    (-fuse-ld=lld, found through -B), which compiles them with LLVM 21.
+    On Linux the archive's --system-libs want zlib, zstd and libxml2
+    (zlib1g-dev, libzstd-dev, libxml2-dev)."""
     llvm = toolchain()
     config_tool = llvm / ("bin/llvm-config" + (".exe" if sys.platform == "win32" else ""))
     llvm_config = subprocess.check_output(
@@ -238,7 +249,8 @@ def host_compiler(binary, source):
         text=True,
     )
     cxx = os.environ.get("MEMORIES_GUEST_CXX", "c++")
-    command = [cxx, str(source), *shlex.split(llvm_config.replace("\\", "/")), "-O2",
+    linker = ["-B" + str(llvm / "bin"), "-fuse-ld=lld"] if not host_llvm() and sys.platform.startswith("linux") else []
+    command = [cxx, str(source), *shlex.split(llvm_config.replace("\\", "/")), *linker, "-O2",
                *(["-static"] if sys.platform == "win32" else []), "-o", str(binary)]
     fingerprint = hashlib.sha256(json.dumps({
         "source": hashlib.sha256(source.read_bytes()).hexdigest(),

@@ -87,6 +87,14 @@ class Pins(unittest.TestCase):
         self.assertEqual((sh_value(self.sh, "PYTHON_MINIMUM_MAJOR"), sh_value(self.sh, "PYTHON_MINIMUM_MINOR")),
                          (major, minor))
 
+    def test_downloads_only_over_https(self):
+        """curl and wget may use https only, also after a redirect."""
+        self.assertEqual(bat_value(self.bat, "ALLOWED"), "https")
+        self.assertEqual(sh_value(self.sh, "ALLOWED"), "https")
+        self.assertIn('--proto =%ALLOWED% --proto-redir =%ALLOWED%', self.bat)
+        self.assertIn('--proto "=$ALLOWED" --proto-redir "=$ALLOWED"', self.sh)
+        self.assertIn("wget --https-only", self.sh)
+
     def test_pins_are_consistent(self):
         python = PINS["python"]["windows"]
         major, minor, _ = python["version"].split(".")
@@ -121,6 +129,20 @@ class Pins(unittest.TestCase):
         attributes = (HERE.parent.parent / ".gitattributes").read_text(encoding="utf-8").splitlines()
         self.assertIn("*.bat text eol=crlf", attributes)
         self.assertIn("*.sh text eol=lf", attributes)
+
+    def test_no_echo_of_a_user_path_and_no_call_argument(self):
+        """An unquoted echo of a folder called "A&B" runs B; call reads % and ^ of its
+        arguments a second time. Paths are printed with set /p, quoted, and handed to
+        subroutines in variables."""
+        constants = {"PYTHON_VERSION", "PYTHON_MEGABYTES", "LLVM_RELEASE", "LLVM_MEGABYTES", "WHAT", "URL", "WANT", "GOT",
+                     "MEGABYTES", "EXITCODE"}
+        for line in self.bat.splitlines():
+            text = line.strip()
+            if text.lower().startswith("echo ") and not text.lower().startswith("echo."):
+                for name in re.findall(r"%([A-Za-z_0-9]+)%", text):
+                    self.assertIn(name, constants, f"echo prints %{name}%, which can hold a user's folder: {text}")
+            if re.match(r"call :\w+\s+\S", text):
+                self.fail(f"a subroutine is called with an argument: {text}")
 
     def test_no_block_prints_a_path(self):
         """A folder called "yfm (1)" ends a parenthesized block at its ")": no line
@@ -213,23 +235,29 @@ class Packaged(unittest.TestCase):
 
 class Launcher:
     """A launcher run on a fake SDK. Subclasses say how to start it."""
+    PARENT = "game (1)"      # a ")" in the way, as a browser's "(1)" copy has
+    MOD = "my mod (2)"
 
     def setUp(self):
         self.folder = pathlib.Path(tempfile.mkdtemp(prefix="sdk-launcher-"))
         self.addCleanup(shutil.rmtree, self.folder, ignore_errors=True)
-        self.sdk = self.folder / "game (1)" / "sdk"      # a ")" in the way, as a browser's "(1)" copy has
+        self.sdk = self.folder / self.PARENT / "sdk"
         (self.sdk / "tools").mkdir(parents=True)
         (self.sdk / "tools" / "build_mod.py").write_text(FAKE_BUILD_MOD, encoding="utf-8")
         self.serve = self.folder / "serve"
         self.serve.mkdir()
-        self.mod = self.folder / "my mod (2)"
+        self.mod = self.folder / self.MOD
         self.mod.mkdir()
         (self.mod / "mod.json").write_text("{}", encoding="utf-8")
 
     def environment(self, **extra):
         environment = {name: value for name, value in os.environ.items() if not name.startswith("MEMORIES_SDK_")}
         environment["MEMORIES_SDK_NOPAUSE"] = "1"
-        environment.update(extra)
+        for name, value in extra.items():
+            if value is None:
+                environment.pop(name, None)
+            else:
+                environment[name] = value
         return environment
 
     def own_tools(self):
@@ -246,7 +274,7 @@ class Launcher:
         self.assertIn(f"ARGS={self.mod}|--target|i386".replace("\\", "/"), result.stdout.replace("\\", "/"))
         self.assertEqual(os.path.normcase(os.path.normpath(self.pathfirst(result.stdout))),
                          os.path.normcase(os.path.normpath(str(bin))))
-        self.assertIn("done", result.stdout)
+        self.assertIn("build_mod.py finished", result.stdout)
         self.assertNotIn("downloading", result.stdout)
         self.assertFalse((self.sdk / "toolchain").exists(), "nothing is fetched when both tools are named")
 
@@ -255,7 +283,7 @@ class Launcher:
         result = self.run_launcher([str(self.mod)], dict(tools, FAKE_EXIT="3"))
         self.assertEqual(result.returncode, 3)
         self.assertIn("stopped", result.stdout + result.stderr)
-        self.assertNotIn("done", result.stdout)
+        self.assertNotIn("finished", result.stdout)
 
     def test_not_a_folder(self):
         tools, _ = self.own_tools()
@@ -293,6 +321,36 @@ class Launcher:
         second = self.run_launcher(["--setup"], {})
         self.assertEqual(second.returncode, 0, second.stdout + second.stderr)
         self.assertNotIn("downloading", second.stdout)
+
+    def test_only_https_is_followed(self):
+        """The addresses in the test are file:// ones, which the unpatched script refuses."""
+        self.patch_pins(allowed="https")
+        result = self.run_launcher(["--setup"], {})
+        self.assertNotEqual(result.returncode, 0)
+        text = result.stdout + result.stderr
+        self.assertRegex(text, r"download failed|could not download")
+        self.assertIn("proxy", text)
+        self.assertFalse(any((self.sdk / "toolchain").glob("llvm-mingw-*")))
+
+    def test_a_folder_without_clang_is_replaced(self):
+        """A llvm-mingw folder an earlier run left half there would take the new one inside it."""
+        broken = self.sdk / "toolchain" / f"llvm-mingw-{PINS['llvm_mingw']['release']}"
+        (broken / "bin").mkdir(parents=True)
+        (broken / "bin" / "junk.txt").write_text("cut short")
+        self.patch_pins()
+        result = self.run_launcher(["--setup"], {})
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.check_unpacked(self.sdk / "toolchain")
+        self.assertFalse((broken / "bin" / "junk.txt").exists())
+        self.assertFalse((broken / broken.name).exists(), "the new folder went inside the old one")
+
+    def test_an_archive_that_cannot_be_unpacked(self):
+        self.patch_pins(unpackable=False)
+        result = self.run_launcher(["--setup"], {})
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("could not unpack", result.stdout + result.stderr)
+        self.assertFalse(any((self.sdk / "toolchain").glob("llvm-mingw-*")))
+        self.assertEqual([p.name for p in (self.sdk / "toolchain").glob(".unpack*")], [], "the half-unpacked folder is removed")
 
     def test_a_wrong_hash_is_refused(self):
         self.patch_pins(corrupt="llvm")
@@ -342,7 +400,7 @@ class Batch(Launcher, unittest.TestCase):
                               capture_output=True, text=True, encoding="utf-8", errors="replace", stdin=subprocess.DEVNULL,
                               cwd=self.folder, timeout=300)
 
-    def patch_pins(self, corrupt=None):
+    def patch_pins(self, corrupt=None, allowed="file", unpackable=True):
         python = io.BytesIO()
         with zipfile.ZipFile(python, "w") as archive:
             archive.writestr("python.exe", b"MZ fake")
@@ -354,7 +412,9 @@ class Batch(Launcher, unittest.TestCase):
             archive.writestr(f"{top}/bin/clang.exe", b"")
             archive.writestr(f"{top}/bin/ld.lld.exe", b"")
         text = (SOURCE / "build-mod.bat").read_bytes().decode("utf-8")
-        for name, data, bad in (("PYTHON", python.getvalue(), corrupt == "python"), ("LLVM", llvm.getvalue(), corrupt == "llvm")):
+        text = text.replace('set "ALLOWED=https"', f'set "ALLOWED={allowed}"')
+        llvm_bytes = llvm.getvalue() if unpackable else b"this is not a zip file"
+        for name, data, bad in (("PYTHON", python.getvalue(), corrupt == "python"), ("LLVM", llvm_bytes, corrupt == "llvm")):
             file = self.serve / pathlib.PurePosixPath(bat_value(text, f"{name}_URL")).name
             file.write_bytes(data)
             text = text.replace(f'set "{name}_URL={bat_value(text, name + "_URL")}"', f'set "{name}_URL={file.as_uri()}"')
@@ -377,10 +437,27 @@ class Batch(Launcher, unittest.TestCase):
         self.assertIn(f"ARGS={self.mod}\n", result.stdout.replace("\r\n", "\n"))
 
     def test_trailing_backslash_does_not_eat_the_quote(self):
+        """Tab completion and a drag add a backslash, to the folder and to every other argument."""
         tools, _ = self.own_tools()
-        result = self.run_launcher([str(self.mod) + "\\", "--out", str(self.folder / "o u t")], tools)
+        result = self.run_launcher([str(self.mod) + "\\", "--out", str(self.folder / "o u t") + "\\", "--x", "a b\\\\"], tools)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertIn(f"ARGS={self.mod}|--out|{self.folder / 'o u t'}", result.stdout)
+        self.assertIn(f"ARGS={self.mod}|--out|{self.folder / 'o u t'}|--x|a b\n", result.stdout.replace("\r\n", "\n"))
+
+    def test_a_drive_root_keeps_its_backslash(self):
+        tools, _ = self.own_tools()
+        result = self.run_launcher([str(self.mod), "--out", "C:\\"], tools)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertRegex(result.stdout, r"\|--out\|C:\\\r?\n")
+
+    def test_32_bit_windows_is_told_to_name_its_tools(self):
+        self.patch_pins()
+        result = self.run_launcher(["--setup"], {"PROCESSOR_ARCHITECTURE": "x86", "PROCESSOR_ARCHITEW6432": None})
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("32-bit Windows", result.stdout + result.stderr)
+        self.assertFalse((self.sdk / "toolchain").exists())
+        tools, _ = self.own_tools()    # tools of its own need no download
+        result = self.run_launcher([str(self.mod)], dict(tools, PROCESSOR_ARCHITECTURE="x86", PROCESSOR_ARCHITEW6432=None))
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def test_waits_for_a_key_only_when_opened_by_a_double_click(self):
         tools, _ = self.own_tools()
@@ -394,6 +471,14 @@ class Batch(Launcher, unittest.TestCase):
         # pause's line is in the language of Windows: only that it is there is checked.
         self.assertGreater(len(waited), len(not_waited), waited)
         self.assertEqual(waited[:len(not_waited)], not_waited)
+
+
+@unittest.skipUnless(WINDOWS, "build-mod.bat runs on Windows")
+class BatchInOddFolders(Batch):
+    """The same, with % ^ & ! and parentheses in the SDK's and the mod's folder names: call
+    reads % and ^ a second time, an unquoted echo runs what follows an &."""
+    PARENT = "A&B 100%% ^x !y (2)"
+    MOD = "my mod 5%% ^ & (3)"
 
 
 @unittest.skipUnless(posix_shell(), "no POSIX shell")
@@ -434,17 +519,18 @@ class Shell(Launcher, unittest.TestCase):
                               capture_output=True, text=True, encoding="utf-8", errors="replace", stdin=subprocess.DEVNULL,
                               cwd=self.folder, timeout=300)
 
-    def patch_pins(self, corrupt=None):
+    def patch_pins(self, corrupt=None, allowed="file", unpackable=True, clang=b"#!/bin/sh\n:\n\n"):
         llvm = io.BytesIO()
         top = pathlib.PurePosixPath(PINS["llvm_mingw"]["linux"]["url"]).name[:-len(".tar.xz")]
         with tarfile.open(fileobj=llvm, mode="w:xz") as archive:
             for name in ("bin/clang", "bin/ld.lld"):
                 info = tarfile.TarInfo(f"{top}/{name}")
                 info.mode = 0o755
-                info.size = 12
-                archive.addfile(info, io.BytesIO(b"#!/bin/sh\n:\n\n"))
-        data = llvm.getvalue()
+                info.size = len(clang)
+                archive.addfile(info, io.BytesIO(clang))
+        data = llvm.getvalue() if unpackable else b"this is not a tar.xz file"
         text = (SOURCE / "build-mod.sh").read_text(encoding="utf-8")
+        text = text.replace('ALLOWED="https"', f'ALLOWED="{allowed}"')
         file = self.serve / pathlib.PurePosixPath(sh_value(text, "LLVM_URL")).name
         file.write_bytes(data)
         text = text.replace(f'LLVM_URL="{sh_value(text, "LLVM_URL")}"', f'LLVM_URL="{file.as_uri()}"')
@@ -460,6 +546,29 @@ class Shell(Launcher, unittest.TestCase):
         result = self.run_launcher(["--setup"], {"MEMORIES_SDK_PYTHON": self.python_path()})
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("MEMORIES_SDK_TOOLCHAIN", result.stdout + result.stderr)
+
+    def test_a_clang_that_does_not_start_says_what_it_needs(self):
+        """llvm-mingw's ubuntu-22.04 build on an older system. The clang here is a fake that fails."""
+        self.patch_pins(clang=b"#!/bin/sh\nexit 127\n")
+        result = self.run_launcher(["--setup"], {"MEMORIES_SDK_PYTHON": self.python_path()})
+        self.assertNotEqual(result.returncode, 0)
+        text = result.stdout + result.stderr
+        self.assertIn("does not start", text)
+        self.assertIn("glibc 2.34", text)
+        self.assertIn("MEMORIES_SDK_TOOLCHAIN", text)
+        # Every run asks again: the unpacked folder is there, and the next run says the same.
+        again = self.run_launcher(["--setup"], {"MEMORIES_SDK_PYTHON": self.python_path()})
+        self.assertNotEqual(again.returncode, 0)
+        self.assertNotIn("downloading", again.stdout)
+        self.assertIn("glibc 2.34", again.stdout + again.stderr)
+
+    def test_a_named_clang_that_does_not_start(self):
+        tools, bin = self.own_tools()
+        (bin / "clang").write_text("#!/bin/sh\nexit 1\n", newline="\n")
+        result = self.run_launcher([str(self.mod)], tools)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("MEMORIES_SDK_TOOLCHAIN", result.stdout + result.stderr)
+        self.assertIn("does not start", result.stdout + result.stderr)
 
     def test_too_old_a_python(self):
         old = self.folder / "old-python"

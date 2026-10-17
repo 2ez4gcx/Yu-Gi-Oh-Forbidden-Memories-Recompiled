@@ -20,6 +20,11 @@
 # i386 and x86_64-windows objects, not the Android one (aarch64-translated):
 # that goes through the SDK's guest pass, which is built against LLVM 23, and
 # the clang that writes the IR must be of the same LLVM major.
+#
+# The downloaded llvm-mingw is the ubuntu-22.04 build: its clang needs glibc 2.34
+# and the libstdc++ of GCC 11 or newer (Ubuntu 22.04, Debian 12, Fedora 35...).
+# On an older system (Debian 11, Ubuntu 20.04) it does not start, and the script
+# says so; name a clang 23 of your own with MEMORIES_SDK_TOOLCHAIN then.
 
 set -eu
 
@@ -29,6 +34,9 @@ LLVM_RELEASE="20260922"
 LLVM_URL="https://github.com/mstorsjo/llvm-mingw/releases/download/20260922/llvm-mingw-20260922-ucrt-ubuntu-22.04-x86_64.tar.xz"
 LLVM_SHA256="bb7bb7654b33d5aa8712acb837c963b2e0c56352560c76105270a3268c665c21"
 LLVM_MEGABYTES="84"
+# The only protocol curl and wget may use, also after a redirect (the tests of
+# this file name another, for archives made on the spot).
+ALLOWED="https"
 # What tools/build_mod.py needs of python.
 PYTHON_MINIMUM_MAJOR="3"
 PYTHON_MINIMUM_MINOR="8"
@@ -53,7 +61,8 @@ Options after the folder go to tools/build_mod.py (--target, --out, ...).
 With no folder, the current one is used if it holds a mod.json.
 
 First run: downloads llvm-mingw $LLVM_RELEASE (about $LLVM_MEGABYTES MB) into
-$toolchain, checks its SHA-256 and unpacks it. Needs python3 ($PYTHON_MINIMUM_MAJOR.$PYTHON_MINIMUM_MINOR or newer), curl or wget, tar with xz, and Linux x86-64.
+$toolchain, checks its SHA-256 and unpacks it. Needs python3 ($PYTHON_MINIMUM_MAJOR.$PYTHON_MINIMUM_MINOR or newer), curl or wget, tar with xz, Linux x86-64 with
+glibc 2.34 and libstdc++ from GCC 11 or newer (Ubuntu 22.04, Debian 12, Fedora 35...).
 
 MEMORIES_SDK_PYTHON     python to use instead of python3
 MEMORIES_SDK_TOOLCHAIN  folder with clang, ld.lld and llvm-objcopy (or its bin/)
@@ -74,12 +83,27 @@ sha256_of() {
     fi
 }
 
+download_failed() {
+    rm -f "$2.part"
+    fail "could not download $1
+Check the internet connection. Behind a company proxy or firewall that inspects HTTPS, the
+certificate checks can stop the download (the message above may say 'certificate'): this script
+does not switch them off. Ask whoever runs the network, or download the file from the address
+above in a browser and put it in $toolchain/downloads/ under its own name; the next run checks
+it and uses it."
+}
+
 download() {
     # $1 url, $2 file
     if command -v curl >/dev/null 2>&1; then
-        curl --fail --location --retry 3 --output "$2.part" "$1" || fail "could not download $1"
+        curl --fail --location --retry 3 --proto "=$ALLOWED" --proto-redir "=$ALLOWED" --output "$2.part" "$1" ||
+            download_failed "$1" "$2"
     elif command -v wget >/dev/null 2>&1; then
-        wget --output-document "$2.part" "$1" || fail "could not download $1"
+        if [ "$ALLOWED" = https ]; then
+            wget --https-only --output-document "$2.part" "$1" || download_failed "$1" "$2"
+        else
+            wget --output-document "$2.part" "$1" || download_failed "$1" "$2"
+        fi
     else
         fail "needs curl or wget to download $1 (or download it yourself to $2)"
     fi
@@ -110,7 +134,7 @@ fetch_llvm() {
   expected $LLVM_SHA256
   got      $actual
   from     $LLVM_URL
-Try again. If it repeats, a proxy or a mirror may be changing the file; do not use it. Download it from the address above in a browser and put it in $toolchain/downloads/, or set MEMORIES_SDK_TOOLCHAIN to a toolchain of your own."
+Try again. If it repeats, a proxy or a mirror may be changing the file (some companies' proxies do); do not use it. Download it from the address above in a browser and put it in $toolchain/downloads/, or set MEMORIES_SDK_TOOLCHAIN to a toolchain of your own."
     fi
     echo "build-mod: SHA-256 matches; unpacking"
     part="$toolchain/.unpack-llvm-mingw"
@@ -127,9 +151,28 @@ Try again. If it repeats, a proxy or a mirror may be changing the file; do not u
         rm -rf "$part"
         fail "$archive has no single folder with bin/clang in it"
     fi
+    # A folder of that name without clang in it (an earlier run cut short) would make mv put the
+    # new one inside it.
+    rm -rf "$folder"
     mv "$top" "$folder"
     rm -rf "$part"
     rm -f "$archive"
+}
+
+# The toolchain's clang has to start here: the download is the ubuntu-22.04 build.
+check_clang() {
+    if "$1/clang" --version >/dev/null 2>&1; then
+        return 0
+    fi
+    if [ "$2" = downloaded ]; then
+        fail "the downloaded clang ($1/clang) does not start on this system.
+It is llvm-mingw's ubuntu-22.04 build: it needs glibc 2.34 and the libstdc++ of GCC 11 or newer
+(Ubuntu 22.04, Debian 12, Fedora 35 or newer; its version strings were read, not run). On an
+older system, point MEMORIES_SDK_TOOLCHAIN at a clang 23 with lld of your own: the Android object
+needs the same LLVM major as the SDK's guest pass (23). A distribution's older clang still builds
+the i386 and x86_64-windows objects."
+    fi
+    fail "the clang in MEMORIES_SDK_TOOLCHAIN ($1/clang) does not start"
 }
 
 case "${1:-}" in
@@ -154,9 +197,11 @@ if [ -n "${MEMORIES_SDK_TOOLCHAIN:-}" ]; then
         bin="$MEMORIES_SDK_TOOLCHAIN"
     fi
     [ -x "$bin/clang" ] || fail "MEMORIES_SDK_TOOLCHAIN is $MEMORIES_SDK_TOOLCHAIN, which has no clang"
+    check_clang "$bin" named
 else
     fetch_llvm
     bin="$toolchain/llvm-mingw-$LLVM_RELEASE/bin"
+    check_clang "$bin" downloaded
 fi
 PATH="$bin:$PATH"
 export PATH
@@ -185,4 +230,5 @@ if [ "$status" -ne 0 ]; then
     echo "build-mod: tools/build_mod.py stopped (exit $status); its message is above" >&2
     exit "$status"
 fi
-echo "build-mod: done; the objects are next to the mod's files (or in --out)"
+echo "build-mod: build_mod.py finished. Its last line above says which objects were built and which"
+echo "build-mod: were not, and why; they are next to the mod's files (or in --out)"

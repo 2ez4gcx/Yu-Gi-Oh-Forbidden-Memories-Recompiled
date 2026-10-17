@@ -6,7 +6,8 @@ rem     build-mod.bat my-mod                  the objects: my-mod\NAME.o, NAME.x
 rem     build-mod.bat my-mod --target i386    anything after the folder goes to tools\build_mod.py
 rem     build-mod.bat --setup                 only fetch the tools (below), then stop
 rem
-rem Needs nothing installed. The first run downloads, into the toolchain folder
+rem Needs nothing installed, on Windows 10 version 1803 or newer (64-bit: the
+rem downloads are x64 programs). The first run downloads, into the toolchain folder
 rem beside this file, a Python (the embeddable package from python.org) and the
 rem compiler (llvm-mingw, the toolchain the game is built with: clang, ld.lld,
 rem llvm-objcopy), checks each file's SHA-256 against the hash written below,
@@ -34,6 +35,9 @@ set "LLVM_RELEASE=20260922"
 set "LLVM_URL=https://github.com/mstorsjo/llvm-mingw/releases/download/20260922/llvm-mingw-20260922-ucrt-x86_64.zip"
 set "LLVM_SHA256=e3ad77d117a4bea19a7a3b333341824d79a5a371004a10e25b8504e7b3047666"
 set "LLVM_MEGABYTES=191"
+rem The only protocol curl may use, also after a redirect (the tests of this file
+rem name another, for archives made on the spot).
+set "ALLOWED=https"
 
 rem --- The programs Windows comes with, by full path: a Git for Windows or MSYS
 rem --- tar earlier on PATH cannot unpack a zip, and a clean PATH has none of them.
@@ -62,40 +66,39 @@ set "SETUP_ONLY="
 if /i "%~1"=="--setup" set "SETUP_ONLY=1"
 
 rem --- Which mod: the first argument (a folder dragged onto this file arrives
-rem --- here), else ask.
+rem --- here), else ask. Every argument goes on to build_mod.py in quotes and with
+rem --- its trailing backslashes taken off: Tab completion and a drag add one, and
+rem --- "C:\some dir\" would swallow the closing quote on the way to Python.
 set "ARGS="
 if defined SETUP_ONLY goto :tools
-if not "%~1"=="" goto :arguments
+if not "%~1"=="" goto :next_argument
 echo.
 echo Which mod should be built? Drag its folder into this window and press Enter.
 echo (The folder with its mod.json and .c files.)
 set "ASKED="
 set /p "ASKED=Mod folder: "
 if not defined ASKED goto :no_mod
-set "ASKED=%ASKED:"=%"
-set "FIRST=%ASKED%"
-goto :first_known
-:arguments
-set "FIRST=%~1"
-:first_known
-rem A folder dragged onto this file may end in a backslash, which would swallow the closing quote.
+set "ARG=%ASKED:"=%"
+goto :strip_backslash
+:next_argument
+if "%~1"=="" goto :tools
+set "ARG=%~1"
+shift
 :strip_backslash
-if not "%FIRST:~-1%"=="\" goto :backslash_gone
-set "FIRST=%FIRST:~0,-1%"
+if not "%ARG:~-1%"=="\" goto :backslash_gone
+set "ARG=%ARG:~0,-1%"
 goto :strip_backslash
 :backslash_gone
-if "%FIRST:~0,1%"=="-" goto :rest_of_arguments
-if not exist "%FIRST%\" goto :not_a_folder
-:rest_of_arguments
-rem Every argument again in quotes, so a trailing backslash cannot swallow the quote.
-set ARGS="%FIRST%"
-if "%~1"=="" goto :tools
-shift
-:more_arguments
-if "%~1"=="" goto :tools
-set ARGS=%ARGS% "%~1"
-shift
-goto :more_arguments
+rem A drive's root keeps its backslash ("C:" alone is the drive's current folder); two
+rem of them before the closing quote make one.
+if "%ARG:~-1%"==":" set "ARG=%ARG%\\"
+if defined ARGS goto :argument_added
+if "%ARG:~0,1%"=="-" goto :argument_added
+set "FIRST=%ARG%"
+if not exist "%ARG%\" goto :not_a_folder
+:argument_added
+set ARGS=%ARGS% "%ARG%"
+goto :next_argument
 
 :tools
 rem --- Python.
@@ -110,7 +113,8 @@ set "PYTHON=%MEMORIES_SDK_PYTHON%"
 if exist "%PYTHON%" goto :python_ready
 where "%PYTHON%" >nul 2>nul
 if not errorlevel 1 goto :python_ready
-echo build-mod: MEMORIES_SDK_PYTHON is %MEMORIES_SDK_PYTHON%, which was not found.
+<nul set /p "=build-mod: MEMORIES_SDK_PYTHON is %MEMORIES_SDK_PYTHON%, which was not found."
+echo.
 goto :failed
 :python_ready
 
@@ -125,17 +129,22 @@ goto :toolchain_ready
 set "BIN=%MEMORIES_SDK_TOOLCHAIN%"
 if exist "%BIN%\bin\clang.exe" set "BIN=%BIN%\bin"
 if exist "%BIN%\clang.exe" goto :toolchain_ready
-echo build-mod: MEMORIES_SDK_TOOLCHAIN is %MEMORIES_SDK_TOOLCHAIN%, which has no clang.exe.
+<nul set /p "=build-mod: MEMORIES_SDK_TOOLCHAIN is %MEMORIES_SDK_TOOLCHAIN%, which has no clang.exe."
+echo.
 goto :failed
 :toolchain_ready
 set "PATH=%BIN%;%PATH%"
 
-rem (No parenthesized blocks around the lines that print a path: a folder
-rem called "yfm (1)" would end the block early.)
+rem (Paths are printed with set /p, quoted, and not in parenthesized blocks: an
+rem unquoted echo would run what follows an & in a folder's name, and a ")" in
+rem it would end a block. No path is a call argument either: call reads % and ^
+rem in it a second time.)
 if not defined SETUP_ONLY goto :build
 echo build-mod: the tools are ready:
-echo build-mod:   %PYTHON%
-echo build-mod:   %BIN%
+<nul set /p "=build-mod:   %PYTHON%"
+echo.
+<nul set /p "=build-mod:   %BIN%"
+echo.
 goto :finish
 
 :build
@@ -147,7 +156,8 @@ echo build-mod: tools\build_mod.py stopped with code %EXITCODE%; its message is 
 goto :finish
 :built
 echo.
-echo build-mod: done. The objects are next to the mod's files, or in the folder --out names.
+echo build-mod: build_mod.py finished. Its last line above says which objects were built and
+echo build-mod: which were not, and why; they are next to the mod's files, or in the folder --out names.
 goto :finish
 
 :usage
@@ -162,8 +172,9 @@ echo folder it asks, so you can double-click it or drag a folder onto it.
 echo.
 echo First run: downloads Python %PYTHON_VERSION% (about %PYTHON_MEGABYTES% MB, from python.org) and
 echo llvm-mingw %LLVM_RELEASE% (about %LLVM_MEGABYTES% MB, from github.com) into the toolchain folder
-echo beside this file, checks their SHA-256 and unpacks them. It needs Windows 10 or 11
-echo with its curl, tar and certutil. Nothing else is installed or changed.
+echo beside this file, checks their SHA-256 and unpacks them. It needs 64-bit Windows 10
+echo version 1803 or newer, or 11, with its curl, tar and certutil. Nothing else is installed
+echo or changed.
 echo.
 echo MEMORIES_SDK_PYTHON      python to use instead of the download
 echo MEMORIES_SDK_TOOLCHAIN   folder with clang, ld.lld and llvm-objcopy (or its bin
@@ -177,7 +188,8 @@ set "EXITCODE=1"
 goto :finish
 
 :not_a_folder
-echo build-mod: %FIRST% is not a folder.
+<nul set /p "=build-mod: %FIRST% is not a folder."
+echo.
 set "EXITCODE=1"
 goto :finish
 
@@ -198,6 +210,8 @@ rem it into toolchain\.unpack-* and rename that to its final folder, so that a
 rem folder under its final name is always complete.
 
 :fetch_python
+call :check_system
+if errorlevel 1 exit /b 1
 set "WHAT=Python %PYTHON_VERSION% (the embeddable package, from python.org)"
 set "URL=%PYTHON_URL%"
 set "WANT=%PYTHON_SHA256%"
@@ -211,20 +225,26 @@ mkdir "%PART%"
 "%TAR%" -xf "%ARCHIVE%" -C "%PART%"
 if not errorlevel 1 goto :python_unpacked
 rmdir /s /q "%PART%"
-echo build-mod: could not unpack %ARCHIVE%.
+call :unpack_failed
 exit /b 1
 :python_unpacked
 if exist "%PART%\python.exe" goto :python_has_exe
 rmdir /s /q "%PART%"
-echo build-mod: %ARCHIVE% has no python.exe in it.
+<nul set /p "=build-mod: %ARCHIVE% has no python.exe in it."
+echo.
 exit /b 1
 :python_has_exe
+rem A folder of that name without python.exe in it (an earlier run cut short) would make move
+rem put the new one inside it.
+if exist "%TOOLCHAIN%\python-%PYTHON_VERSION%" rmdir /s /q "%TOOLCHAIN%\python-%PYTHON_VERSION%"
 move "%PART%" "%TOOLCHAIN%\python-%PYTHON_VERSION%" >nul
 if errorlevel 1 exit /b 1
 del "%ARCHIVE%"
 exit /b 0
 
 :fetch_llvm
+call :check_system
+if errorlevel 1 exit /b 1
 set "WHAT=llvm-mingw %LLVM_RELEASE% (clang, ld.lld and llvm-objcopy, from github.com)"
 set "URL=%LLVM_URL%"
 set "WANT=%LLVM_SHA256%"
@@ -239,32 +259,55 @@ echo build-mod: unpacking (a minute or two)
 "%TAR%" -xf "%ARCHIVE%" -C "%PART%"
 if not errorlevel 1 goto :llvm_unpacked
 rmdir /s /q "%PART%"
-echo build-mod: could not unpack %ARCHIVE%.
+call :unpack_failed
 exit /b 1
 :llvm_unpacked
 set "TOP="
 set "COUNT=0"
-for /d %%d in ("%PART%\*") do call :count_top "%%d"
+for /d %%d in ("%PART%\*") do set "TOP=%%d" & set /a COUNT+=1
 if "%COUNT%"=="1" goto :llvm_single
 rmdir /s /q "%PART%"
-echo build-mod: %ARCHIVE% does not hold a single folder.
+<nul set /p "=build-mod: %ARCHIVE% does not hold a single folder."
+echo.
 exit /b 1
 :llvm_single
 if exist "%TOP%\bin\clang.exe" goto :llvm_has_clang
 rmdir /s /q "%PART%"
-echo build-mod: %ARCHIVE% has no bin\clang.exe in it.
+<nul set /p "=build-mod: %ARCHIVE% has no bin\clang.exe in it."
+echo.
 exit /b 1
 :llvm_has_clang
+rem A folder of that name without clang in it (an earlier run cut short) would make move put
+rem the new one inside it.
+if exist "%TOOLCHAIN%\llvm-mingw-%LLVM_RELEASE%" rmdir /s /q "%TOOLCHAIN%\llvm-mingw-%LLVM_RELEASE%"
 move "%TOP%" "%TOOLCHAIN%\llvm-mingw-%LLVM_RELEASE%" >nul
 if errorlevel 1 exit /b 1
 rmdir /s /q "%PART%"
 del "%ARCHIVE%"
 exit /b 0
 
-:count_top
-set "TOP=%~1"
-set /a COUNT+=1
+:unpack_failed
+<nul set /p "=build-mod: could not unpack %ARCHIVE%."
+echo.
+echo build-mod: tar.exe cannot read or write every folder name. If the SDK folder's path has
+echo build-mod: letters outside plain English (accents, another alphabet), or is long (Windows
+echo build-mod: stops at 260 characters), move the whole SDK folder to a short plain one, such
+echo build-mod: as C:\yfm-sdk, and run this again.
 exit /b 0
+
+:check_system
+if /i not "%PROCESSOR_ARCHITECTURE%"=="x86" goto :system_64
+if defined PROCESSOR_ARCHITEW6432 goto :system_64
+echo build-mod: this is 32-bit Windows, and the Python and the compiler it downloads are 64-bit
+echo build-mod: (x64) programs. Set MEMORIES_SDK_PYTHON and MEMORIES_SDK_TOOLCHAIN to tools of
+echo build-mod: your own, which need not be downloaded.
+exit /b 1
+:system_64
+if exist "%CURL%" if exist "%TAR%" if exist "%CERTUTIL%" exit /b 0
+echo build-mod: curl.exe, tar.exe and certutil.exe are not in the Windows System32 folder. They
+echo build-mod: come with Windows 10 version 1803 (April 2018) and newer. Use a newer Windows, or
+echo build-mod: set MEMORIES_SDK_PYTHON and MEMORIES_SDK_TOOLCHAIN to tools of your own.
+exit /b 1
 
 rem :get_verified: %ARCHIVE% is there with the SHA-256 %WANT%, downloaded from
 rem %URL% if need be. A file that is there with another hash is deleted and
@@ -272,23 +315,29 @@ rem fetched again; a download with another hash is deleted and refused.
 :get_verified
 if not exist "%TOOLCHAIN%\downloads" mkdir "%TOOLCHAIN%\downloads"
 if not exist "%ARCHIVE%" goto :download
-call :sha256 "%ARCHIVE%"
+set "FILE=%ARCHIVE%"
+call :sha256
 if /i "%GOT%"=="%WANT%" exit /b 0
 del "%ARCHIVE%"
 :download
 echo build-mod: downloading %WHAT%, about %MEGABYTES% MB
 echo build-mod:   from %URL%
-"%CURL%" --fail --location --retry 3 --output "%ARCHIVE%.part" "%URL%"
+"%CURL%" --fail --location --retry 3 --proto =%ALLOWED% --proto-redir =%ALLOWED% --output "%ARCHIVE%.part" "%URL%"
 if not errorlevel 1 goto :downloaded
 if exist "%ARCHIVE%.part" del "%ARCHIVE%.part"
 echo.
-echo build-mod: the download failed. Check the internet connection, or download the file
-echo build-mod: from the address above in a browser and put it in %TOOLCHAIN%\downloads
-echo build-mod: under its own name; the next run checks it and uses it.
+echo build-mod: the download failed. Check the internet connection. Behind a company proxy or
+echo build-mod: firewall that inspects HTTPS, curl can stop at its certificate checks (the message
+echo build-mod: above may say "revocation" or "certificate"): this script does not switch those
+echo build-mod: checks off. Ask whoever runs the network, or download the file from the address
+echo build-mod: above in a browser and put it in the downloads folder of the toolchain folder
+<nul set /p "=build-mod: (%TOOLCHAIN%\downloads) under its own name; the next run checks it and uses it."
+echo.
 exit /b 1
 :downloaded
 move /y "%ARCHIVE%.part" "%ARCHIVE%" >nul
-call :sha256 "%ARCHIVE%"
+set "FILE=%ARCHIVE%"
+call :sha256
 if /i not "%GOT%"=="%WANT%" goto :wrong_hash
 echo build-mod: SHA-256 matches.
 exit /b 0
@@ -300,19 +349,22 @@ echo build-mod: was deleted.
 echo build-mod:   expected %WANT%
 echo build-mod:   got      %GOT%
 echo build-mod:   from     %URL%
-echo build-mod: Try again. If it repeats, a proxy or a mirror may be changing the file: do
-echo build-mod: not use it. Download it from the address above in a browser and put it in
-echo build-mod: %TOOLCHAIN%\downloads, or set MEMORIES_SDK_PYTHON and MEMORIES_SDK_TOOLCHAIN
-echo build-mod: to tools of your own.
+echo build-mod: Try again. If it repeats, a proxy or a mirror may be changing the file (some
+echo build-mod: companies' proxies do): do not use it. Download it from the address above in a
+<nul set /p "=build-mod: browser and put it in %TOOLCHAIN%\downloads, or set MEMORIES_SDK_PYTHON and"
+echo.
+echo build-mod: MEMORIES_SDK_TOOLCHAIN to tools of your own.
 exit /b 1
 
-rem :sha256: the SHA-256 of the file %~1 in GOT. certutil prints a heading, the
+rem :sha256: the SHA-256 of the file FILE in GOT. certutil prints a heading, the
 rem hash (in older Windows with spaces between the bytes) and a closing line;
 rem it is read from a file, since a ")" in the path would end a for /f command.
+rem The file is named in a variable, not an argument of call: call would read the
+rem % and ^ of a path a second time.
 :sha256
 set "GOT="
-"%CERTUTIL%" -hashfile "%~1" SHA256 > "%~1.sha256" 2>nul
-for /f "usebackq skip=1 tokens=* delims=" %%h in ("%~1.sha256") do if not defined GOT set "GOT=%%h"
-del "%~1.sha256"
+"%CERTUTIL%" -hashfile "%FILE%" SHA256 > "%FILE%.sha256" 2>nul
+for /f "usebackq skip=1 tokens=* delims=" %%h in ("%FILE%.sha256") do if not defined GOT set "GOT=%%h"
+del "%FILE%.sha256"
 set "GOT=%GOT: =%"
 exit /b 0

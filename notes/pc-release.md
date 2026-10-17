@@ -104,7 +104,17 @@ the packages. Each SDK carries the guest pass of its system
 llvm-mingw clang by the `sdk-guest-ir` job: `tools/pc/sdk_llvm.json` pins it,
 notes/pc-build.md "The SDK's guest pass"), and the `package` job builds a
 bundled code mod for Android from the packed SDK to prove it
-(`sdk-mod-ir-*` artifacts).
+(`sdk-mod-ir-*` artifacts). Each SDK also carries the one-click mod build
+(`sdk/build-mod.bat`, `sdk/build-mod.sh`, `sdk/toolchain-pins.json`, from
+`tools/pc/sdk`; [modding.md](modding.md#one-click-build-a-mod-with-nothing-installed)),
+and the `sdk-one-click` job proves it on a clean machine: it unpacks the packed
+SDK on `windows-2022` and `ubuntu-24.04`, cuts PATH to the operating system (on
+Windows no Python and no clang; on Linux the system `python3` the script
+requires), runs the launcher on `examples/mods/gameplay-rules` twice (the
+second run must download nothing), and `tools/pc/check_one_click.py` checks
+the objects (i386, x86_64-windows, and the Android one when the SDK has the guest
+pass). A new Python or llvm-mingw pin goes in `tools/pc/sdk/toolchain-pins.json`
+and in the two scripts (`test_sdk_launchers.py` says which differs).
 
 *The guest pass's LLVM in CI.* Its libraries are the costly part (a Windows
 build is up to an hour, the Linux archive 2 GB), so `sdk-guest-ir` caches
@@ -531,7 +541,8 @@ check itself failed (no key, network, quota, `--timeout`).
 **In CI.** The release workflow's *VirusTotal* step (Windows job) runs the
 script on the shipped `memories-pc.exe`, the SDK's `memories-guest-ir.exe`
 (`sdk/tools/`, a program of its own that is built, stripped and given
-version information as the game is) and `fm-editor.exe`, taken from
+version information as the game is), the SDK's `build-mod.bat` (a script that
+downloads a compiler, the kind of file scanners look at hardest) and `fm-editor.exe`, taken from
 the archives, and writes the table, the matrix and the links into the job
 summary. It warns above `VT_MAX_DETECTIONS` (2) and never fails the build;
 when VirusTotal is down or slow it warns too, after at most 10 minutes an

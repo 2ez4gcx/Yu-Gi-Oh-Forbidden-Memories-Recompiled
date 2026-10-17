@@ -167,7 +167,7 @@ GUEST_LLVM_DEFAULT = 21
 LLVM_MINGW_RELEASE = "20260922"
 # That release's clang, and so the LLVM the SDK's guest pass is built against
 # (tools/pc/sdk_llvm.json; test_build_mod_toolchain.py keeps them the same).
-LLVM_MINGW_CLANG = 22
+LLVM_MINGW_CLANG = 23
 LLVM_MINGW_DOWNLOADS = {
     "windows": "https://github.com/mstorsjo/llvm-mingw/releases/download/20260922/"
                "llvm-mingw-20260922-ucrt-x86_64.zip",
@@ -685,7 +685,7 @@ def through_pass(command, source, obj):
 # or an older one, never a newer. So the clang may not be newer than the LLVM
 # the pass is built against (`memories-guest-ir --llvm-major`): the SDK's pass
 # is built against its llvm-mingw's clang, the checkout's against the game's
-# LLVM 21 (where the NDK's clang 21 goes, not llvm-mingw's 22).
+# LLVM 21 (where the NDK's clang 21 goes, not llvm-mingw's 23).
 
 _translation = {}   # translation_problem's findings, for the games being built for
 

@@ -4708,7 +4708,7 @@ or 0xC0000000 starts the game all the same.
 - **The SDK's guest pass** (2026-10-17). A mod's clang writes the IR the pass
   reads and compiles the IR it writes, and LLVM reads the IR of its own
   version or older, so the pass an SDK ships is built against the LLVM of
-  the SDK's own clang (llvm-mingw 20260922: clang 22 -> LLVM 22), where the
+  the SDK's own clang (llvm-mingw 20260922: clang 23.1.2 -> LLVM 23), where the
   game stays translated with LLVM 21 (`llvm_guest.py`, untouched): the game
   and a mod meet through `mod_translation.json`/`mod_signatures.json`, not a
   compiler version. `tools/pc/build_sdk_guest_ir.py` builds it, pinned by

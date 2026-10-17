@@ -10,7 +10,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import build_sdk_guest_ir as sdk
 import package
 
-CONFIG_H = '#define LLVM_VERSION_MAJOR 22\n#define LLVM_VERSION_STRING "22.1.8"\n'
+CONFIG_H = '#define LLVM_VERSION_MAJOR 23\n#define LLVM_VERSION_STRING "23.1.2"\n'
 
 
 class Archive(unittest.TestCase):
@@ -18,7 +18,7 @@ class Archive(unittest.TestCase):
         self.folder = tempfile.mkdtemp(prefix="sdk-guest-ir-")
         self.addCleanup(shutil.rmtree, self.folder, ignore_errors=True)
 
-    def make(self, files, top="LLVM-22.1.8-Linux-X64"):
+    def make(self, files, top="LLVM-23.1.2-Linux-X64"):
         """A tar.xz with `files` ({path below the top folder: bytes}) in it."""
         path = os.path.join(self.folder, top + ".tar.xz")
         with tarfile.open(path, "w:xz") as archive:
@@ -40,21 +40,21 @@ class Archive(unittest.TestCase):
     def test_only_the_parts_are_unpacked(self):
         target = os.path.join(self.folder, "out")
         top, seen = sdk.stream_parts(self.make(self.GOOD), sdk.RELEASE_PARTS, target)
-        self.assertEqual(top, "LLVM-22.1.8-Linux-X64")
+        self.assertEqual(top, "LLVM-23.1.2-Linux-X64")
         self.assertEqual(seen, {"bin", "include", "lib", "share"})
         found = sorted(os.path.relpath(os.path.join(directory, name), target).replace(os.sep, "/")
                        for directory, _, files in os.walk(target) for name in files)
         self.assertEqual(found, ["bin/llvm-config", "include/llvm-c/Core.h", "include/llvm/Config/llvm-config.h",
                                  "include/llvm/IR/Module.h", "lib/libLLVMCore.a", "lib/libLLVMSupport.a"])
-        sdk.check_release(target, "22.1.8")
-        self.assertEqual(sdk.version_of(target), (22, "22.1.8"))
+        sdk.check_release(target, "23.1.2")
+        self.assertEqual(sdk.version_of(target), (23, "23.1.2"))
 
     def test_the_source_release_is_unpacked_without_its_tests(self):
         files = {"llvm/CMakeLists.txt": b"x", "llvm/include/llvm/IR/Module.h": b"x", "llvm/lib/IR/Core.cpp": b"x",
                  "llvm/test/CodeGen/x.ll": b"x", "llvm/unittests/y.cpp": b"x", "llvm/docs/z.rst": b"x",
                  "cmake/modules/a.cmake": b"x", "third-party/b/c.h": b"x", "clang/lib/d.cpp": b"x", "README.md": b"x"}
         target = os.path.join(self.folder, "src")
-        top, _ = sdk.stream_parts(self.make(files, "llvm-project-22.1.8.src"), sdk.SOURCE_PARTS, target, sdk.SOURCE_SKIP)
+        top, _ = sdk.stream_parts(self.make(files, "llvm-project-23.1.2.src"), sdk.SOURCE_PARTS, target, sdk.SOURCE_SKIP)
         found = sorted(os.path.relpath(os.path.join(directory, name), target).replace(os.sep, "/")
                        for directory, _, names in os.walk(target) for name in names)
         self.assertEqual(found, ["cmake/modules/a.cmake", "llvm/CMakeLists.txt", "llvm/include/llvm/IR/Module.h",
@@ -62,17 +62,17 @@ class Archive(unittest.TestCase):
 
     def test_release_is_fetched_checked_and_dropped(self):
         archive = self.make(self.GOOD)
-        entry = {"method": "release", "url": "https://example.invalid/LLVM-22.1.8-Linux-X64.tar.xz", "sha256": "ab" * 32}
+        entry = {"method": "release", "url": "https://example.invalid/LLVM-23.1.2-Linux-X64.tar.xz", "sha256": "ab" * 32}
         with mock.patch.object(sdk, "download", lambda entry, name: archive):
-            folder = sdk.release_llvm(entry, {"version": "22.1.8"}, os.path.join(self.folder, "work"))
+            folder = sdk.release_llvm(entry, {"version": "23.1.2"}, os.path.join(self.folder, "work"))
         self.assertTrue(os.path.isfile(os.path.join(folder, "lib", "libLLVMCore.a")))
         self.assertFalse(os.path.exists(archive))   # 2 GB of it: only the parts stay
         with mock.patch.object(sdk, "download", side_effect=AssertionError("fetched twice")):   # cached
-            self.assertEqual(sdk.release_llvm(entry, {"version": "22.1.8"}, os.path.join(self.folder, "work")), folder)
+            self.assertEqual(sdk.release_llvm(entry, {"version": "23.1.2"}, os.path.join(self.folder, "work")), folder)
 
-    def lacks(self, files, version="22.1.8"):
+    def lacks(self, files, version="23.1.2"):
         archive = self.make(files)
-        entry = {"method": "release", "url": "https://example.invalid/LLVM-22.1.8-Linux-X64.tar.xz", "sha256": "ab" * 32}
+        entry = {"method": "release", "url": "https://example.invalid/LLVM-23.1.2-Linux-X64.tar.xz", "sha256": "ab" * 32}
         with mock.patch.object(sdk, "download", lambda entry, name: archive), self.assertRaises(SystemExit) as stopped:
             sdk.release_llvm(entry, {"version": version}, os.path.join(self.folder, "work"))
         return str(stopped.exception.code)
@@ -92,10 +92,10 @@ class Archive(unittest.TestCase):
         without_tool = {name: data for name, data in self.GOOD.items() if name != "bin/llvm-config"}
         self.assertIn("bin/llvm-config", self.lacks(without_tool))
         # Nothing half-unpacked is left to be taken for the archive's parts.
-        self.assertFalse(os.path.exists(os.path.join(self.folder, "work", "LLVM-22.1.8-Linux-X64")))
+        self.assertFalse(os.path.exists(os.path.join(self.folder, "work", "LLVM-23.1.2-Linux-X64")))
 
     def test_another_version_stops_the_build(self):
-        self.assertIn("is LLVM 22.1.8, sdk_llvm.json pins 22.1.9", self.lacks(self.GOOD, "22.1.9"))
+        self.assertIn("is LLVM 23.1.2, sdk_llvm.json pins 23.1.3", self.lacks(self.GOOD, "23.1.3"))
 
     def test_a_download_needs_its_pin(self):
         with self.assertRaises(SystemExit) as stopped:

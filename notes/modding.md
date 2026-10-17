@@ -2078,7 +2078,7 @@ What it needs:
 The simplest way to have the i386 and x86_64-windows objects is the
 toolchain the game itself is built with, [llvm-mingw 20260922](https://github.com/mstorsjo/llvm-mingw/releases/tag/20260922):
 on Windows `llvm-mingw-20260922-ucrt-x86_64.zip` (its clang builds the Linux
-object format too; it is clang 22, which the guest pass in the SDK is built
+object format too; it is clang 23, which the guest pass in the SDK is built
 for, so it also builds the Android object: [Android code
 mods](#android-code-mods-aarch64-translated)), on Linux x86-64
 `llvm-mingw-20260922-ucrt-ubuntu-22.04-x86_64.tar.xz`. Unpack it and put its
@@ -2399,13 +2399,13 @@ What it needs, besides `ld.lld` and `llvm-objcopy`:
 * **A clang no newer than the LLVM the guest pass is built against.** The
   clang writes the IR the pass reads and compiles the IR the pass writes
   back, and LLVM reads the IR of its own version or an older one, never a
-  newer. A release's SDK carries a pass built against LLVM 22, the LLVM of
+  newer. A release's SDK carries a pass built against LLVM 23, the LLVM of
   its toolchain's clang (llvm-mingw 20260922): that clang goes with it, and
   so does an older one (the Android NDK r29's is 21; a distribution's, e.g.
   18, may do, though a clang older than the pass has to read the IR it
   writes: if it cannot, the error says so and llvm-mingw's is the way out).
   A pass built from a source checkout is built against the game's own LLVM
-  21.1.8 and wants clang 21 or older: llvm-mingw's 22 is refused there, and
+  21.1.8 and wants clang 21 or older: llvm-mingw's 23 is refused there, and
   `build_mod.py` takes the Android NDK's when `ANDROID_NDK_ROOT` (or
   `ANDROID_NDK_HOME`) names one, or `MEMORIES_MOD_CC` names the compiler
   outright. `memories-guest-ir --llvm-major` prints which LLVM a pass is

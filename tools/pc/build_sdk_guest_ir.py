@@ -5,7 +5,7 @@ the SDK's own clang (release workflow: tools/pc/package.py --guest-ir).
 The pass reads the IR a mod's clang writes and the clang compiles the IR the
 pass writes back (tools/pc/build_mod.py, aarch64-translated), and LLVM reads
 the IR of its own version or an older one, never a newer. The SDK's toolchain
-is llvm-mingw (clang 22), so its pass is built against LLVM 22, where the game
+is llvm-mingw (clang 23), so its pass is built against LLVM 23, where the game
 itself is translated with LLVM 21 (tools/pc/llvm_guest.py, untouched: the
 two meet through the game's tables, mod_translation.json, not through a
 compiler version). tools/pc/sdk_llvm.json pins the LLVM, per host:

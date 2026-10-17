@@ -129,29 +129,30 @@ class Toolchain(unittest.TestCase):
         """aarch64-translated: the clang may not be newer than the LLVM the
         guest pass is built against (the pass reads that clang's IR, and the
         clang reads what the pass writes). The game's own pass is LLVM 21:
-        llvm-mingw's clang 22 is refused, with the NDK's as the way out; an
-        SDK's pass is LLVM 22, built for llvm-mingw's clang."""
+        a newer clang (the pinned llvm-mingw 20260922's is 23) is refused,
+        with the NDK's as the way out; an SDK's pass is LLVM 23, built for
+        llvm-mingw's clang."""
         clang = self.program("clang")
         self.program("ld.lld")
-        text = self.with_pass([(clang, 22)], 21)
+        text = self.with_pass([(clang, 23)], 21)
         self.assertIn("needs a clang of LLVM 21 or older", text)
-        self.assertIn(f"{clang} is clang 22", text)
+        self.assertIn(f"{clang} is clang 23", text)
         self.assertIn("ANDROID_NDK_ROOT", text)
         self.assertNotIn("llvm-mingw " + build_mod.LLVM_MINGW_RELEASE, text)   # newer than the pass: no way out
         self.assertIsNone(self.with_pass([(clang, 21)], 21))
-        self.assertIsNone(self.with_pass([(clang, 22)], 22))
-        self.assertIsNone(self.with_pass([(clang, 21)], 22))   # older than the pass: allowed
-        text = self.with_pass([(clang, 23)], 22)
-        self.assertIn("needs a clang of LLVM 22 or older", text)
+        self.assertIsNone(self.with_pass([(clang, 23)], 23))
+        self.assertIsNone(self.with_pass([(clang, 21)], 23))   # older than the pass: allowed
+        text = self.with_pass([(clang, 24)], 23)
+        self.assertIn("needs a clang of LLVM 23 or older", text)
         self.assertIn("llvm-mingw " + build_mod.LLVM_MINGW_RELEASE, text)
         self.assertIn(build_mod.LLVM_MINGW_DOWNLOADS["windows" if os.name == "nt" else "linux"], text)
         self.assertIn("MEMORIES_MOD_CC", text)
         # A pass that cannot say is taken for the game's LLVM.
         self.assertIsNone(self.with_pass([(clang, 21)], None))
-        self.assertIn("needs a clang of LLVM 21 or older", self.with_pass([(clang, 22)], None))
+        self.assertIn("needs a clang of LLVM 21 or older", self.with_pass([(clang, 23)], None))
         # Without ld.lld no clang fits, whatever its version.
         os.remove(os.path.join(self.bin, "ld.lld" + EXE))
-        self.assertIn("needs a clang of LLVM 22 or older", self.with_pass([(clang, 22)], 22))
+        self.assertIn("needs a clang of LLVM 23 or older", self.with_pass([(clang, 23)], 23))
 
     def test_translated_apple_clang(self):
         """Apple's clang has Xcode's version numbers, no LLVM major: it is not
@@ -164,7 +165,7 @@ class Toolchain(unittest.TestCase):
             self.assertIsNone(build_mod.clang_major(apple))   # not 17
             self.assertTrue(build_mod.is_apple_clang(apple))
             self.assertIsNone(self.with_pass([(apple, None)], 21))
-            self.assertIsNone(self.with_pass([(apple, None)], 22))
+            self.assertIsNone(self.with_pass([(apple, None)], 23))
             self.assertEqual(build_mod.pick_clang([(apple, None), (other, 21)], 21), other)   # the numbered one first
             self.assertEqual(build_mod.pick_clang([(apple, None), (other, 22)], 21), apple)
             hint = build_mod.hint_for(apple, "pass")
@@ -201,8 +202,8 @@ class Toolchain(unittest.TestCase):
         build_mod.py takes for the game's LLVM."""
         def run(code, out):
             return lambda command, **options: subprocess.CompletedProcess(command, code, out, "")
-        for code, out, expected in ((0, "22\n", 22), (0, "21", 21), (1, "", None), (1, "22\n", None),
-                                    (0, "LLVM 22", None), (0, "", None)):
+        for code, out, expected in ((0, "23\n", 23), (0, "21", 21), (1, "", None), (1, "23\n", None),
+                                    (0, "LLVM 23", None), (0, "", None)):
             with mock.patch.object(build_mod.subprocess, "run", run(code, out)):
                 self.assertEqual(TOOL_LLVM_MAJOR("tool"), expected, (code, out))
         def missing(command, **options):
@@ -210,7 +211,7 @@ class Toolchain(unittest.TestCase):
         with mock.patch.object(build_mod.subprocess, "run", missing):
             self.assertIsNone(TOOL_LLVM_MAJOR("tool"))
         tool = self.program("memories-guest-ir")
-        for major, expected in ((22, 22), (None, build_mod.GUEST_LLVM_DEFAULT)):
+        for major, expected in ((23, 23), (None, build_mod.GUEST_LLVM_DEFAULT)):
             self.pass_major = major
             self.assertEqual(build_mod.guest_pass_major(tool), expected)
 

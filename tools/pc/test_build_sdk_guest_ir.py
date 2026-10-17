@@ -269,6 +269,8 @@ class Packing(unittest.TestCase):
                 handle.write("0\n")
         with open(os.path.join(build, "symbols", "0.txt"), "w") as handle:
             handle.write("0\n")
+        with open(os.path.join(build, "symbols", "0.vars.txt"), "w") as handle:
+            handle.write("0\n")
         with mock.patch.dict(package.BUILDS, {"linux": (build, "memories-pc", [])}), \
                 mock.patch.object(package, "DIST", os.path.join(self.folder, "dist")):
             staged = package.stage("linux", "test", {}, source)

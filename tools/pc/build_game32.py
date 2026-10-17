@@ -292,6 +292,46 @@ def run(command):
         sys.exit(f"{' '.join(command[:6])} ...\n{result.stderr}")
     return result.stdout
 
+def variable_table(rows, pinned, addresses, owned):
+    """The lines of symbols/<id>.vars.txt (src/pc/debug/symbols.c): every
+    variable the build defines that a client may name, "address size name",
+    and every one it pins to its retail guest address, "address 0 name pinned".
+    The defined ones are those in game_data and game_bss and the modules'
+    ovl_* sections (between the markers the link provides: all of the small
+    data) and those the retail table names (`addresses`) that the game's or
+    the port's own objects (`owned`: not a library's, whose `open` is not the
+    game's) define elsewhere (gRand_dwSeed); the ones in read-only data are
+    marked "ro", since a write to them faults. `rows` are nm's:
+    (address, size, type, C name). PE symbols carry no sizes: a variable runs
+    to the next higher address, or to the end of its section, and names at the
+    same address share the extent."""
+    import bisect
+    by_name = {name: address for address, _, _, name in rows}
+    ranges = [(by_name[name], by_name["__stop_" + name[len("__start_"):]]) for name in sorted(by_name)
+              if name.startswith(("__start_game_data", "__start_game_bss", "__start_ovl_"))
+              and "__stop_" + name[len("__start_"):] in by_name]
+    every = sorted({row[0] for row in rows})
+    variables, taken = [], set()
+    def add(address, size, name, limit, flag=""):
+        if not size:
+            above = bisect.bisect_right(every, address)
+            size = min(every[above] if above < len(every) else limit, limit) - address
+        variables.append((address, size, name, flag))
+        taken.add((address, name))
+    for start, stop in ranges:
+        for address, size, kind, name in rows:
+            if kind in "DdBb" and start <= address < stop and not name.startswith(("__start_", "__stop_")):
+                add(address, size, name, stop)
+    for address, size, kind, name in rows:
+        if kind in "DdBbRr" and name in addresses and name in owned and (address, name) not in taken:
+            add(address, size, name, 0xFFFFFFFF, " ro" if kind in "Rr" else "")
+    lines, seen = [], {}
+    for address, size, name, flag in sorted(variables):
+        seen[name] = seen.get(name, 0) + 1
+        lines.append(f"{address:08x} {size:08x} {name if seen[name] == 1 else f'{name}#{seen[name]}'}{flag}\n")
+    lines += [f"{address:08x} 00000000 {name} pinned\n" for name, address in sorted(pinned.items())]
+    return lines
+
 def flags_changed(path, flags):
     """When these flags were last different: path keeps them, rewritten
     only when they change, so its time is when they did (--release adds or
@@ -933,6 +973,8 @@ def package_android_build(build, game, build_id):
     import package_android
     assets = {"build/buildid": f"{build}/buildid", "build/commit": f"{build}/commit",
               f"build/symbols/{build_id}.txt": f"{build}/symbols/{build_id}.txt"}
+    if os.path.exists(f"{build}/symbols/{build_id}.vars.txt"):   # the control channel's names (not the translated game)
+        assets[f"build/symbols/{build_id}.vars.txt"] = f"{build}/symbols/{build_id}.vars.txt"
     assets.update(package_android.program_files(build, ("mods", "languages")))
     if ANDROID_ABI in ANDROID_PACKAGED:
         package_android.package(build, ANDROID_ABI, f"{build}/libmain.so", game, assets)
@@ -1261,7 +1303,7 @@ def main():
         if os.path.exists(obj(source) + ".aliased"):
             with open(obj(source) + ".aliased") as handle:
                 undefined.update(handle.read().split())
-    native_defined, _, native_undefined = symbols([obj(s) for s in NATIVE])
+    native_defined, native_tentative, native_undefined = symbols([obj(s) for s in NATIVE])
     with open("config/slus_01411/functions.csv") as handle:
         rows = list(csv.DictReader(handle))
     functions = {row["name"]: row["status"] for row in rows}
@@ -1517,6 +1559,24 @@ def main():
     build_id = write_build_identity(options.build, output, lambda kind, address: kind in "Tt" or
                                     (kind in "DdBb" and in_game(address)),
                                     older=digest.hexdigest()[:8])  # serves states saved before build ids
+    # The game's variables by name, where this build keeps them
+    # (symbols/<id>.vars.txt, src/pc/debug/symbols.c): every data and bss
+    # symbol between the game_data and game_bss markers, which holds the
+    # small data (.sdata/.sbss) whatever the target places at fixed addresses.
+    # config/pc/guest_addresses.txt has the retail address of all of them, and
+    # that is where only a pinned variable is. Kept apart from the table
+    # write_build_identity wrote, whose hash is the build id and whose data
+    # entries a state carried between builds must find in the same place.
+    nm_rows = []
+    for line in run([NM, "-n", "-S", output]).splitlines():
+        parts = line.split()
+        if len(parts) == 4 and c_name(parts[3]):
+            nm_rows.append((int(parts[0], 16), int(parts[1], 16), parts[2], c_name(parts[3])))
+        elif len(parts) == 3 and parts[2].startswith(("__start_game_", "__stop_game_", "__start_ovl_", "__stop_ovl_")):   # the link's markers: no size
+            nm_rows.append((int(parts[0], 16), 0, parts[1], parts[2]))
+    with open(f"{options.build}/symbols/{build_id}.vars.txt", "w") as handle:
+        handle.writelines(variable_table(nm_rows, pinned, addresses,
+                                       game_defined | tentative | native_defined | native_tentative))
     if ANDROID:
         package_android_build(options.build, output, build_id)
     kinds = {name: functions.get(name, "outside_resident_image") for name in stubs}

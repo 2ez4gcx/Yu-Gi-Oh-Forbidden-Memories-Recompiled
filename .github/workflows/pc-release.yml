@@ -339,7 +339,8 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           env -i HOME="$HOME" PATH=/usr/bin:/bin tmp/clean/game/sdk/build-mod.sh tmp/clean/mod
-          env -i HOME="$HOME" PATH=/usr/bin:/bin tmp/clean/game/sdk/build-mod.sh tmp/clean/mod | tee tmp/clean/second-run.txt
+          env -i HOME="$HOME" PATH=/usr/bin:/bin tmp/clean/game/sdk/build-mod.sh tmp/clean/mod > tmp/clean/second-run.txt 2>&1 || { cat tmp/clean/second-run.txt; exit 1; }
+          cat tmp/clean/second-run.txt
           if grep -q downloading tmp/clean/second-run.txt; then echo "the second run downloaded again"; exit 1; fi
       - name: Check the objects
         run: python tools/pc/check_one_click.py tmp/clean/mod --sdk tmp/clean/game/sdk
@@ -769,7 +770,7 @@ jobs:
 
   draft-release:
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-    needs: [package, android, package-macos]
+    needs: [package, sdk-one-click, android, package-macos]
     runs-on: ubuntu-24.04
     permissions:
       contents: write

@@ -415,8 +415,19 @@ int Memories_NativeStateLoad(const char *path, char *why, size_t size)
     pending_memory = Memories_NativeMemoryPrepare(&state, why, size);
     if (!pending_memory) { Memories_NativeSymbolsClear(); free(image); return -1; }
     if (other_build) {
-        size_t missing = Memories_NativeSymbolsScan(image + 16, state.image_size - 16, saved_entry.image_base,
-                                                    saved_entry.image_size);
+        /* Every chunk at every byte, but the saved regions word by word
+         * with this build's own values beside them (they are restored so,
+         * Memories_NativeMemoryRestorePayloads). */
+        size_t missing = Memories_NativeMemoryUncarried(pending_memory, saved_entry.image_base,
+                                                        saved_entry.image_size);
+        for (at = 16; at + 20 <= state.image_size;) {
+            uint32_t bytes;
+            memcpy(&bytes, image + at + 16, sizeof(bytes));
+            if (strncmp((const char *)image + at, "arm64-regions", 16))
+                missing += Memories_NativeSymbolsScan(image + at + 20, bytes, saved_entry.image_base,
+                                                      saved_entry.image_size);
+            at += 20 + bytes;
+        }
         if (missing) {
             Memories_NativeMemoryFree(pending_memory); pending_memory = NULL;
             Memories_NativeSymbolsClear();

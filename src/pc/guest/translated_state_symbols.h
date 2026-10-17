@@ -13,6 +13,8 @@ char *Memories_NativeSymbolsText(size_t *length);
 int Memories_NativeSymbolsPrepare(const void *saved, size_t saved_length, uint64_t old_image_size,
                                   uint64_t new_image_size);
 int Memories_NativeSymbolsActive(void);
+/* The size of this build's image, as Memories_NativeSymbolsPrepare was given. */
+uint64_t Memories_NativeSymbolsImageSize(void);
 void Memories_NativeSymbolsClear(void);
 /* An offset into the old image, in the new one: 0, or -1 when it cannot be
  * carried (no such symbol, or one that changed under it). */

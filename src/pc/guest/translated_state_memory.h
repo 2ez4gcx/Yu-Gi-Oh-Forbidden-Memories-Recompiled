@@ -8,6 +8,9 @@ int Memories_NativeMemoryApply(MemoriesNativeMemoryState *pending);
 void Memories_NativeMemoryRelocate(MemoriesNativeMemoryState *pending, void *data, size_t size,
                                   uintptr_t old_image, uintptr_t new_image, size_t image_size);
 void Memories_NativeMemoryFree(MemoriesNativeMemoryState *pending);
+/* How many words of the saved regions point into another build's image
+ * where neither its symbol table nor this build's own value carries them. */
+size_t Memories_NativeMemoryUncarried(MemoriesNativeMemoryState *pending, uintptr_t old_image, size_t image_size);
 void Memories_NativeMemoryRestorePayloads(MemoriesNativeMemoryState *pending,
                                          uintptr_t old_image, uintptr_t new_image, size_t image_size);
 void Memories_NativeMemoryRemapGuests(MemoriesNativeMemoryState *pending, uint32_t from, uint32_t to, uint32_t size);

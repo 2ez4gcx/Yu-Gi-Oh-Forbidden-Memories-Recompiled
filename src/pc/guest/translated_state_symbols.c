@@ -162,6 +162,7 @@ int Memories_NativeSymbolsPrepare(const void *saved, size_t saved_length, uint64
 }
 
 int Memories_NativeSymbolsActive(void) { return active; }
+uint64_t Memories_NativeSymbolsImageSize(void) { return new_table.image_size; }
 
 void Memories_NativeSymbolsClear(void)
 {

@@ -73,8 +73,9 @@ def darwin_flags(sdk):
     (build_arm64.py --target android-arm64-translated). -fsigned-char: MIPS and Darwin's char is
     signed, Linux AArch64's is not."""
     if sdk is None:
-        # Code mods stay off: an app cannot load a library from its data
-        # folder (targetSdk 29+), and no translated ELF mod format exists yet.
+        # Code mods are ELF objects the game's own loader reads (an app
+        # cannot load a library from its data folder, targetSdk 29+):
+        # build_mod.py --target aarch64-translated.
         return [f"--target=aarch64-linux-android{ANDROID_API}", "-fPIC", "-fsigned-char"]
     return ["-isysroot", str(sdk), f"-mmacosx-version-min={MACOS_MINIMUM}"]
 

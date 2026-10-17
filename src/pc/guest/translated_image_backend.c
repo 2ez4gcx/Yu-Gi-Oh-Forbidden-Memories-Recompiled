@@ -85,7 +85,27 @@ static void hold_guest(void)
         }
         wanted = (void *)(uintptr_t)(at & ~0xFFFul);
         got = mmap(wanted, size, PROT_NONE, MAP_FIXED_NOREPLACE | MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-        if (got != wanted) {
+        if (got != wanted && size > 0x200000ul) {
+            /* Part of the range is taken already (an emulator's own runtime
+             * may sit there): every free 2 MiB piece is held instead, so
+             * none of it is the game's either way. */
+            unsigned long piece, held = 0;
+            if (got != MAP_FAILED) munmap(got, size);
+            for (piece = 0; piece + 0x200000ul <= size; piece += 0x200000ul) {
+                char *part = (char *)wanted + piece;
+                void *one = mmap(part, 0x200000, PROT_NONE, MAP_FIXED_NOREPLACE | MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+                if (one == (void *)part) {
+                    prctl(0x53564d41, 0, (unsigned long)(uintptr_t)one, 0x200000ul,
+                          (unsigned long)(uintptr_t)"dalvik-free list large object space (MEMORIES_TEST_HOLD_GUEST)");
+                    held += 0x200000ul;
+                } else if (one != MAP_FAILED) {
+                    munmap(one, 0x200000);
+                }
+            }
+            fprintf(stderr, "memories-pc: %p-%p: %lu of %lu MiB held (MEMORIES_TEST_HOLD_GUEST), the rest was "
+                    "taken already; the translated game maps nothing there\n", wanted, (void *)((char *)wanted + size),
+                    held >> 20, size >> 20);
+        } else if (got != wanted) {
             if (got != MAP_FAILED) munmap(got, size);
             fprintf(stderr, "memories-pc: MEMORIES_TEST_HOLD_GUEST: %p could not be held\n", wanted);
         } else {

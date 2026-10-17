@@ -4696,7 +4696,8 @@ or 0xC0000000 starts the game all the same.
   `0x80000000,0x9C000000,0x9E000000,0x9FF00000` also holds the text arena,
   low memory and the interpreter stack, which it then takes elsewhere
   (the fixed requests above) without a word in the log. An entry
-  `START-END` holds that whole range: `0x762fd000-0x962fd000` is the large
+  `START-END` holds that whole range (each free 2 MiB of it when part is
+  taken already, as on the emulator): `0x762fd000-0x962fd000` is the large
   object space of #372 (Retroid Pocket Nova, Android 13, where v0.3.0
   stopped with "cannot map guest memory at 0x80000000: File exists"), which
   the translated game starts past, with its code mods (2026-10-16). The device

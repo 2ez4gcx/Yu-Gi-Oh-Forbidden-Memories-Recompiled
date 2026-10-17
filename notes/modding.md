@@ -2409,7 +2409,7 @@ What it needs, besides `ld.lld` and `llvm-objcopy`:
   one), not llvm-mingw's 23. `MEMORIES_MOD_CC` names the compiler outright.
   `memories-guest-ir --llvm-major` prints which LLVM a pass is built against.
   At your own risk, `MEMORIES_MOD_ALLOW_OTHER_CLANG=1` also takes an older
-  clang (never a newer), with a warning, for a modder who knows his clang
+  clang (never a newer), with a warning, for a modder who knows their clang
   reads what the pass writes; the pass's own LLVM is still preferred. Apple's
   clang numbers its versions its own way, so `build_mod.py` cannot compare
   it: it tries it, and if the IR does not parse it says so and points to

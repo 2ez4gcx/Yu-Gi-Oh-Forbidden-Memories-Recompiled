@@ -4655,8 +4655,9 @@ or 0xC0000000 starts the game all the same.
   (`translated_state_symbols.c`): an address in a function or variable
   moves with it (inside one whose size changed, only its start), one in
   the gap after a symbol moves with it when the gap is the same size
-  (ld.lld's `__CortexA53843419_` veneers are left out: their names are
-  addresses), and a word of a game global that neither carries takes this
+  (ld.lld's `__CortexA53843419_<offset>` erratum veneers go by the
+  instruction they stand in for: to the new build's veneer for it, or to
+  the instruction itself where it needs none now), and a word of a game global that neither carries takes this
   build's own value there when that is an address in its image (constant
   tables of string literals). Anything else refuses the load, before
   anything is applied, with how many addresses changed. A state of the

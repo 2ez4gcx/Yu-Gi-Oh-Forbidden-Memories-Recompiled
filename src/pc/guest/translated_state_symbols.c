@@ -31,8 +31,12 @@ typedef struct TableSymbol {
     char name[72];
 } TableSymbol;
 
+#define VENEER "__CortexA53843419_"
+
 typedef struct Table {
     TableSymbol *symbols;   /* by offset */
+    TableSymbol *veneers;   /* ld.lld's __CortexA53843419_<patched offset>, by offset */
+    size_t veneer_count;
     unsigned *by_name;      /* indexes, by name */
     size_t count;
     uint64_t image_size;
@@ -51,6 +55,7 @@ static void clear(Table *table)
 {
     free(table->symbols);
     free(table->by_name);
+    free(table->veneers);
     memset(table, 0, sizeof(*table));
 }
 
@@ -68,11 +73,19 @@ static int parse(Table *table, const char *text, size_t length, uint64_t image_s
         if (end - at < sizeof(line)) {
             memcpy(line, text + at, end - at);
             line[end - at] = '\0';
-            /* Not ld.lld's Cortex-A53 erratum veneers: their names are
-             * their addresses, so no other build has them, and an address
-             * after one goes by the symbol before it instead. */
+            /* ld.lld's Cortex-A53 erratum veneers are named by the offset
+             * of the instruction they stand in for, so no other build has
+             * the same names: they are kept apart and found again by that
+             * instruction (veneer_map). */
             if (sscanf(line, "%llx %llx %71s", &start, &size, symbol.name) == 3 &&
-                strncmp(symbol.name, "__CortexA53843419_", 18)) {
+                !strncmp(symbol.name, VENEER, sizeof(VENEER) - 1)) {
+                TableSymbol *grown = realloc(table->veneers, (table->veneer_count + 1) * sizeof(*grown));
+                if (!grown) { clear(table); return -1; }
+                table->veneers = grown;
+                symbol.start = start;
+                symbol.size = size;
+                table->veneers[table->veneer_count++] = symbol;
+            } else if (sscanf(line, "%llx %llx %71s", &start, &size, symbol.name) == 3) {
                 if (start >= image_size || (table->count && start < table->symbols[table->count - 1].start)) {
                     clear(table);
                     return -1;   /* not offsets in order: not this format */
@@ -171,7 +184,47 @@ void Memories_NativeSymbolsClear(void)
     active = 0;
 }
 
+static int map_symbol(uint64_t offset, uint64_t *mapped);
+
+/* An address in an old erratum veneer: the same place in the new build's
+ * veneer for the instruction the old one stood in for, wherever that went. */
+static int veneer_map(uint64_t offset, uint64_t *mapped, int *found)
+{
+    size_t i;
+    unsigned long long patched;
+    uint64_t moved;
+    char name[72];
+    *found = 0;
+    for (i = 0; i < old_table.veneer_count; i++) {
+        const TableSymbol *old = &old_table.veneers[i];
+        if (offset < old->start || offset >= old->start + (old->size ? old->size : 8)) continue;
+        *found = 1;
+        if (sscanf(old->name + sizeof(VENEER) - 1, "%llx", &patched) != 1 || map_symbol(patched, &moved)) return -1;
+        snprintf(name, sizeof(name), VENEER "%llX", (unsigned long long)moved);
+        for (size_t j = 0; j < new_table.veneer_count; j++) {
+            if (!strcmp(new_table.veneers[j].name, name)) {
+                *mapped = new_table.veneers[j].start + (offset - old->start);
+                return 0;
+            }
+        }
+        /* No veneer there now: the instruction runs in place, and the
+         * veneer's second word (its branch back) is the one after it. */
+        *mapped = moved + (offset - old->start);
+        return 0;
+    }
+    return -1;
+}
+
 int Memories_NativeSymbolsMap(uint64_t offset, uint64_t *mapped)
+{
+    int found;
+    if (!active) return -1;
+    if (!veneer_map(offset, mapped, &found)) return 0;
+    if (found) return -1;
+    return map_symbol(offset, mapped);
+}
+
+static int map_symbol(uint64_t offset, uint64_t *mapped)
 {
     size_t low = 0, high = old_table.count;
     const TableSymbol *old, *now;

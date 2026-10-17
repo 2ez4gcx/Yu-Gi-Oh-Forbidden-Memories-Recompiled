@@ -199,8 +199,11 @@ jobs:
           target = os.path.join(os.environ["RUNNER_TEMP"], "vt")
           os.makedirs(target, exist_ok=True)
           # The guest pass is in the SDK (sdk/tools/): a program of the archive as much as the game.
+          # So is the one-click launcher, a script that downloads a compiler: the kind of file
+          # scanners look at hardest, and it is public anyway.
           for archive, name in ((f"dist/yfm-redecomp-{version}-windows.zip", "/memories-pc.exe"),
                                 (f"dist/yfm-redecomp-{version}-windows.zip", "/memories-guest-ir.exe"),
+                                (f"dist/yfm-redecomp-{version}-windows.zip", "/build-mod.bat"),
                                 (f"dist/fm-editor-{version}-windows.zip", "/fm-editor.exe")):
               with zipfile.ZipFile(archive) as package:
                   member = next(entry for entry in package.namelist() if entry.endswith(name))
@@ -208,11 +211,11 @@ jobs:
                       handle.write(package.read(member))
           EOF
           status=0
-          # --timeout 600: three new files' analyses still leave the step's
+          # --timeout 600: four new files' analyses still leave the step's
           # 45 minutes room to write the summary.
           python tools/pc/vt_check.py --max "$VT_MAX_DETECTIONS" --timeout 600 \
-            --markdown "$RUNNER_TEMP/vt.md" --label memories-pc.exe --label memories-guest-ir.exe --label fm-editor.exe \
-            "$RUNNER_TEMP/vt/memories-pc.exe" "$RUNNER_TEMP/vt/memories-guest-ir.exe" "$RUNNER_TEMP/vt/fm-editor.exe" || status=$?
+            --markdown "$RUNNER_TEMP/vt.md" --label memories-pc.exe --label memories-guest-ir.exe --label build-mod.bat --label fm-editor.exe \
+            "$RUNNER_TEMP/vt/memories-pc.exe" "$RUNNER_TEMP/vt/memories-guest-ir.exe" "$RUNNER_TEMP/vt/build-mod.bat" "$RUNNER_TEMP/vt/fm-editor.exe" || status=$?
           {
             echo "### VirusTotal ($PACKAGE_VERSION)"
             echo
@@ -263,6 +266,92 @@ jobs:
             dist/*.zip
             dist/*.tar.gz
           if-no-files-found: error
+          retention-days: 14
+
+  # The SDK's one-click mod build on a machine with nothing (notes/modding.md,
+  # "One click"): the SDK the package job packed, unpacked on a fresh runner, and
+  # its launcher run with PATH cut to the operating system, on the SDK's own
+  # example code mod. Windows: no Python and no clang on PATH at all. Linux: the
+  # system python3, which the launcher requires (it downloads only llvm-mingw),
+  # and the runner's own distribution clang, which cannot make the Android
+  # object, so that object coming out is the proof that the compiler the
+  # launcher fetched was the one used. The second run must download nothing.
+  # The objects are checked afterwards with the runner's Python
+  # (tools/pc/check_one_click.py: the three ELF files, their sections, the
+  # Android one when the SDK has the guest pass, what is left in toolchain/).
+  sdk-one-click:
+    if: github.event_name != 'workflow_dispatch' || inputs.platform != 'macos-arm64'
+    needs: package
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - system: linux
+            runner: ubuntu-24.04
+          - system: windows
+            runner: windows-2022
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          name: yfm-redecomp-${{ matrix.system }}
+          path: tmp/archives
+      # Unpacked as a player would: python's zipfile here, Explorer's there; the
+      # tar.gz keeps the mode of build-mod.sh, which is run as it is.
+      - name: Unpack the SDK
+        run: |
+          mkdir tmp/clean
+          if [ "${{ matrix.system }}" = windows ]; then
+            python -c "import glob, zipfile; zipfile.ZipFile(glob.glob('tmp/archives/yfm-redecomp-*-windows.zip')[0]).extractall('tmp/clean')"
+          else
+            tar -xzf tmp/archives/yfm-redecomp-*-linux.tar.gz -C tmp/clean
+          fi
+          mv tmp/clean/yfm-redecomp-* tmp/clean/game
+          cp -r tmp/clean/game/sdk/examples/mods/gameplay-rules tmp/clean/mod
+          ls tmp/clean/game/sdk
+      - name: Build the mod on a bare PATH (Windows)
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: |
+          set "PATH=%SystemRoot%\System32;%SystemRoot%"
+          set "MEMORIES_SDK_NOPAUSE=1"
+          where python >nul 2>nul
+          if not errorlevel 1 (echo python is on the bare PATH & exit /b 1)
+          where clang >nul 2>nul
+          if not errorlevel 1 (echo clang is on the bare PATH & exit /b 1)
+          call tmp\clean\game\sdk\build-mod.bat tmp\clean\mod
+          if errorlevel 1 exit /b 1
+          call tmp\clean\game\sdk\build-mod.bat tmp\clean\mod > tmp\clean\second-run.txt 2>&1
+          if errorlevel 1 (type tmp\clean\second-run.txt & exit /b 1)
+          type tmp\clean\second-run.txt
+          findstr /c:"downloading" tmp\clean\second-run.txt
+          if not errorlevel 1 (echo the second run downloaded again & exit /b 1)
+          exit /b 0
+      - name: Build the mod on a bare PATH (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          env -i HOME="$HOME" PATH=/usr/bin:/bin tmp/clean/game/sdk/build-mod.sh tmp/clean/mod
+          env -i HOME="$HOME" PATH=/usr/bin:/bin tmp/clean/game/sdk/build-mod.sh tmp/clean/mod | tee tmp/clean/second-run.txt
+          if grep -q downloading tmp/clean/second-run.txt; then echo "the second run downloaded again"; exit 1; fi
+      - name: Check the objects
+        run: python tools/pc/check_one_click.py tmp/clean/mod --sdk tmp/clean/game/sdk
+      - name: Upload the objects
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sdk-one-click-${{ matrix.system }}
+          path: |
+            tmp/clean/mod/*.o
+            tmp/clean/second-run.txt
+          if-no-files-found: warn
           retention-days: 14
 
   # The guest pass the SDKs ship, one per system (tools/pc/build_sdk_guest_ir.py;

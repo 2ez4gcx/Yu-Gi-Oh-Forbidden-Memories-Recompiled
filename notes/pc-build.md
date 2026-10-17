@@ -2437,6 +2437,22 @@ and up without the picture pass ("needs OpenGL 3 or 1x").
   (`gDuel_bWinnerSide`): the player's name, or the opponent's when the
   computer won, ending where the game's YOU or COM would; a name that
   cannot stay You, or the game's own COM. 2P duels keep 1P and 2P.
+  A translation with result strings of its own (`40`-`45`: the pt-BR mod
+  has them, the shipped languages do not) gets the same, by the same
+  rules, in `unit_results_copy` and `unit_results_target`: its calls are
+  indices of the unit's targets (`listing.h`), so a call is for a side when
+  it lands on the translation's string `3E`, `3F` or `3D`, the label
+  `L050E`, `L051C` or `L0504` somewhere, or the game's own place. The
+  columns move by the width of its word, not by three (VOCÊ is four: the
+  letters of the string a 1P duel takes, following `{f8 17}` and `{f8 18}`),
+  in a copy of the span of its data from the first of `40`-`45` to the next
+  string (`TextUnit.results_from`/`results_to`, up to 16 KB; the unit's
+  `controls` and `target_calls` find the `{f8 02 NN}` before a call without
+  taking the second byte of an added letter, F1 F8, for a step). A name that
+  cannot be shown (a letter the small font has no plain one of, no room
+  before COM, a player with no name of their own, a step that cannot move)
+  leaves the translation's own word, not You or COM. With the setting off
+  nothing here runs: Text_Resolve and Text_Retarget return what they did.
 
 Not covered yet: the sword and shield icons (pictures, not lettering).
 

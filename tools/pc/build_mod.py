@@ -54,7 +54,7 @@ The 64-bit targets need clang (the same one builds all three) and differ:
                   4-byte pointer)
   aarch64-translated  through the game's guest pass (aarch64-translated,
                   below), which needs the pass itself (the SDK ships it) and
-                  a clang no newer than the LLVM the pass is built against
+                  a clang of the LLVM the pass is built against
   both            -fms-extensions: the game's stored pointers stay 4 bytes
                   (G32, src/port_ptr.h); src/pc/mods/prelude64.h first, which
                   also declares the guest tables mods reach most, so a mod
@@ -682,10 +682,14 @@ def through_pass(command, source, obj):
 #
 # The clang writes the IR the pass reads and compiles the IR the pass writes
 # (the same clang, start to end), and LLVM reads the IR of its own version
-# or an older one, never a newer. So the clang may not be newer than the LLVM
-# the pass is built against (`memories-guest-ir --llvm-major`): the SDK's pass
-# is built against its llvm-mingw's clang, the checkout's against the game's
-# LLVM 21 (where the NDK's clang 21 goes, not llvm-mingw's 23).
+# or an older one, never a newer: the pass cannot read a newer clang's IR,
+# and an older clang cannot be counted on to read the pass's. Only a clang
+# of the LLVM the pass is built against (`memories-guest-ir --llvm-major`)
+# does both: the SDK's pass is built against its llvm-mingw's clang, the
+# checkout's against the game's LLVM 21 (where the NDK's clang 21 goes, not
+# llvm-mingw's 23). MEMORIES_MOD_ALLOW_OTHER_CLANG=1 lets an older clang
+# through, with a warning, for a modder who knows his clang reads it.
+ALLOW_OTHER_CLANG = "MEMORIES_MOD_ALLOW_OTHER_CLANG"
 
 _translation = {}   # translation_problem's findings, for the games being built for
 
@@ -715,14 +719,25 @@ def clang_major(path):
     return int(match.group(1)) if match else None
 
 
+class PassCannotRun(Exception):
+    """The guest pass could not be started at all."""
+
+
+def cannot_run(tool, error):
+    return PassCannotRun(f"build_mod: could not run the guest pass {tool}: {error}. An antivirus may have blocked "
+                         "or quarantined it (it is an unsigned program): restore it or allow it, or unpack the SDK again")
+
+
 @functools.lru_cache(maxsize=None)
 def tool_llvm_major(tool):
     """The LLVM major version the guest pass `tool` is built against (its
-    --llvm-major), or None for one that cannot say (built before it could)."""
+    --llvm-major), None for one that runs but cannot say (built before it
+    could: it exits with its usage). Raises PassCannotRun for one that does
+    not start (a blocked or quarantined file, a wrong kind of program)."""
     try:
         result = subprocess.run([tool, "--llvm-major"], capture_output=True, text=True, timeout=60)
-    except (OSError, subprocess.SubprocessError):
-        return None
+    except (OSError, subprocess.SubprocessError) as error:
+        raise cannot_run(tool, error) from None
     text = result.stdout.strip()
     return int(text) if result.returncode == 0 and text.isdigit() else None
 
@@ -730,27 +745,45 @@ def tool_llvm_major(tool):
 def guest_pass_major(tool=None):
     """The LLVM major version of the guest pass in use (`tool`, else the one
     translation_problem found, else one built before in this checkout),
-    GUEST_LLVM_DEFAULT when it cannot say."""
+    GUEST_LLVM_DEFAULT when it cannot say (PassCannotRun when it does not run)."""
     tool = tool or _translation.get("tool") or guest_ir_tool(False)[0]
     return (tool_llvm_major(tool) if tool else None) or GUEST_LLVM_DEFAULT
 
 
 def clang_fits(path, major, pass_major):
     """Whether a clang (`major`, its LLVM version) can go with a guest pass of
-    LLVM `pass_major`: no newer than the pass. Apple's has no LLVM version
-    to compare: it is tried, and the first IR that does not parse says so
-    (hint_for)."""
-    return is_apple_clang(path) if major is None else major <= pass_major
+    LLVM `pass_major`: the same LLVM (the pass reads its IR and it reads the
+    pass's), or with MEMORIES_MOD_ALLOW_OTHER_CLANG=1 an older one. Apple's
+    has no LLVM version to compare: it is tried, and the first IR that does
+    not parse says so (hint_for)."""
+    if major is None:
+        return is_apple_clang(path)
+    return major == pass_major or (major < pass_major and os.environ.get(ALLOW_OTHER_CLANG) == "1")
 
 
 def pick_clang(candidates, pass_major):
     """The first of `candidates` ([(clang, its major)]) that fits the pass and
-    has ld.lld: one with a version before any Apple's."""
-    for versioned in (True, False):
+    has ld.lld: one of the pass's own LLVM first, then (allowed) an older one,
+    then any Apple's."""
+    for rank in range(3):
         for path, major in candidates:
-            if (major is not None) == versioned and clang_fits(path, major, pass_major) and linker_for(path):
+            mine = 2 if major is None else 0 if major == pass_major else 1
+            if mine == rank and clang_fits(path, major, pass_major) and linker_for(path):
                 return path
     return None
+
+
+_warned = set()
+
+
+def warn_other_clang(path, pass_major):
+    """Once per clang: it is not the pass's LLVM (MEMORIES_MOD_ALLOW_OTHER_CLANG)."""
+    major = clang_major(path)
+    if major is not None and major != pass_major and path not in _warned:
+        _warned.add(path)
+        print(f"build_mod: warning: {path} is clang {major} and the guest pass is LLVM {pass_major} "
+              f"({ALLOW_OTHER_CLANG}): the pass reads its IR, but it may not read the IR the pass writes",
+              file=sys.stderr)
 
 
 def ndk_clang():
@@ -783,8 +816,13 @@ def translated_candidates():
 def translated_clang():
     """The clang for aarch64-translated: the first candidate no newer than
     the guest pass's LLVM (pick_clang), with ld.lld beside it or on PATH."""
-    path = pick_clang(translated_candidates(), guest_pass_major())
+    try:
+        major = guest_pass_major()
+    except PassCannotRun as error:
+        sys.exit(str(error))
+    path = pick_clang(translated_candidates(), major)
     if path:
+        warn_other_clang(path, major)
         return path
     sys.exit(translation_problem(None) or "build_mod: no clang for aarch64-translated")
 
@@ -835,23 +873,29 @@ def clang_problem(candidates, tool, major):
                       f"{path} is Apple's clang (no ld.lld beside it or on PATH)" if is_apple_clang(path) else
                       f"{path} gives no version" for path, each in candidates) or "no clang was found"
     ways = []
-    if major >= LLVM_MINGW_CLANG:
+    if major == LLVM_MINGW_CLANG:
         ways.append(f"llvm-mingw {LLVM_MINGW_RELEASE}'s clang is {LLVM_MINGW_CLANG}, the toolchain the game is built "
                     f"with ({LLVM_MINGW_DOWNLOADS['windows' if os.name == 'nt' else 'linux']}; put its bin folder on "
                     "PATH or set MEMORIES_MOD_CC to its clang)")
-    if major >= 21:
+    if major == 21:
         ways.append("the Android NDK r29's clang is 21 (set ANDROID_NDK_ROOT to the NDK, with MEMORIES_MOD_CC "
                     "unset: build_mod.py then takes its clang when the other one does not fit)")
-    ways.append(f"or set MEMORIES_MOD_CC to a clang of LLVM {major} or older, with ld.lld beside it")
-    return (f"build_mod: the Android object ({TRANSLATED}) needs a clang of LLVM {major} or older, with ld.lld: "
-            f"the guest pass ({tool}) is built against LLVM {major}, which reads the IR of its own clang version or "
-            f"an older one, and the clang compiles the IR the pass writes ({found}). Use one of: " + "; ".join(ways) + ".")
+    ways.append(f"set MEMORIES_MOD_CC to a clang of LLVM {major} with ld.lld beside it")
+    ways.append(f"or, at your own risk, {ALLOW_OTHER_CLANG}=1 takes an older clang (the pass reads its IR; it may "
+                "not read the IR the pass writes)")
+    return (f"build_mod: the Android object ({TRANSLATED}) needs a clang of LLVM {major}, with ld.lld: "
+            f"the guest pass ({tool}) is built against LLVM {major}; it cannot read the IR of a newer clang, and "
+            f"a clang of another version is not certain to read what it writes ({found}). Use one of: "
+            + "; ".join(ways) + ".")
 
 
 def hint_for(clang, stage):
     """A line for a failure of the guest pass or of the clang on the IR it
     wrote (`stage`: "pass" or "clang"), when the clang could be the cause."""
-    pass_major = guest_pass_major()
+    try:
+        pass_major = guest_pass_major()
+    except PassCannotRun:
+        return ""   # said already
     if is_apple_clang(clang):
         return (f"\n{clang} is Apple's clang, whose version numbers are not LLVM's, so build_mod.py cannot tell "
                 f"whether it matches the guest pass (LLVM {pass_major}). If the error above is about the IR, use an "
@@ -876,7 +920,10 @@ def translation_problem(games, build_tool=True):
     if not tool:
         return f"build_mod: the Android object ({TRANSLATED}) needs the game's guest pass: {why}.\n{GUEST_IR_HELP}"
     candidates = translated_candidates()
-    major = guest_pass_major(tool)
+    try:
+        major = guest_pass_major(tool)
+    except PassCannotRun as error:
+        return str(error)
     if not pick_clang(candidates, major):
         return clang_problem(candidates, tool, major)
     if games is None:
@@ -929,8 +976,11 @@ def guest_pass(operation, text, hint="", **options):
             handle.write(text)
         with open(config, "w", encoding="utf-8") as handle:
             json.dump(options, handle)
-        result = subprocess.run([tool, operation, source, output, config], capture_output=True, text=True,
-                                encoding="utf-8", errors="replace")
+        try:
+            result = subprocess.run([tool, operation, source, output, config], capture_output=True, text=True,
+                                    encoding="utf-8", errors="replace")
+        except OSError as error:
+            sys.exit(str(cannot_run(tool, error)))
         if result.returncode:
             sys.exit(f"build_mod: the guest pass ({operation}) failed:\n{result.stderr.strip()}{hint}")
         with open(output, encoding="utf-8") as handle:

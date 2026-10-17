@@ -125,34 +125,59 @@ class Toolchain(unittest.TestCase):
                 mock.patch.dict(os.environ, {"MEMORIES_GUEST_IR": tool}):
             return build_mod.translation_problem(None)
 
-    def test_translated_clang_follows_the_pass(self):
-        """aarch64-translated: the clang may not be newer than the LLVM the
-        guest pass is built against (the pass reads that clang's IR, and the
-        clang reads what the pass writes). The game's own pass is LLVM 21:
-        a newer clang (the pinned llvm-mingw 20260922's is 23) is refused,
-        with the NDK's as the way out; an SDK's pass is LLVM 23, built for
-        llvm-mingw's clang."""
+    def test_translated_clang_is_the_passs_llvm(self):
+        """aarch64-translated: the pass reads the IR of a clang no newer than
+        its LLVM and the clang compiles what the pass writes, which only a
+        clang of the same LLVM is sure to read. The game's own pass is LLVM
+        21: the NDK's clang 21 goes with it, llvm-mingw's 23 (the pinned
+        20260922) is refused. An SDK's pass is LLVM 23, built for llvm-mingw's
+        clang, which the NDK's 21 does not match either."""
         clang = self.program("clang")
         self.program("ld.lld")
         text = self.with_pass([(clang, 23)], 21)
-        self.assertIn("needs a clang of LLVM 21 or older", text)
+        self.assertIn("needs a clang of LLVM 21,", text)
         self.assertIn(f"{clang} is clang 23", text)
         self.assertIn("ANDROID_NDK_ROOT", text)
-        self.assertNotIn("llvm-mingw " + build_mod.LLVM_MINGW_RELEASE, text)   # newer than the pass: no way out
+        self.assertNotIn("llvm-mingw " + build_mod.LLVM_MINGW_RELEASE, text)   # not the pass's LLVM: no way out
         self.assertIsNone(self.with_pass([(clang, 21)], 21))
         self.assertIsNone(self.with_pass([(clang, 23)], 23))
-        self.assertIsNone(self.with_pass([(clang, 21)], 23))   # older than the pass: allowed
-        text = self.with_pass([(clang, 24)], 23)
-        self.assertIn("needs a clang of LLVM 23 or older", text)
+        text = self.with_pass([(clang, 21)], 23)   # older than the pass: not certain to read its IR
+        self.assertIn("needs a clang of LLVM 23,", text)
         self.assertIn("llvm-mingw " + build_mod.LLVM_MINGW_RELEASE, text)
         self.assertIn(build_mod.LLVM_MINGW_DOWNLOADS["windows" if os.name == "nt" else "linux"], text)
+        self.assertNotIn("ANDROID_NDK_ROOT", text)   # the NDK's clang 21 is not the way out for pass 23
         self.assertIn("MEMORIES_MOD_CC", text)
+        self.assertIn("MEMORIES_MOD_ALLOW_OTHER_CLANG=1", text)
+        self.assertIn("needs a clang of LLVM 23,", self.with_pass([(clang, 24)], 23))
         # A pass that cannot say is taken for the game's LLVM.
         self.assertIsNone(self.with_pass([(clang, 21)], None))
-        self.assertIn("needs a clang of LLVM 21 or older", self.with_pass([(clang, 23)], None))
+        self.assertIn("needs a clang of LLVM 21,", self.with_pass([(clang, 23)], None))
         # Without ld.lld no clang fits, whatever its version.
         os.remove(os.path.join(self.bin, "ld.lld" + EXE))
-        self.assertIn("needs a clang of LLVM 23 or older", self.with_pass([(clang, 23)], 23))
+        self.assertIn("needs a clang of LLVM 23,", self.with_pass([(clang, 23)], 23))
+
+    def test_an_older_clang_only_on_request(self):
+        """MEMORIES_MOD_ALLOW_OTHER_CLANG=1 lets an older clang go with the
+        pass (never a newer), the pass's own LLVM first; it warns."""
+        old, same = self.program("old-clang"), self.program("same-clang")
+        self.program("ld.lld")
+        candidates = [(old, 21), (same, 23)]
+        self.assertEqual(build_mod.pick_clang(candidates, 23), same)
+        self.assertIsNone(build_mod.pick_clang([(old, 21)], 23))
+        with mock.patch.dict(os.environ, {"MEMORIES_MOD_ALLOW_OTHER_CLANG": "1"}):
+            self.assertEqual(build_mod.pick_clang([(old, 21)], 23), old)
+            self.assertEqual(build_mod.pick_clang(candidates, 23), same)   # the same LLVM before an older one
+            self.assertEqual(build_mod.pick_clang([(old, 21), (same, 23)][::-1], 23), same)
+            self.assertIsNone(build_mod.pick_clang([(self.program("new-clang"), 24)], 23))   # never a newer
+            self.assertIsNone(self.with_pass([(old, 21)], 23))
+            build_mod._warned.clear()
+            error = io.StringIO()
+            with mock.patch.object(build_mod, "clang_version_text", lambda path: "clang version 21.1.8\n"), \
+                    contextlib.redirect_stderr(error):
+                build_mod.warn_other_clang(old, 23)
+                build_mod.warn_other_clang(old, 23)
+            self.assertEqual(error.getvalue().count("warning"), 1)
+            self.assertIn("clang 21 and the guest pass is LLVM 23", error.getvalue())
 
     def test_translated_apple_clang(self):
         """Apple's clang has Xcode's version numbers, no LLVM major: it is not
@@ -197,23 +222,45 @@ class Toolchain(unittest.TestCase):
                 self.assertEqual(build_mod.hint_for(clang, "pass"), "")
 
     def test_the_pass_says_its_llvm(self):
-        """tool_llvm_major asks the pass (--llvm-major); a pass that cannot
-        say (an older build, a program that does not run) is None, which
-        build_mod.py takes for the game's LLVM."""
+        """tool_llvm_major asks the pass (--llvm-major). One that runs and
+        cannot say (an older build: it exits with its usage) is None, which
+        build_mod.py takes for the game's LLVM; one that does not start at all
+        (a quarantined file, the wrong kind of program) is an error naming it,
+        not an older pass."""
         def run(code, out):
             return lambda command, **options: subprocess.CompletedProcess(command, code, out, "")
         for code, out, expected in ((0, "23\n", 23), (0, "21", 21), (1, "", None), (1, "23\n", None),
                                     (0, "LLVM 23", None), (0, "", None)):
             with mock.patch.object(build_mod.subprocess, "run", run(code, out)):
                 self.assertEqual(TOOL_LLVM_MAJOR("tool"), expected, (code, out))
-        def missing(command, **options):
-            raise FileNotFoundError(command[0])
-        with mock.patch.object(build_mod.subprocess, "run", missing):
-            self.assertIsNone(TOOL_LLVM_MAJOR("tool"))
+        for error in (FileNotFoundError("gone"), PermissionError("blocked"), OSError(225, "virus"),
+                      subprocess.TimeoutExpired("tool", 60)):
+            def fails(command, **options):
+                raise error
+            with mock.patch.object(build_mod.subprocess, "run", fails), \
+                    self.assertRaises(build_mod.PassCannotRun) as stopped:
+                TOOL_LLVM_MAJOR("pass.exe")
+            self.assertIn("could not run the guest pass pass.exe", str(stopped.exception))
+            self.assertIn("antivirus", str(stopped.exception))
         tool = self.program("memories-guest-ir")
         for major, expected in ((23, 23), (None, build_mod.GUEST_LLVM_DEFAULT)):
             self.pass_major = major
             self.assertEqual(build_mod.guest_pass_major(tool), expected)
+
+    def test_a_pass_that_does_not_run_is_said_not_taken_for_old(self):
+        clang = self.program("clang")
+        self.program("ld.lld")
+        tool = self.program("memories-guest-ir")
+        def blocked(path):
+            raise build_mod.PassCannotRun("build_mod: could not run the guest pass: blocked")
+        with mock.patch.object(build_mod, "tool_llvm_major", blocked), \
+                mock.patch.object(build_mod, "translated_candidates", lambda: [(clang, 21)]), \
+                mock.patch.dict(os.environ, {"MEMORIES_GUEST_IR": tool}):
+            self.assertEqual(build_mod.translation_problem(None), "build_mod: could not run the guest pass: blocked")
+            with self.assertRaises(SystemExit) as stopped:
+                build_mod.translated_clang()
+            self.assertIn("could not run the guest pass", str(stopped.exception.code))
+            self.assertEqual(build_mod.hint_for(clang, "pass"), "")
 
     def test_the_sdk_pass_is_built_for_its_clang(self):
         """tools/pc/sdk_llvm.json pins the LLVM of the SDK's guest pass: the

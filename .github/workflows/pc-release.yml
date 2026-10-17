@@ -362,9 +362,12 @@ jobs:
           env -i HOME="$HOME" PATH=/usr/bin:/bin tmp/clean/game/sdk/build-mod.sh tmp/clean/mod > tmp/clean/second-run.txt 2>&1 || { cat tmp/clean/second-run.txt; exit 1; }
           cat tmp/clean/second-run.txt
           if grep -q downloading tmp/clean/second-run.txt; then echo "the second run downloaded again"; exit 1; fi
+      # The SDK of a pull request may lack the guest pass (sdk-guest-ir above): then
+      # the Android object is not proven, which is a warning there. Anywhere else a
+      # missing pass fails: a release SDK carries it.
       - name: Check the objects
         if: steps.scope.outputs.touched == 'true'
-        run: python tools/pc/check_one_click.py tmp/clean/mod --sdk tmp/clean/game/sdk
+        run: python tools/pc/check_one_click.py tmp/clean/mod --sdk tmp/clean/game/sdk $([ "$GITHUB_EVENT_NAME" = pull_request ] && echo --allow-no-guest-pass)
       - name: Upload the objects
         if: always() && steps.scope.outputs.touched == 'true'
         uses: actions/upload-artifact@v4
@@ -392,12 +395,17 @@ jobs:
   # own step as soon as it is built: a failure in the link or the checks
   # after it keeps the work (actions/cache saves only after a successful job).
   # A pull request must not pay for it: caches saved by master are readable
-  # by pull requests, so a run there takes the cache when it exists (linking
-  # the pass takes a minute), and builds the LLVM only when the pull request
-  # touches what the pass is made of (this job's paths below). Otherwise,
-  # with no cache yet (master has not run since the pin changed), it builds
-  # nothing and the package job packs without the pass (--no-guest-ir, which
-  # test_package.py then expects). Pushes, tags and manual runs always build.
+  # by pull requests (not those of another pull request's runs), so a run
+  # there takes the cache when it exists (linking the pass takes a minute: a
+  # cache HIT always builds the pass), and builds the LLVM itself on a MISS
+  # only when the pull request touches what the pass is made of or the
+  # one-click build that proves it (this job's paths below: a one-click pull
+  # request then proves the Android object, whatever the cache holds).
+  # Otherwise, on a miss with neither touched (master has not run since the
+  # pin changed), it builds nothing and the package job packs without the pass
+  # (--no-guest-ir, which test_package.py then expects, and sdk-one-click
+  # then warns that the Android object is not proven). Pushes, tags and
+  # manual runs always build.
   # The job stops, saying what is missing, if the archive lacks the headers
   # or libraries, or if sdk_llvm.json has no sha256 (`python
   # tools/pc/build_sdk_guest_ir.py --pin`).
@@ -428,11 +436,15 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Does this run touch what the pass is made of
+      # What the pass is made of, and what proves it in a mod build: the one-click
+      # launchers and the files that ship and check them (sdk-one-click below
+      # runs on a pull request for the same second list and would otherwise find
+      # an SDK without the pass, which cannot build the Android object).
+      - name: Does this run touch what the pass is made of, or the one-click build
         id: scope
         run: |
           touched=true
-          if [ "$GITHUB_EVENT_NAME" = pull_request ] && ! git diff --name-only HEAD^1 HEAD | grep -Eq '^(tools/pc/llvm/|tools/pc/build_sdk_guest_ir\.py$|tools/pc/sdk_llvm\.json$|tools/pc/fetch_tools\.py$|src/pc/memory_map\.h$)'; then
+          if [ "$GITHUB_EVENT_NAME" = pull_request ] && ! git diff --name-only HEAD^1 HEAD | grep -Eq '^(tools/pc/llvm/|tools/pc/build_sdk_guest_ir\.py$|tools/pc/sdk_llvm\.json$|tools/pc/fetch_tools\.py$|src/pc/memory_map\.h$|tools/pc/sdk/|tools/pc/package\.py$|tools/pc/build_mod\.py$|tools/pc/check_one_click\.py$|\.github/workflows/pc-release\.yml$)'; then
             touched=false
           fi
           echo "touched=$touched" >> "$GITHUB_OUTPUT"

@@ -14,9 +14,12 @@ nothing the launcher fetched). It asserts:
   64-bit ones with the .memories.abi section that names their target for the
   game's loader;
 - the Android object is among them exactly when the SDK carries the guest
-  pass (a pull request's SDK may be packed without: package.py
-  --no-guest-ir). Only llvm-mingw's clang 23 from sdk/toolchain can make it,
-  which is the proof that the launcher's downloaded compiler was the one used;
+  pass, and all three are required then. An SDK without the pass (package.py
+  --no-guest-ir) fails, unless --allow-no-guest-pass says it is a pull
+  request's, where the pass is not always built: that run prints a
+  ::warning:: that the Android object was not proven. Only llvm-mingw's clang
+  23 from sdk/toolchain can make the object, which is the proof that the
+  launcher's downloaded compiler was the one used;
 - the launcher fetched what it says it does: sdk/toolchain/llvm-mingw-<release>/
   (and python-<version>/ on Windows), no archive left in downloads/ and no
   half-unpacked .unpack-* folder.
@@ -53,6 +56,8 @@ def main():
     parser.add_argument("--sdk", required=True, help="the unpacked SDK (its sdk/ folder)")
     parser.add_argument("--android", choices=("auto", "yes", "no"), default="auto",
                         help="whether the Android object is expected (default: when the SDK has the guest pass)")
+    parser.add_argument("--allow-no-guest-pass", action="store_true",
+                        help="a pull request's SDK may have no guest pass: warn instead of failing")
     parser.add_argument("--no-download", action="store_true",
                         help="the launcher was given its own tools: sdk/toolchain is not expected")
     options = parser.parse_args()
@@ -61,6 +66,12 @@ def main():
     guest_pass = [name for name in ("memories-guest-ir", "memories-guest-ir.exe")
                   if os.path.isfile(os.path.join(options.sdk, "tools", name))]
     android = options.android == "yes" or (options.android == "auto" and bool(guest_pass))
+    if options.android == "auto" and not guest_pass:
+        if not options.allow_no_guest_pass:
+            sys.exit("check_one_click: the SDK has no tools/memories-guest-ir, so the Android object cannot be built: "
+                     "a release SDK carries the guest pass (a pull request's may lack it: --allow-no-guest-pass)")
+        print("::warning title=Android object not proven::this pull request's SDK has no guest pass "
+              "(tools/memories-guest-ir), so the aarch64-translated object was not built or checked")
     with open(os.path.join(options.mod, "mod.json"), encoding="utf-8") as handle:
         library = json.load(handle).get("library")
     if not library:

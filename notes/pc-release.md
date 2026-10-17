@@ -124,14 +124,22 @@ build is up to an hour, the Linux archive 2 GB), so `sdk-guest-ir` caches
 them under a key of the pin, `fetch_tools.py` and the script, saving the
 cache in a step of its own as soon as they are built (a failure while
 linking the pass keeps the work). Caches saved by master are readable by
-pull requests, which therefore link the pass in a minute; a pull request
-builds the LLVM itself only when it touches what the pass is made of
-(`tools/pc/llvm/`, `build_sdk_guest_ir.py`, `sdk_llvm.json`,
-`fetch_tools.py`, `src/pc/memory_map.h`). A pull request that touches
-none of them while master has not yet saved the cache (right after the pin
-changed) builds no pass: its SDKs are packed with `package.py
---no-guest-ir` and tested with `test_package.py --no-guest-ir`. Pushes,
-tags and manual runs always have the pass, or fail.
+pull requests (not those of another pull request's runs), which therefore
+link the pass in a minute: **a cache hit always builds the pass**. On a miss,
+a pull request builds the LLVM itself only when it touches what the pass is
+made of (`tools/pc/llvm/`, `build_sdk_guest_ir.py`, `sdk_llvm.json`,
+`fetch_tools.py`, `src/pc/memory_map.h`) or the one-click build that proves it
+(`tools/pc/sdk/`, `package.py`, `build_mod.py`, `check_one_click.py`, the
+workflow), so that a one-click pull request proves the Android object whatever
+the cache holds (a cold Windows build of the LLVM can take an hour). A pull
+request that touches none of them on a cache miss (right after the pin
+changed, or a branch of its own) builds no pass: its SDKs are packed with
+`package.py --no-guest-ir` and tested with `test_package.py --no-guest-ir`,
+and `sdk-one-click` then builds only the i386 and x86_64-windows objects and
+says so in a `::warning::` ("Android object not proven"); it cannot be
+unnoticed, because `check_one_click.py` fails without `--allow-no-guest-pass`,
+which only pull requests pass. Pushes, tags and manual runs always have the
+pass, or fail.
 
 *Changing the LLVM pin.* When llvm-mingw's clang changes major (the toolchain
 pinned in `tools/pc/fetch_tools.py` and `build_win32_deps.py`), the SDK's pass

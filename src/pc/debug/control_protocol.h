@@ -52,12 +52,13 @@ typedef struct {
     int pad;          /* pad: 0 for pad 1, 1 for pad 2 */
     uint16_t bits;    /* pad */
     uint32_t address; /* peek, poke: as given (normalised by ControlProtocol_GuestRange) */
-    const char *symbol; /* peek, poke: the variable's name when ADDR was @NAME (inside the line); else NULL */
-    uint32_t offset;  /* peek, poke: the +OFF after @NAME */
     uint32_t length;  /* peek: bytes asked for; poke: bytes decoded into the caller's buffer */
     const char *path; /* shot, save, load: inside the parsed line; jump: the target */
     int opponent;     /* jump */
     const char *deck; /* jump: NULL when not given */
+    /* After v0.3.0's fields (tools/pc/mod_compat.txt): */
+    const char *symbol; /* peek, poke: the variable's name when ADDR was @NAME (inside the line); else NULL */
+    uint32_t offset;  /* peek, poke: the +OFF after @NAME */
 } ControlCommand;
 
 /* Parse one line (without its newline; a trailing '\r' is ignored). `data`

@@ -4647,7 +4647,21 @@ or 0xC0000000 starts the game all the same.
   from one launch to the next; `check_load_bias` (`android.c`, which kept a
   fixed game's states for one launch when it loaded elsewhere) is not
   built. The log says `libgame.so at <address> (translated)`: a crash
-  address is symbolized as its offset from that.
+  address is symbolized as its offset from that. **Across builds** (an app
+  update, 2026-10-17): `symbols/<id>.txt` holds functions and data as
+  offsets into `libgame.so` (linked at 0); crash reports add the load
+  address (`debug/symbols.c`), and every state carries its build's table
+  (`arm64-symbols`). A state of another build is carried over by name
+  (`translated_state_symbols.c`): an address in a function or variable
+  moves with it (inside one whose size changed, only its start), one in
+  the gap after a symbol moves with it when the gap is the same size
+  (ld.lld's `__CortexA53843419_` veneers are left out: their names are
+  addresses), and a word of a game global that neither carries takes this
+  build's own value there when that is an address in its image (constant
+  tables of string literals). Anything else refuses the load, before
+  anything is applied, with how many addresses changed. A state of the
+  fixed-memory game (v0.3.0) is refused: "this state uses another
+  architecture or state format".
 - **Code mods** (2026-10-16, [modding.md, "Android code
   mods"](modding.md#android-code-mods-aarch64-translated)) are
   `<library>.aarch64-translated.o`: each unit of the mod through the guest

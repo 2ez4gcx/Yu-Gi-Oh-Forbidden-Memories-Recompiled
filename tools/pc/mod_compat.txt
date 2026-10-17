@@ -115,3 +115,9 @@ accept v0.2.0 export name was the C library macros' parameter, never a name the 
 # v0.3.0 mod could have compiled a comparison against one. Same reasoning
 # as DuelResultDisplayState's starchip_prize above.
 accept v0.3.0 record MonsterEffect widened attribute and each_attribute into their own trailing pad byte
+
+# PR #381 (peek and poke by name): the control channel's parsed command
+# gained `symbol` and `offset` at its end. ControlCommand is only filled by
+# ControlProtocol_Parse for the channel MEMORIES_CONTROL opens (src/pc/debug);
+# no mod parses control lines or receives one.
+accept v0.3.0 record ControlCommand grew by symbol and offset at its end

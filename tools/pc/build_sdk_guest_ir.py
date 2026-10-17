@@ -214,8 +214,16 @@ def release_llvm(entry, config, work):
     return folder
 
 
+def say(text):
+    """Print `text`, with what the console's encoding cannot spell escaped (a
+    Windows console in cp1252 and a folder named in another script), never
+    an error."""
+    encoding = getattr(sys.stdout, "encoding", None) or "utf-8"
+    print(text.encode(encoding, "backslashreplace").decode(encoding), flush=True)
+
+
 def run(command, **options):
-    print("+ " + " ".join(shlex.quote(str(word)) for word in command), flush=True)
+    say("+ " + " ".join(shlex.quote(str(word)) for word in command))
     subprocess.run(command, check=True, **options)
 
 
@@ -280,9 +288,11 @@ def cleaned(flags):
     static library (missing_static says when there is none)."""
     result = []
     for flag in flags:
-        name = os.path.basename(flag)
-        if os.path.isabs(flag) and flag.endswith((".so", ".a", ".dylib")) and not name.startswith("libLLVM"):
-            result.append("-l" + name[3:].split(".")[0])
+        # A shared library may be named by its versioned file (libxml2.so.2).
+        # Read as written, whatever the host's own idea of an absolute path.
+        library = re.fullmatch(r"(?:[A-Za-z]:)?/(?:.*/)?lib([^/]+?)\.(?:so(?:\.\d+)*|a|dylib)", flag)
+        if library and not library.group(1).startswith("LLVM"):
+            result.append("-l" + library.group(1))
         else:
             result.append(flag)
     return result
@@ -294,8 +304,9 @@ def missing_static(cxx, flags):
     missing = []
     for flag in flags:
         if flag.startswith("-l") and not flag.startswith("-lLLVM"):
-            found = subprocess.run([cxx, f"-print-file-name=lib{flag[2:]}.a"], capture_output=True, text=True).stdout.strip()
-            if not os.path.isabs(found):   # the driver gives the bare name back when it finds nothing
+            name = f"lib{flag[2:]}.a"
+            found = subprocess.run([cxx, f"-print-file-name={name}"], capture_output=True, text=True).stdout.strip()
+            if found in ("", name):   # the driver gives the bare name back when it finds nothing
                 missing.append(flag)
     return missing
 
@@ -410,7 +421,7 @@ def smoke(program, major):
             if operation == "translate" and "Memories_ResolveDataFast" not in text:
                 sys.exit(f"build_sdk_guest_ir: {program} translate did not route the guest load through the resolver")
     check_static(program)
-    print(f"{program}: LLVM {major}, inspect/normalize/translate ran, stands alone")
+    say(f"{program}: LLVM {major}, inspect/normalize/translate ran, stands alone")
 
 
 def clang_major(path):
@@ -465,14 +476,14 @@ def main():
     if found is not None and found != major:
         sys.exit(f"build_sdk_guest_ir: {llvm} is LLVM {found}, expected {major}")
     if options.llvm_only:
-        print(llvm)
+        say(llvm)
         return
     output = os.path.join(options.out, "memories-guest-ir" + EXE)
     os.makedirs(options.out, exist_ok=True)
     with tempfile.TemporaryDirectory() as resources:
         compile_pass(llvm, cxx, output, [version_resource(resources)] if system == "windows" else [])
     smoke(output, major)
-    print(output)
+    say(output)
 
 
 if __name__ == "__main__":

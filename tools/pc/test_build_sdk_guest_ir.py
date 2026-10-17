@@ -144,9 +144,11 @@ class Archive(unittest.TestCase):
         machine that built the archive; they are asked of this one by name."""
         flags = ["-L/opt/llvm/lib", "-lLLVMCore", "/usr/lib/x86_64-linux-gnu/libz.so", "/usr/lib/libzstd.a",
                  "/usr/lib/x86_64-linux-gnu/libxml2.so.2", "-lm"]
-        if os.name != "nt":   # an absolute path is only one where the system says so
-            self.assertEqual(sdk.cleaned(flags), ["-L/opt/llvm/lib", "-lLLVMCore", "-lz", "-lzstd", "-lxml2", "-lm"])
-            self.assertEqual(sdk.cleaned(["/opt/llvm/lib/libLLVMCore.a"]), ["/opt/llvm/lib/libLLVMCore.a"])
+        # The same on every host: the flags are read as llvm-config wrote them.
+        self.assertEqual(sdk.cleaned(flags), ["-L/opt/llvm/lib", "-lLLVMCore", "-lz", "-lzstd", "-lxml2", "-lm"])
+        self.assertEqual(sdk.cleaned(["/opt/llvm/lib/libLLVMCore.a"]), ["/opt/llvm/lib/libLLVMCore.a"])
+        self.assertEqual(sdk.cleaned(["/usr/lib/libtinfo.so.6.4", "C:/llvm/lib/libz.a", "/usr/lib/notalib.so"]),
+                         ["-ltinfo", "-lz", "/usr/lib/notalib.so"])
         self.assertEqual(sdk.cleaned(["-lLLVMCore", "-lpsapi"]), ["-lLLVMCore", "-lpsapi"])
 
     def test_a_system_library_without_a_static_one_is_named(self):
@@ -158,6 +160,15 @@ class Archive(unittest.TestCase):
             self.assertEqual(sdk.missing_static("c++", ["-lLLVMCore", "-lz", "-ltinfo", "-lm", "-lxml2", "-pthread"]),
                              ["-ltinfo", "-lxml2"])
             self.assertEqual(sdk.missing_static("c++", ["-lz", "-lm"]), [])
+
+    def test_a_path_the_console_cannot_spell_is_printed(self):
+        """A Windows console in cp1252, a folder named in another script."""
+        console = io.TextIOWrapper(io.BytesIO(), encoding="cp1252")
+        with mock.patch("sys.stdout", console):
+            sdk.say("+ windres /tmp/Jos\u00e9-e\u0301-\u042f-\U0001f600/x.rc")
+        console.flush()
+        self.assertEqual(console.buffer.getvalue().decode("cp1252").rstrip(),
+                         "+ windres /tmp/Jos\u00e9-e\\u0301-\\u042f-\\U0001f600/x.rc")
 
     def test_a_static_pass_imports_only_the_systems_libraries(self):
         names = ["KERNEL32.dll", "ntdll.dll", "api-ms-win-crt-runtime-l1-1-0.dll", "ADVAPI32.dll", "SHELL32.dll",

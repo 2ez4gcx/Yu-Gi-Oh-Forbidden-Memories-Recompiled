@@ -56,8 +56,10 @@ void Memories_NativeStateRelocateField(const char *tag, void *data, size_t size)
 {
     if (!pending_memory || !strcmp(tag, "soft_gpu") || !strcmp(tag, "gte") ||
         !strcmp(tag, "arm64-jump-floats")) return;
+    /* A jmp_buf ("arm64-jumps") holds what the stack and the saved
+     * registers do: callee-saved registers and a return address. */
     Memories_NativeMemoryRelocate(pending_memory, data, size, saved_entry.image_base,
-                                 restore_image_base, saved_entry.image_size, 0);
+                                 restore_image_base, saved_entry.image_size, !strcmp(tag, "arm64-jumps"));
 }
 
 #ifndef __APPLE__
@@ -431,6 +433,8 @@ int Memories_NativeStateLoad(const char *path, char *why, size_t size)
             memcpy(tag, image + at, 16);
             if (!strcmp(tag, "arm64-stack"))
                 missing += Memories_NativeSymbolsScan(image + at + 20, bytes, saved_entry.image_base, 1, 1);
+            else if (!strcmp(tag, "arm64-jumps"))
+                missing += Memories_NativeSymbolsScan(image + at + 20, bytes, saved_entry.image_base, 1, 0);
             else if (strcmp(tag, "arm64-regions") && strcmp(tag, "arm64-entry") && strcmp(tag, "arm64-symbols") &&
                      strcmp(tag, "memory") && strcmp(tag, "soft_gpu") && strcmp(tag, "gte") &&
                      strcmp(tag, "arm64-jump-floats"))

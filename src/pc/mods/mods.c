@@ -1800,10 +1800,10 @@ static void activate_once(int index, int on)
 #if defined(__ANDROID__) && defined(MEMORIES_TRANSLATED)
             /* A mod made for the fixed-memory game has <library>.aarch64.o:
              * the same code mod, which needs building again for this one. */
-            note(mod, old_android_object(mod) ? "was built for the fixed-memory Android game: rebuild this mod "
-                                                "(build_mod.py --target aarch64-translated); it has no %s"
-                                              : "needs an Android build of this mod: it has no %s (rebuild it with "
-                                                "build_mod.py --target aarch64-translated)",
+            note(mod, old_android_object(mod) ? "was built for the fixed-memory Android game: ask the mod's author to "
+                                                "rebuild it (build_mod.py --target aarch64-translated); it has no %s"
+                                              : "needs an Android build of this mod: it has no %s (ask the mod's "
+                                                "author to rebuild it with build_mod.py --target aarch64-translated)",
                  mod->library);
 #elif defined(__ANDROID__)
             note(mod, "needs an Android build of this mod: it has no %s (rebuild it with build_mod.py using clang)",

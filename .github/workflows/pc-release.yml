@@ -279,6 +279,11 @@ jobs:
   # The objects are checked afterwards with the runner's Python
   # (tools/pc/check_one_click.py: the three ELF files, their sections, the
   # Android one when the SDK has the guest pass, what is left in toolchain/).
+  # The download is the proof and costs about 300 MB a run, so a pull request
+  # runs it only when it touches what the launchers are made of or ship
+  # (the scope step below); pushes, tags and manual runs always do. A pull
+  # request that does not touch them still gets a green job (every step but
+  # the scope one is skipped), so draft-release's dependency on it holds.
   sdk-one-click:
     if: github.event_name != 'workflow_dispatch' || inputs.platform != 'macos-arm64'
     needs: package
@@ -296,17 +301,32 @@ jobs:
       run:
         shell: bash
     steps:
+      # Two commits: a pull request's merge commit and the base it merges into.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - name: Does this run touch the one-click build
+        id: scope
+        run: |
+          touched=true
+          if [ "$GITHUB_EVENT_NAME" = pull_request ] && ! git diff --name-only HEAD^1 HEAD | grep -Eq '^(tools/pc/sdk/|tools/pc/package\.py$|tools/pc/build_mod\.py$|tools/pc/check_one_click\.py$|\.github/workflows/pc-release\.yml$)'; then
+            touched=false
+            echo "::notice title=SDK one-click build::not run: this pull request touches none of tools/pc/sdk/, package.py, build_mod.py, check_one_click.py or the workflow"
+          fi
+          echo "touched=$touched" >> "$GITHUB_OUTPUT"
       - uses: actions/setup-python@v5
+        if: steps.scope.outputs.touched == 'true'
         with:
           python-version: '3.12'
       - uses: actions/download-artifact@v4
+        if: steps.scope.outputs.touched == 'true'
         with:
           name: yfm-redecomp-${{ matrix.system }}
           path: tmp/archives
       # Unpacked as a player would: python's zipfile here, Explorer's there; the
       # tar.gz keeps the mode of build-mod.sh, which is run as it is.
       - name: Unpack the SDK
+        if: steps.scope.outputs.touched == 'true'
         run: |
           mkdir tmp/clean
           if [ "${{ matrix.system }}" = windows ]; then
@@ -318,7 +338,7 @@ jobs:
           cp -r tmp/clean/game/sdk/examples/mods/gameplay-rules tmp/clean/mod
           ls tmp/clean/game/sdk
       - name: Build the mod on a bare PATH (Windows)
-        if: runner.os == 'Windows'
+        if: steps.scope.outputs.touched == 'true' && runner.os == 'Windows'
         shell: cmd
         run: |
           set "PATH=%SystemRoot%\System32;%SystemRoot%"
@@ -336,16 +356,17 @@ jobs:
           if not errorlevel 1 (echo the second run downloaded again & exit /b 1)
           exit /b 0
       - name: Build the mod on a bare PATH (Linux)
-        if: runner.os == 'Linux'
+        if: steps.scope.outputs.touched == 'true' && runner.os == 'Linux'
         run: |
           env -i HOME="$HOME" PATH=/usr/bin:/bin tmp/clean/game/sdk/build-mod.sh tmp/clean/mod
           env -i HOME="$HOME" PATH=/usr/bin:/bin tmp/clean/game/sdk/build-mod.sh tmp/clean/mod > tmp/clean/second-run.txt 2>&1 || { cat tmp/clean/second-run.txt; exit 1; }
           cat tmp/clean/second-run.txt
           if grep -q downloading tmp/clean/second-run.txt; then echo "the second run downloaded again"; exit 1; fi
       - name: Check the objects
+        if: steps.scope.outputs.touched == 'true'
         run: python tools/pc/check_one_click.py tmp/clean/mod --sdk tmp/clean/game/sdk
       - name: Upload the objects
-        if: always()
+        if: always() && steps.scope.outputs.touched == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: sdk-one-click-${{ matrix.system }}

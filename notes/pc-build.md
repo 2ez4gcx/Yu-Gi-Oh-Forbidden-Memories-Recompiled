@@ -2437,6 +2437,27 @@ and up without the picture pass ("needs OpenGL 3 or 1x").
   (`gDuel_bWinnerSide`): the player's name, or the opponent's when the
   computer won, ending where the game's YOU or COM would; a name that
   cannot stay You, or the game's own COM. 2P duels keep 1P and 2P.
+  A translation with result strings of its own (`40`-`45`: the pt-BR mod
+  has them, the shipped languages do not) gets the same, by the same
+  rules, in `unit_results_copy` and `unit_results_target`: its calls are
+  indices of the unit's targets (`listing.h`), so a call is for a side when
+  it lands on the translation's string `3E`, `3F` or `3D`, the label
+  `L050E`, `L051C` or `L0504` somewhere, or the game's own place. The
+  columns move by the width of its word, not by three (VOCÊ is four: the
+  letters of the string a 1P duel takes, following `{f8 17}` and `{f8 18}`),
+  in a copy of the span of its data from the first of `40`-`45` to the next
+  string (`TextUnit.results_from`/`results_to`, up to 16 KB; the unit's
+  `controls` and `target_calls` find the `{f8 02 NN}` before a call without
+  taking the second byte of an added letter, F1 F8, for a step). A name that
+  cannot be shown (a letter the small font has no plain one of, no room
+  before COM, a player with no name of their own, a step that cannot move)
+  leaves the translation's own word, not You or COM. The steps before a
+  side's calls move together or not at all. With the setting off these
+  functions are still called but answer as before (the same string, the same
+  jump), so the screen is the translation's, pixel for pixel. A span past
+  16 KB is said once in the log and the Mods window, and shows no names. No
+  shipped language redefines `40`-`45` (only the pt-BR mod does), so the
+  shipped languages are unchanged by construction.
 
 Not covered yet: the sword and shield icons (pictures, not lettering).
 
@@ -2976,7 +2997,10 @@ bit-identical. How (details in `src/pc/guest/state.h`):
     wrong one of its two buffers from then on. `build_game32.py` now puts
     them in `game_data` after everything else (`$n`), where no variable
     moves, and a variables chunk shorter than the section (a state from
-    before) restores the part it has. The other way round, an older build says the
+    before) restores the part it has. These variables are therefore not at
+    their retail addresses (nor on Linux: the game's `game_data`/`game_bss`
+    are not the guest RAM); the control channel finds them by name
+    (`peek @gGraphics_sViewportX`), see notes/agent-control.md. The other way round, an older build says the
     game's variables "do not match this build" and leaves them out: the
     state loads, but play does not go on as saved. Issue #229 was the same
     gap in Build Deck: its two panes lie side by side and the screen slides
@@ -3029,7 +3053,10 @@ bit-identical. How (details in `src/pc/guest/state.h`):
   grew). Every build files all of its functions and the game objects'
   variables in `tmp/pc/game32/symbols/<build id>.txt`, the id being the
   table's hash (also written to `tmp/pc/game32/buildid`, which the runtime
-  reads); the state header carries the id (format version 3; version 1
+  reads; beside it, `<build id>.vars.txt` names the variables the build
+  defines (game, module and native) and pins, and where, for the control
+  channel's `peek @NAME`, notes/agent-control.md; it is shipped with the
+  build); the state header carries the id (format version 3; version 1
   carried the game-source fingerprint, version 2 the build id of a game
   compiled without the indirect-branch thunks).
   A state from another build is

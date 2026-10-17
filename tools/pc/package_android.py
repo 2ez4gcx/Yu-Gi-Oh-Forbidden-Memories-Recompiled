@@ -456,5 +456,8 @@ if __name__ == "__main__":
         build_id = handle.read().strip()
     assets = {"build/buildid": os.path.join(build, "buildid"), "build/commit": os.path.join(build, "commit"),
               f"build/symbols/{build_id}.txt": os.path.join(build, "symbols", f"{build_id}.txt")}
+    variables = os.path.join(build, "symbols", f"{build_id}.vars.txt")
+    if os.path.exists(variables):   # the control channel's names; the translated game has none
+        assets[f"build/symbols/{build_id}.vars.txt"] = variables
     assets.update(program_files(build, ("mods", "languages")))
     package(build, sys.argv[2], os.path.join(build, "libmain.so"), os.path.join(build, "libgame.so"), assets)

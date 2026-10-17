@@ -4668,7 +4668,12 @@ or 0xC0000000 starts the game all the same.
   with how many addresses changed, before anything is applied; PS1 RAM
   (`memory`) is copied as it is and not scanned, as the same build's loads
   never relocated it. A state of the fixed-memory game (v0.3.0) is
-  refused: "this state uses another architecture or state format".
+  refused: "this state uses another architecture or state format". The
+  desktop games' tables (`state.c`) still number repeated statics by link
+  order (`put#2`), so a callback stored to one unit's static could be
+  carried to another unit's after the link order changes; the fix there
+  would be the same qualification by unit (STT_FILE on ELF, the COFF
+  `.file` records on Windows) in `write_build_identity`.
 - **Code mods** (2026-10-16, [modding.md, "Android code
   mods"](modding.md#android-code-mods-aarch64-translated)) are
   `<library>.aarch64-translated.o`: each unit of the mod through the guest

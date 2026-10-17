@@ -23,6 +23,7 @@ import package
 SOURCE = HERE / "sdk"
 PINS = json.loads((SOURCE / "toolchain-pins.json").read_text(encoding="utf-8"))
 WINDOWS = os.name == "nt"
+UNICODE_NAME = "José-é-Я-東京-\U0001f600 & (100%) ! ^"    # tools/pc/test_path_layout.py's
 
 # build_mod.py as the SDK's tools folder has it, which the launchers run.
 FAKE_BUILD_MOD = '''import os, sys
@@ -233,6 +234,54 @@ class Packaged(unittest.TestCase):
                 test_package.check_launchers(zipped, "yfm-redecomp-x", contents - {"sdk/build-mod.sh"}, True)
 
 
+class CheckOneClick(unittest.TestCase):
+    """tools/pc/check_one_click.py: the three objects when the SDK has the guest pass, and a pull request's
+    SDK without it warns while any other fails."""
+
+    def elf(self, path, elf_class, machine, abi):
+        header = bytearray(64)
+        header[0:4] = b"\x7fELF"
+        header[4] = elf_class
+        header[16:20] = (1).to_bytes(2, "little") + machine.to_bytes(2, "little")
+        path.write_bytes(bytes(header) + (b".memories.abi" if abi else b"") + bytes(2000))
+
+    def setUp(self):
+        self.folder = pathlib.Path(tempfile.mkdtemp(prefix="check-one-click-"))
+        self.addCleanup(shutil.rmtree, self.folder, ignore_errors=True)
+        self.sdk = self.folder / "sdk"
+        (self.sdk / "tools").mkdir(parents=True)
+        shutil.copyfile(SOURCE / "toolchain-pins.json", self.sdk / "toolchain-pins.json")
+        self.mod = self.folder / "mod"
+        self.mod.mkdir()
+        (self.mod / "mod.json").write_text('{"library": "rules"}', encoding="utf-8")
+        self.elf(self.mod / "rules.o", 1, 3, False)
+        self.elf(self.mod / "rules.x86_64-windows.o", 2, 62, True)
+
+    def run_check(self, *extra):
+        return subprocess.run([sys.executable, str(HERE / "check_one_click.py"), str(self.mod), "--sdk", str(self.sdk),
+                               "--no-download", *extra], capture_output=True, text=True, encoding="utf-8", errors="replace")
+
+    def test_no_guest_pass_fails_except_on_a_pull_request(self):
+        failed = self.run_check()
+        self.assertNotEqual(failed.returncode, 0)
+        self.assertIn("no tools/memories-guest-ir", failed.stdout + failed.stderr)
+        warned = self.run_check("--allow-no-guest-pass")
+        self.assertEqual(warned.returncode, 0, warned.stdout + warned.stderr)
+        self.assertIn("::warning title=Android object not proven::", warned.stdout)
+
+    def test_the_guest_pass_requires_all_three_objects(self):
+        (self.sdk / "tools" / "memories-guest-ir").write_bytes(b"x")
+        for flags in ((), ("--allow-no-guest-pass",)):
+            missing = self.run_check(*flags)
+            self.assertNotEqual(missing.returncode, 0, "a pull request's flag does not excuse an SDK that has the pass")
+            self.assertIn("aarch64-translated.o was not made", missing.stdout + missing.stderr)
+        self.elf(self.mod / "rules.aarch64-translated.o", 2, 183, True)
+        done = self.run_check()
+        self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
+        self.assertNotIn("without the Android object", done.stdout)
+        self.assertNotIn("::warning", done.stdout)
+
+
 class Launcher:
     """A launcher run on a fake SDK. Subclasses say how to start it."""
     PARENT = "game (1)"      # a ")" in the way, as a browser's "(1)" copy has
@@ -417,7 +466,9 @@ class Batch(Launcher, unittest.TestCase):
         for name, data, bad in (("PYTHON", python.getvalue(), corrupt == "python"), ("LLVM", llvm_bytes, corrupt == "llvm")):
             file = self.serve / pathlib.PurePosixPath(bat_value(text, f"{name}_URL")).name
             file.write_bytes(data)
-            text = text.replace(f'set "{name}_URL={bat_value(text, name + "_URL")}"', f'set "{name}_URL={file.as_uri()}"')
+            # file:// addresses have %C3%A9 in them for a letter like é: doubled, so that the batch file does not read them as variables.
+            text = text.replace(f'set "{name}_URL={bat_value(text, name + "_URL")}"',
+                                f'set "{name}_URL={file.as_uri().replace("%", "%%")}"')
             text = text.replace(f'set "{name}_SHA256={bat_value(text, name + "_SHA256")}"',
                                 f'set "{name}_SHA256={sha256(data + (b"x" if bad else b""))}"')
         (self.sdk / "build-mod.bat").write_bytes(text.encode("utf-8"))
@@ -430,6 +481,10 @@ class Batch(Launcher, unittest.TestCase):
         self.assertTrue((toolchain / f"llvm-mingw-{PINS['llvm_mingw']['release']}" / "bin" / "clang.exe").is_file())
 
     def test_asks_for_the_folder(self):
+        if not str(self.mod).isascii():
+            # What is typed or dragged into the window reaches set /p in the console's code page:
+            # a folder like that is given as an argument (dragged onto the file) instead.
+            self.skipTest("a path with letters outside ASCII cannot be piped into set /p")
         tools, _ = self.own_tools()
         result = subprocess.run([str(self.sdk / "build-mod.bat")], env=self.environment(**tools), input=f'"{self.mod}"\n',
                                 capture_output=True, text=True, encoding="utf-8", errors="replace", cwd=self.folder, timeout=300)
@@ -481,6 +536,15 @@ class BatchInOddFolders(Batch):
     MOD = "my mod 5%% ^ & (3)"
 
 
+@unittest.skipUnless(WINDOWS, "build-mod.bat runs on Windows")
+class BatchInUnicodeFolders(Batch):
+    """Folders as test_path_layout.py makes them for CTest (letters of other alphabets, a combining
+    accent, an emoji, & ( ) % ! ^), for the SDK and the mod. The output is read as bytes the child
+    wrote, whatever Windows' code page: build_mod.py is started with -X utf8."""
+    PARENT = UNICODE_NAME
+    MOD = "règles-東京 ́ mod"
+
+
 @unittest.skipUnless(posix_shell(), "no POSIX shell")
 class Shell(Launcher, unittest.TestCase):
     downloads = 1
@@ -509,7 +573,9 @@ class Shell(Launcher, unittest.TestCase):
 
     def pathfirst(self, output):
         whole = re.search(r"^PATH=(.*)$", output, re.M).group(1).strip()
-        return re.split(r";|:(?![/\\])", whole)[0]   # ":" also separates, in a shell that is not Windows' own
+        if not WINDOWS:
+            return whole.split(":")[0]     # only what the launcher put first: the rest is the host's PATH
+        return re.split(r";|:(?![/\\])", whole)[0]   # an MSYS shell on Windows: ":" also separates, not a drive's
 
     def run_launcher(self, arguments, extra):
         environment = self.environment(**extra)
@@ -520,6 +586,10 @@ class Shell(Launcher, unittest.TestCase):
                               cwd=self.folder, timeout=300)
 
     def patch_pins(self, corrupt=None, allowed="file", unpackable=True, clang=b"#!/bin/sh\n:\n\n"):
+        if WINDOWS and not all(str(path).isascii() for path in (self.sdk, self.serve)):
+            # The shell here is Git for Windows', whose curl opens file:// paths in the ANSI code page.
+            # The script itself runs on Linux, in the Linux jobs, with these names.
+            self.skipTest("Git for Windows' curl cannot open a file:// path with letters outside ASCII")
         llvm = io.BytesIO()
         top = pathlib.PurePosixPath(PINS["llvm_mingw"]["linux"]["url"]).name[:-len(".tar.xz")]
         with tarfile.open(fileobj=llvm, mode="w:xz") as archive:
@@ -590,6 +660,13 @@ class Shell(Launcher, unittest.TestCase):
                                 encoding="utf-8", errors="replace", stdin=subprocess.DEVNULL, timeout=300)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("no mod folder given", result.stdout + result.stderr)
+
+
+@unittest.skipUnless(posix_shell(), "no POSIX shell")
+class ShellInUnicodeFolders(Shell):
+    """test_path_layout.py's folder names (CTest runs from one), for the SDK and the mod."""
+    PARENT = UNICODE_NAME
+    MOD = "r\u00e8gles-\u6771\u4eac \u0301 mod"
 
 
 if __name__ == "__main__":

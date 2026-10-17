@@ -225,7 +225,9 @@ case "$1" in
 esac
 
 status=0
-"$python" "$here/tools/build_mod.py" "$@" || status=$?
+# -X utf8: its messages hold folder names, and a Python in a "C" locale writing to a pipe would
+# stop at the first letter it lacks.
+"$python" -X utf8 "$here/tools/build_mod.py" "$@" || status=$?
 if [ "$status" -ne 0 ]; then
     echo "build-mod: tools/build_mod.py stopped (exit $status); its message is above" >&2
     exit "$status"

@@ -148,7 +148,9 @@ echo.
 goto :finish
 
 :build
-"%PYTHON%" "%SDK%\tools\build_mod.py" %ARGS%
+rem -X utf8: its messages hold folder names, and a Python writing to a pipe or a file would
+rem stop at the first letter the Windows code page lacks (a console takes any).
+"%PYTHON%" -X utf8 "%SDK%\tools\build_mod.py" %ARGS%
 set "EXITCODE=%ERRORLEVEL%"
 if "%EXITCODE%"=="0" goto :built
 echo.
@@ -216,13 +218,15 @@ set "WHAT=Python %PYTHON_VERSION% (the embeddable package, from python.org)"
 set "URL=%PYTHON_URL%"
 set "WANT=%PYTHON_SHA256%"
 set "MEGABYTES=%PYTHON_MEGABYTES%"
-for %%f in ("%PYTHON_URL%") do set "ARCHIVE=%TOOLCHAIN%\downloads\%%~nxf"
+for %%f in ("%PYTHON_URL%") do set "ARCHIVE_NAME=%%~nxf"
+set "ARCHIVE=%TOOLCHAIN%\downloads\%ARCHIVE_NAME%"
 call :get_verified
 if errorlevel 1 exit /b 1
 set "PART=%TOOLCHAIN%\.unpack-python"
 if exist "%PART%" rmdir /s /q "%PART%"
 mkdir "%PART%"
-"%TAR%" -xf "%ARCHIVE%" -C "%PART%"
+set "PART_NAME=.unpack-python"
+call :untar
 if not errorlevel 1 goto :python_unpacked
 rmdir /s /q "%PART%"
 call :unpack_failed
@@ -249,14 +253,16 @@ set "WHAT=llvm-mingw %LLVM_RELEASE% (clang, ld.lld and llvm-objcopy, from github
 set "URL=%LLVM_URL%"
 set "WANT=%LLVM_SHA256%"
 set "MEGABYTES=%LLVM_MEGABYTES%"
-for %%f in ("%LLVM_URL%") do set "ARCHIVE=%TOOLCHAIN%\downloads\%%~nxf"
+for %%f in ("%LLVM_URL%") do set "ARCHIVE_NAME=%%~nxf"
+set "ARCHIVE=%TOOLCHAIN%\downloads\%ARCHIVE_NAME%"
 call :get_verified
 if errorlevel 1 exit /b 1
 set "PART=%TOOLCHAIN%\.unpack-llvm-mingw"
 if exist "%PART%" rmdir /s /q "%PART%"
 mkdir "%PART%"
+set "PART_NAME=.unpack-llvm-mingw"
 echo build-mod: unpacking (a minute or two)
-"%TAR%" -xf "%ARCHIVE%" -C "%PART%"
+call :untar
 if not errorlevel 1 goto :llvm_unpacked
 rmdir /s /q "%PART%"
 call :unpack_failed
@@ -286,13 +292,25 @@ rmdir /s /q "%PART%"
 del "%ARCHIVE%"
 exit /b 0
 
+rem :untar: ARCHIVE_NAME from toolchain\downloads into toolchain\PART_NAME, with tar started in
+rem the toolchain folder and given plain relative names. tar.exe reads its arguments in the
+rem Windows code page: a path with letters outside it ("Jose" with an accent is fine, a Cyrillic or
+rem Japanese folder name or an emoji is not) reaches it with question marks and it cannot open
+rem the file. The folder itself is entered by cmd, which handles any name.
+:untar
+pushd "%TOOLCHAIN%"
+"%TAR%" -xf "downloads\%ARCHIVE_NAME%" -C "%PART_NAME%"
+set "TAR_RESULT=%ERRORLEVEL%"
+popd
+exit /b %TAR_RESULT%
+
 :unpack_failed
 <nul set /p "=build-mod: could not unpack %ARCHIVE%."
 echo.
-echo build-mod: tar.exe cannot read or write every folder name. If the SDK folder's path has
-echo build-mod: letters outside plain English (accents, another alphabet), or is long (Windows
-echo build-mod: stops at 260 characters), move the whole SDK folder to a short plain one, such
-echo build-mod: as C:\yfm-sdk, and run this again.
+echo build-mod: The file was checked, so it is not damaged. tar.exe may be stopped by the SDK
+echo build-mod: folder's path: very long (Windows stops at 260 characters), or not on a local
+echo build-mod: drive. Move the whole SDK folder to a short plain one, such as C:\yfm-sdk,
+echo build-mod: and run this again.
 exit /b 0
 
 :check_system

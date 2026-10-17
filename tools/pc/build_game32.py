@@ -958,7 +958,9 @@ def build_android_translated(options):
     link_android_loader(options.build, output, translated=True)
     build_mods(options.build, options.release, target="aarch64-translated")
     copy_languages(options.build, options.release)
-    build_id = write_build_identity(options.build, output, lambda kind, address: kind in "Tt")
+    # Functions and data: offsets into libgame.so (linked at 0), which crash
+    # reports and save states of another build go by (translated_state_symbols.c).
+    build_id = write_build_identity(options.build, output, lambda kind, address: kind in "TtDdBbRr")
     package_android_build(options.build, output, build_id)
 
 def source_stamp():

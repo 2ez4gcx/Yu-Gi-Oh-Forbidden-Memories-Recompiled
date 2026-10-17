@@ -1,5 +1,6 @@
 #define _DARWIN_C_SOURCE
 #define MEMORIES_TRANSLATED_MMAN_IMPLEMENTATION
+#include "translated_state_symbols.h"
 #include "pc/compat/fs.h"
 #include "translated_state_backend.h"
 #include "state_arm64.h"
@@ -235,6 +236,7 @@ static void apply(void)
     chunk = Memories_StateFindChunk(&state, "arm64-stack", &length);
     memcpy((void *)(uintptr_t)saved_entry.context.sp, chunk, length);
     Memories_NativeMemoryFree(pending_memory); pending_memory = NULL;
+    Memories_NativeSymbolsClear();
     free(pending_image); pending_image = NULL; pending_size = 0;
     /* Complete the saved VSync boundary exactly as the fixed backend does;
      * otherwise the CPU sees a stale last_vsync after restoring its turn. */
@@ -308,6 +310,17 @@ int Memories_NativeStateSave(const char *path)
     Memories_StateWrite(&state, header, sizeof(header));
     field = (MemoriesStateField){&entry, sizeof(entry)};
     Memories_StateChunk(&state, "arm64-entry", &field, 1);
+    {
+        /* This build's symbol table, so that another build can carry the
+         * state over by name (translated_state_symbols.c). */
+        size_t table_length;
+        char *table = Memories_NativeSymbolsText(&table_length);
+        if (table) {
+            field = (MemoriesStateField){table, table_length};
+            Memories_StateChunk(&state, "arm64-symbols", &field, 1);
+            free(table);
+        }
+    }
     field = (MemoriesStateField){GuestRuntime_Memory(), sizeof(MemoriesMemory)};
     Memories_StateChunk(&state, "memory", &field, 1);
     failed = Memories_NativeMemorySave(&state);
@@ -351,7 +364,9 @@ int Memories_NativeStateLoad(const char *path, char *why, size_t size)
     size_t have, at;
     const uint8_t *chunk;
     const char *reason = "invalid or unreadable ARM64 save state";
+    int other_build = 0;
     if (!boundary()) return -2;
+    Memories_NativeSymbolsClear();
     file = path ? fopen(path, "rb") : NULL;
     if (!file) goto refused;
     if (fseek(file, 0, SEEK_END) || (length = ftell(file)) < 16 || fseek(file, 0, SEEK_SET)) {
@@ -364,7 +379,7 @@ int Memories_NativeStateLoad(const char *path, char *why, size_t size)
     if (memcmp(image, "YFMSTATE", 8)) goto refused;
     memcpy(header, image + 8, sizeof(header));
     if (header[0] != STATE_VERSION) { reason = "this state uses another architecture or state format"; goto refused; }
-    if (header[1] != Memories_StateBuildId()) { reason = "this state was made with a different ARM64 build"; goto refused; }
+    other_build = header[1] != Memories_StateBuildId();
     state = (MemoriesState){1, NULL, image, (size_t)length};
     if (!Memories_StateIntegrity(&state)) { reason = "the ARM64 state is truncated or its integrity check failed"; goto refused; }
     for (at = 16; at < state.image_size;) {
@@ -377,8 +392,17 @@ int Memories_NativeStateLoad(const char *path, char *why, size_t size)
     chunk = Memories_StateFindChunk(&state, "arm64-entry", &have);
     if (!chunk || have != sizeof(saved_entry)) goto refused;
     memcpy(&saved_entry, chunk, have);
-    if (executable(&now) || memcmp(now.uuid, saved_entry.uuid, sizeof(now.uuid)) || now.image_size != saved_entry.image_size) {
-        reason = "this state was made with a different ARM64 executable"; goto refused;
+    if (executable(&now)) goto refused;
+    if (memcmp(now.uuid, saved_entry.uuid, sizeof(now.uuid)) || now.image_size != saved_entry.image_size) other_build = 1;
+    if (other_build) {
+        /* Another build (an update): carried by the two symbol tables,
+         * or refused as before. */
+        chunk = Memories_StateFindChunk(&state, "arm64-symbols", &have);
+        if (!chunk || Memories_NativeSymbolsPrepare(chunk, have, saved_entry.image_size, now.image_size)) {
+            reason = "this state was made with a different build of the game, and one of the two has no symbol "
+                     "table to carry it over with";
+            goto refused;
+        }
     }
     if (saved_entry.stack_size != STACK_SIZE || saved_entry.context.sp < saved_entry.stack_base ||
         saved_entry.context.sp - saved_entry.stack_base >= STACK_SIZE || (saved_entry.context.sp & 15)) goto refused;
@@ -389,13 +413,28 @@ int Memories_NativeStateLoad(const char *path, char *why, size_t size)
     if (!Memories_StateCompatibleMods(&state)) { reason = "this state has different mods"; goto refused; }
     if (!Memories_StateCompatibleLanguage(&state, path, why, size)) { free(image); return -1; }
     pending_memory = Memories_NativeMemoryPrepare(&state, why, size);
-    if (!pending_memory) { free(image); return -1; }
+    if (!pending_memory) { Memories_NativeSymbolsClear(); free(image); return -1; }
+    if (other_build) {
+        size_t missing = Memories_NativeSymbolsScan(image + 16, state.image_size - 16, saved_entry.image_base,
+                                                    saved_entry.image_size);
+        if (missing) {
+            Memories_NativeMemoryFree(pending_memory); pending_memory = NULL;
+            Memories_NativeSymbolsClear();
+            free(image);
+            if (why && size)
+                snprintf(why, size, "this state was made with another build of the game, and %u of its addresses "
+                         "into the game are in code or data that changed since", (unsigned)missing);
+            return -1;
+        }
+        fprintf(stderr, "memories-pc: ARM64 state from another build: carried over by its symbol table\n");
+    }
     pending_image = image;
     pending_size = state.image_size;
     last_slot = Memories_StateSlotFromPath(path);
     fprintf(stderr, "memories-pc: ARM64 state loading: %s\n", path);
     Memories_Arm64Restore(&service, 2);
 refused:
+    Memories_NativeSymbolsClear();
     free(image);
     if (why && size) snprintf(why, size, "%s", reason);
     return -1;

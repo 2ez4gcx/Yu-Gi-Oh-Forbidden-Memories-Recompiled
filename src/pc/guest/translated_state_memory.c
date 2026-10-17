@@ -2,6 +2,7 @@
 #ifndef _DARWIN_C_SOURCE
 #define _DARWIN_C_SOURCE
 #endif
+#include "translated_state_symbols.h"
 #include "translated_state_memory.h"
 #include "translated_runtime.h"
 #include "state_io.h"
@@ -206,7 +207,13 @@ void Memories_NativeMemoryRelocate(MemoriesNativeMemoryState *pending, void *dat
         uint64_t word, relocated;
         memcpy(&word, bytes + offset, sizeof(word));
         relocated = word;
-        if (word >= old_image && word - old_image < image_size) relocated = new_image + (word - old_image);
+        if (word >= old_image && word - old_image < image_size) {
+            /* Another build's state: by the two symbol tables (checked
+             * whole before the load, Memories_NativeSymbolsScan). */
+            uint64_t mapped = word - old_image;
+            if (!Memories_NativeSymbolsActive() || !Memories_NativeSymbolsMap(word - old_image, &mapped))
+                relocated = new_image + mapped;
+        }
         else if (pending->count && word >= pending->relocations[0].host) {
             /* Upper bound selects the owning region at a shared endpoint.
              * In a gap, the preceding region may own a one-past iterator.

@@ -4,6 +4,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef MEMORIES_TRANSLATED
+#include "pc/guest/translated_state_symbols.h"
+#endif
 
 typedef struct RuntimeSymbol {
     uintptr_t address, size;
@@ -18,14 +21,21 @@ int Symbols_Load(void)
     char path[640];
     FILE *file;
     size_t room = 0;
+    uintptr_t base = 0;
     if (Memories_SymbolTablePath(path, sizeof(path))) return -1;
+#ifdef MEMORIES_TRANSLATED
+    /* The translated game's table holds offsets into its image
+     * (state_translated.c): add where it is loaded. */
+    base = Memories_NativeImageBase();
+    if (!base) return -1;
+#endif
     file = fopen(path, "r");
     if (!file) return -1;
     while (!feof(file)) {
         RuntimeSymbol symbol;
         unsigned address, size;
         if (fscanf(file, "%x %x %71s", &address, &size, symbol.name) != 3) break;
-        symbol.address = address;
+        symbol.address = base + address;
         symbol.size = size;
         if (symbol_count == room) {
             RuntimeSymbol *grown;

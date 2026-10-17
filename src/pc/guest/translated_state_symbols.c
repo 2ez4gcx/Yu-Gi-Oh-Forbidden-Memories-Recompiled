@@ -15,8 +15,8 @@
  *
  * Data of the game's guest memory is guest-addressed and needs none of
  * this; the native regions are matched by their guest tokens
- * (translated_state_memory.c). */
-#ifdef MEMORIES_TRANSLATED
+ * (translated_state_memory.c). Built in every game (it needs nothing of the
+ * translated one) and used by the translated one only. */
 #include "translated_state_symbols.h"
 #include "state.h"
 #include <stdio.h>
@@ -222,6 +222,3 @@ size_t Memories_NativeSymbolsScan(const uint8_t *data, size_t size, uint64_t old
     }
     return missing;
 }
-#else
-typedef int MemoriesTranslatedStateSymbolsUnit;   /* fixed-memory builds: an empty unit is not C */
-#endif

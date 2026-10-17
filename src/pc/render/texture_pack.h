@@ -96,10 +96,12 @@ enum { TEXTURE_BANK_OWNER_STARS = 1, TEXTURE_BANK_OWNER_LAYOUT_FRAME, TEXTURE_BA
        TEXTURE_BANK_OWNER_LAYOUT_BACK };
 void TexturePack_BankSpritesUseOwner(unsigned owner);
 void TexturePack_BankSpritesClear(unsigned owner);
-/* Drops the decoded copy of `file` the bank sprites kept (or its cached failure)
- * when no sprite shows it any more, so a PNG changed on disk is read again.
- * One a sprite still shows is left alone. */
-void TexturePack_BankImageForget(const char *file);
+/* Drops every decoded PNG (and cached failure) the bank sprites kept that no
+ * sprite shows any more -- the spares BANK_SPARE keeps for a picture soon
+ * wanted again, however they came to be unused -- so a PNG changed on disk is
+ * read again when next placed.  Images a sprite still shows are left alone,
+ * so clear the owners' sprites first. */
+void TexturePack_BankImagesForgetSpare(void);
 
 /* For a renderer that samples the pack's images itself, at their own
  * resolution (gl_picture.c). The entry (its index + 1) whose image replaces

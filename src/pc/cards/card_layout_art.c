@@ -782,41 +782,31 @@ static void layout_bank_registrations_lost(void)
  * are read once and the path says nothing of the file's content, so a mod
  * turned off and on with its PNGs edited in between (or another mod's under the
  * same path) would go on drawing what was read first.  Drops the decoded
- * pixels, the bank's "stored" bookkeeping, the HD registrations and the texture
- * pack's own decoded copies of the PNGs; the next draw reads them again.
- * Nothing is read here and the bank's texels stay until a draw writes over
- * them. */
+ * pixels, the bank's "stored" bookkeeping, the HD registrations and every
+ * decoded PNG the texture pack keeps unused -- not only those still named here:
+ * a back, a digit strip or a sprite evicted earlier waits there as a spare, and
+ * would come back stale by its path.  The next draw reads them again.  Nothing
+ * is read here and the bank's texels stay until a draw writes over them. */
 void CardLayoutArt_Clear(void)
 {
     int i, j;
-    const char *file;
 
     TexturePack_BankSpritesClear(TEXTURE_BANK_OWNER_LAYOUT_FRAME);
     TexturePack_BankSpritesClear(TEXTURE_BANK_OWNER_LAYOUT_DIGITS);
     TexturePack_BankSpritesClear(TEXTURE_BANK_OWNER_LAYOUT_BACK);
-    for (i = 0; i < FRAME_CACHE; i++) {
-        if (images[i].used) TexturePack_BankImageForget(images[i].path);
-        free(images[i].indices);
-    }
+    TexturePack_BankImagesForgetSpare();
+    for (i = 0; i < FRAME_CACHE; i++) free(images[i].indices);
     memset(images, 0, sizeof(images));
     memset(slots, 0, sizeof(slots));
     for (i = 0; i < (int)(sizeof(small_kinds) / sizeof(small_kinds[0])); i++) {
-        for (j = 0; j < small_kinds[i]->count; j++) {
-            SmallSlot *slot = &small_kinds[i]->slots[j];
-            if (slot->used) TexturePack_BankImageForget(slot->path);
-            free(slot->indices);
-        }
+        for (j = 0; j < small_kinds[i]->count; j++) free(small_kinds[i]->slots[j].indices);
         memset(small_kinds[i]->slots, 0, (size_t)small_kinds[i]->count * sizeof(SmallSlot));
     }
-    /* back_path is "<w>x<h>:<file>"; the size has no ':' in it. */
-    file = back_path[0] ? strchr(back_path, ':') : NULL;
-    if (file) TexturePack_BankImageForget(file + 1);
     free(back_indices);
     back_indices = NULL;
     back_path[0] = 0;
     back_bank_path[0] = 0;
     back_png_w = back_png_h = 0;
-    if (digits_path[0]) TexturePack_BankImageForget(digits_path);
     free(digits_indices);
     digits_indices = NULL;
     digits_path[0] = 0;

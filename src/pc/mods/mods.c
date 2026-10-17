@@ -1747,7 +1747,7 @@ static void activate_once(int index, int on)
 {
     Mod *mod = &mods[index];
     if (on == mod->active) return;
-    change_count++;
+    change_count++;   /* before it can fail: a rollback is a change too */
     if (on) {
         int option_count = Mods_OptionCount(index);
         if (option_count && !mod->runtime_options) {

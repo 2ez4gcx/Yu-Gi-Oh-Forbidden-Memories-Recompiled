@@ -194,11 +194,61 @@ static void pictures_are_read_again_after_a_mod_change(void)
     assert(hand_color() == 0x0000ff && index_reads == 2);
 }
 
+/* A back the texture pack keeps only as a spare (a style left for another) is
+ * read again too, though nothing in card_layout_art.c names it any more. */
+static void a_spare_back_is_read_again(void)
+{
+    CardLayoutArt_Clear();
+    write_color_png("a.png", 255, 0, 0);
+    write_color_png("b.png", 0, 255, 0);
+    draw_back("a.png", 140, 196);
+    assert(back_color(0, 0) == 0xff0000);
+    draw_back("b.png", 60, 80);
+    assert(back_color(0, 0) == 0x00ff00);
+    write_color_png("a.png", 0, 0, 255);   /* edited while the mod was off */
+    mod_changes += 2;
+    draw_back("a.png", 140, 196);
+    assert(back_color(0, 0) == 0x0000ff);
+}
+
+static long field_color(const char *name)
+{
+    int tpage, u, v, clut, w, h, entry, slot;
+    const unsigned char *pixels;
+    char file[1024];
+    path_of(file, name);
+    assert(small_cell(&field_kind, file, &tpage, &u, &v, &clut, &w, &h));
+    for (slot = 0; slot < field_kind.count && strcmp(field_slots[slot].path, file); slot++) continue;
+    assert(slot < field_kind.count);
+    entry = TexturePack_BankEntryFor(FRAME_BANK, field_cells[slot][0] & ~63, field_cells[slot][1] & ~255, 1,
+                                     SMALL_CLUT_X, field_cells[slot][2], u, v);
+    if (!entry || !TexturePack_BankEntryLevel(entry, 0, &pixels, &w, &h)) return -1;
+    return (long)pixels[0] << 16 | pixels[1] << 8 | pixels[2];
+}
+
+/* A small picture pushed out of its kind's slots is a spare too. */
+static void an_evicted_small_picture_is_read_again(void)
+{
+    char name[32];
+    int i;
+    CardLayoutArt_Clear();
+    for (i = 0; i < field_kind.count + 1; i++) {   /* one file more than slots: f0 goes */
+        snprintf(name, sizeof(name), "f%d.png", i);
+        write_color_png(name, 255, 0, 0);
+        assert(field_color(name) == 0xff0000);
+    }
+    write_color_png("f0.png", 0, 0, 255);
+    mod_changes += 2;
+    assert(field_color("f0.png") == 0x0000ff);
+}
+
 int main(void)
 {
     assert(scratch_dir(root, sizeof(root), "memories-card-layout-art"));
     back_follows_its_style();
     pictures_are_read_again_after_a_mod_change();
+    a_spare_back_is_read_again();
+    an_evicted_small_picture_is_read_again();
     CardLayoutArt_Clear();
     TexturePack_Unload();
     puts("card layout art tests passed");

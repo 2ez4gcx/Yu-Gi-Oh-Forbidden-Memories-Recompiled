@@ -1268,9 +1268,12 @@ nothing of the file behind it. Turning a mod off and on again in the Mods
 window (Apply each time: an Apply that changes nothing is not a reload)
 drops everything `card_layout_art.c` kept of them -- the decoded frames, the
 hand/field/back/Library/caption sprites, the digit strip and the texture
-pack's own decoded copy of each PNG -- and the next draw reads the files
+pack's decoded PNGs it kept unused, spares of earlier styles included
+(`TexturePack_BankImagesForgetSpare`) -- and the next draw reads the files
 again (`CardLayoutArt_Clear`, which every cell function runs by itself when
-`Mods_Changes` has moved). So editing `frames/*.png` in place and switching
+`Mods_Changes` has moved). Turning *any* mod on or off counts, not only a
+`card_layout` one, and resets these caches once; the next hand or duel after
+it decodes the styles on screen again, a one-time hitch. So editing `frames/*.png` in place and switching
 the mod off and on shows the new pictures with no restart; editing them
 while the mod stays on shows them at the next launch or reload, and with no
 `card_layout` mod nothing is ever dropped. The card viewer's `back_image`

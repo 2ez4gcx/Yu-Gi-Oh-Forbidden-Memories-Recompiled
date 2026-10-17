@@ -46,6 +46,8 @@ jobs:
       # Whether the repository has a VirusTotal key; the key itself is
       # handed only to the step that uses it.
       VT_ENABLED: ${{ secrets.VT_API_KEY != '' }}
+      # Whether the sdk-guest-ir job built this system's guest pass.
+      GUEST_IR_BUILT: ${{ needs.sdk-guest-ir.outputs[format('built-{0}', matrix.system)] }}
     defaults:
       run:
         shell: bash
@@ -102,28 +104,45 @@ jobs:
         with:
           name: sdk-exports-x86_64-windows
           path: tmp/sdk-exports/win64
+      # The guest pass of this system. The sdk-guest-ir job did not build one
+      # only for a pull request that touches nothing it is made of while the
+      # LLVM cache (filled by master) is cold: that run packs SDKs without
+      # the pass (--no-guest-ir) and tests them as such. Any other run
+      # without it stops here: a release never ships an SDK that cannot
+      # build the Android object.
       - uses: actions/download-artifact@v4
+        if: env.GUEST_IR_BUILT == 'true'
         with:
           name: sdk-guest-ir-${{ matrix.system }}
           path: tmp/sdk-guest-ir
+      - name: Guest pass for the SDK
+        run: |
+          if [ "$GUEST_IR_BUILT" = true ]; then
+            echo "GUEST_IR_ARGS=--guest-ir tmp/sdk-guest-ir/memories-guest-ir${{ matrix.system == 'windows' && '.exe' || '' }}" >> "$GITHUB_ENV"
+          elif [ "$GITHUB_EVENT_NAME" = pull_request ]; then
+            echo "::notice title=SDK guest pass::not built in this pull request (it touches none of its inputs and master's LLVM cache is cold): the SDKs are packed without it"
+            echo "GUEST_IR_ARGS=--no-guest-ir" >> "$GITHUB_ENV"
+          else
+            echo "::error title=SDK guest pass::the sdk-guest-ir job built no guest pass, and a release SDK carries one"
+            exit 1
+          fi
       - name: Build and package
         run: >-
           python tools/pc/package.py "${{ matrix.system }}" --skip-smoke --version "$PACKAGE_VERSION"
           --exports-from tmp/sdk-exports/android-arm64-v8a --exports-from tmp/sdk-exports/win64
-          --guest-ir "tmp/sdk-guest-ir/memories-guest-ir${{ matrix.system == 'windows' && '.exe' || '' }}"
+          $GUEST_IR_ARGS
       - name: Test archive structure
-        run: python tools/pc/test_package.py --archives dist
+        run: python tools/pc/test_package.py --archives dist $([ "$GUEST_IR_ARGS" = --no-guest-ir ] && echo --no-guest-ir)
       # What a modder does with the SDK alone: unpack it and build a bundled
       # code mod for Android with its own llvm-mingw clang and guest pass (no
       # NDK, no checkout's pass). The IR from clang (*.raw.ll) and from the
       # pass (*.ll) is kept: diff it against sdk-mod-ir-llvm21 (the same mod
       # through the game's own LLVM 21 pass, the android job).
       - name: Android code mod from the packed SDK
-        run: |
-          archive=$(ls "dist/yfm-redecomp-$PACKAGE_VERSION-${{ matrix.system }}".zip "dist/yfm-redecomp-$PACKAGE_VERSION-${{ matrix.system }}".tar.gz 2>/dev/null | head -n 1)
-          python tools/pc/check_sdk_mod.py "$archive" --ir-out tmp/sdk-mod-ir
+        if: env.GUEST_IR_BUILT == 'true'
+        run: python tools/pc/check_sdk_mod.py "dist/yfm-redecomp-$PACKAGE_VERSION-${{ matrix.system }}.${{ matrix.system == 'windows' && 'zip' || 'tar.gz' }}" --ir-out tmp/sdk-mod-ir
       - name: Upload the SDK pass's IR
-        if: always()
+        if: always() && env.GUEST_IR_BUILT == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: sdk-mod-ir-${{ matrix.system }}
@@ -169,7 +188,7 @@ jobs:
       - name: VirusTotal
         if: runner.os == 'Windows' && (github.ref_type == 'tag' || github.event_name == 'workflow_dispatch') && env.VT_ENABLED == 'true'
         continue-on-error: true
-        timeout-minutes: 30
+        timeout-minutes: 45
         env:
           VT_API_KEY: ${{ secrets.VT_API_KEY }}
           VT_MAX_DETECTIONS: "2"
@@ -179,7 +198,9 @@ jobs:
           version = os.environ["PACKAGE_VERSION"]
           target = os.path.join(os.environ["RUNNER_TEMP"], "vt")
           os.makedirs(target, exist_ok=True)
+          # The guest pass is in the SDK (sdk/tools/): a program of the archive as much as the game.
           for archive, name in ((f"dist/yfm-redecomp-{version}-windows.zip", "/memories-pc.exe"),
+                                (f"dist/yfm-redecomp-{version}-windows.zip", "/memories-guest-ir.exe"),
                                 (f"dist/fm-editor-{version}-windows.zip", "/fm-editor.exe")):
               with zipfile.ZipFile(archive) as package:
                   member = next(entry for entry in package.namelist() if entry.endswith(name))
@@ -187,11 +208,11 @@ jobs:
                       handle.write(package.read(member))
           EOF
           status=0
-          # --timeout 600: two new files' analyses still leave the step's
-          # 30 minutes room to write the summary.
+          # --timeout 600: three new files' analyses still leave the step's
+          # 45 minutes room to write the summary.
           python tools/pc/vt_check.py --max "$VT_MAX_DETECTIONS" --timeout 600 \
-            --markdown "$RUNNER_TEMP/vt.md" --label memories-pc.exe --label fm-editor.exe \
-            "$RUNNER_TEMP/vt/memories-pc.exe" "$RUNNER_TEMP/vt/fm-editor.exe" || status=$?
+            --markdown "$RUNNER_TEMP/vt.md" --label memories-pc.exe --label memories-guest-ir.exe --label fm-editor.exe \
+            "$RUNNER_TEMP/vt/memories-pc.exe" "$RUNNER_TEMP/vt/memories-guest-ir.exe" "$RUNNER_TEMP/vt/fm-editor.exe" || status=$?
           {
             echo "### VirusTotal ($PACKAGE_VERSION)"
             echo
@@ -253,10 +274,22 @@ jobs:
   # distribution). Windows: the official Windows archive is built for the MSVC
   # C++ ABI, which llvm-mingw cannot link, so the three libraries the pass
   # needs are built from the official source release with llvm-mingw itself.
-  # The unpacked or built LLVM is cached by the pin; the job fails, saying
-  # what is missing, if the archive lacks the headers or libraries, or if
-  # sdk_llvm.json has no sha256 yet (`python tools/pc/build_sdk_guest_ir.py
-  # --pin`).
+  #
+  # The LLVM is the expensive part (a Windows build is up to an hour on a
+  # runner, the Linux archive 2 GB to fetch), so it is cached under a key of
+  # what it is made of (the pin, fetch_tools.py, the script), saved by its
+  # own step as soon as it is built: a failure in the link or the checks
+  # after it keeps the work (actions/cache saves only after a successful job).
+  # A pull request must not pay for it: caches saved by master are readable
+  # by pull requests, so a run there takes the cache when it exists (linking
+  # the pass takes a minute), and builds the LLVM only when the pull request
+  # touches what the pass is made of (this job's paths below). Otherwise,
+  # with no cache yet (master has not run since the pin changed), it builds
+  # nothing and the package job packs without the pass (--no-guest-ir, which
+  # test_package.py then expects). Pushes, tags and manual runs always build.
+  # The job stops, saying what is missing, if the archive lacks the headers
+  # or libraries, or if sdk_llvm.json has no sha256 (`python
+  # tools/pc/build_sdk_guest_ir.py --pin`).
   sdk-guest-ir:
     if: github.event_name != 'workflow_dispatch' || inputs.platform != 'macos-arm64'
     strategy:
@@ -269,34 +302,87 @@ jobs:
             runner: windows-2022
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 120
+    # One output a system (a matrix job's outputs would overwrite each other).
+    outputs:
+      built-linux: ${{ steps.done.outputs.built-linux }}
+      built-windows: ${{ steps.done.outputs.built-windows }}
     defaults:
       run:
         shell: bash
     steps:
+      # Two commits: a pull request's merge commit and the base it merges into.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      # libz.a and libzstd.a: the pass links statically.
-      - name: Linux build tools
-        if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install --yes --no-install-recommends zlib1g-dev libzstd-dev
-      - name: Cache the LLVM the pass is built against
-        uses: actions/cache@v4
+      - name: Does this run touch what the pass is made of
+        id: scope
+        run: |
+          touched=true
+          if [ "$GITHUB_EVENT_NAME" = pull_request ] && ! git diff --name-only HEAD^1 HEAD | grep -Eq '^(tools/pc/llvm/|tools/pc/build_sdk_guest_ir\.py$|tools/pc/sdk_llvm\.json$|tools/pc/fetch_tools\.py$|src/pc/memory_map\.h$)'; then
+            touched=false
+          fi
+          echo "touched=$touched" >> "$GITHUB_OUTPUT"
+      - name: Restore the LLVM the pass is built against
+        id: llvm
+        uses: actions/cache/restore@v4
         with:
           path: |
             tmp/pc/sdk-llvm
             tmp/pc/tools/llvm-mingw
-          key: sdk-llvm-${{ runner.os }}-${{ hashFiles('tools/pc/sdk_llvm.json', 'tools/pc/fetch_tools.py') }}
+          key: sdk-llvm-${{ runner.os }}-${{ hashFiles('tools/pc/sdk_llvm.json', 'tools/pc/fetch_tools.py', 'tools/pc/build_sdk_guest_ir.py') }}
+      - name: Plan
+        id: plan
+        run: |
+          if [ "${{ steps.llvm.outputs.cache-hit }}" = true ] || [ "${{ steps.scope.outputs.touched }}" = true ]; then
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "build=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=SDK guest pass::not built: this pull request touches none of its inputs and master's LLVM cache is not there yet"
+          fi
+      # libz.a, libzstd.a and libtinfo.a: the pass links statically.
+      - name: Linux build tools
+        if: steps.plan.outputs.build == 'true' && runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install --yes --no-install-recommends zlib1g-dev libzstd-dev libncurses-dev
+      - name: Archive version
+        if: steps.plan.outputs.build == 'true'
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          if [ "$REF_TYPE" = tag ]; then
+            echo "PACKAGE_VERSION=$REF_NAME" >> "$GITHUB_ENV"
+          else
+            echo "PACKAGE_VERSION=dev-${GITHUB_SHA:0:12}" >> "$GITHUB_ENV"
+          fi
+      - name: Get the LLVM libraries
+        if: steps.plan.outputs.build == 'true'
+        run: python tools/pc/build_sdk_guest_ir.py --llvm-only --jobs 4
+      - name: Save the LLVM libraries
+        if: steps.plan.outputs.build == 'true' && steps.llvm.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            tmp/pc/sdk-llvm
+            tmp/pc/tools/llvm-mingw
+          key: ${{ steps.llvm.outputs.cache-primary-key }}
       - name: Build the guest pass
-        run: python tools/pc/build_sdk_guest_ir.py --out tmp/pc/sdk-guest-ir --jobs 4
+        if: steps.plan.outputs.build == 'true'
+        run: MEMORIES_VERSION="$PACKAGE_VERSION" python tools/pc/build_sdk_guest_ir.py --out tmp/pc/sdk-guest-ir --jobs 4
       - name: Upload the guest pass
+        if: steps.plan.outputs.build == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: sdk-guest-ir-${{ matrix.system }}
           path: tmp/pc/sdk-guest-ir/memories-guest-ir*
           if-no-files-found: error
           retention-days: 14
+      - name: Built
+        id: done
+        if: steps.plan.outputs.build == 'true'
+        run: echo "built-${{ matrix.system }}=true" >> "$GITHUB_OUTPUT"
 
   # The 64-bit Windows game's export list for the SDKs (not a package of its
   # own): sdk/exports.x86_64-windows.txt and the tree it was built from.

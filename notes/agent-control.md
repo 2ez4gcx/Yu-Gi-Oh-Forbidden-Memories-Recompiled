@@ -191,12 +191,15 @@ build with the old combination; the eight smoke cases unchanged.
     units define, the small data (`.sdata`, `.sbss`: `gGraphics_sViewportX`)
     among them: those are in the executable's `game_data`/`game_bss`, not at
     the retail address of `config/pc/guest_addresses.txt`, which only a
-    *pinned* global (one the units leave undefined) has. The range is the
+    *pinned* global (one the units leave undefined) has; so are the modules'
+    (`ovl_*`: `gCampaignMap_Location`) and those native code defines
+    (`gRand_dwSeed`). A pinned name answers `err NAME is pinned at retail
+    address ADDR`: the client then peeks and pokes ADDR. The range is the
     variable's own: a peek or poke past its end is `err` (never the next
-    variable), a name the build does not have is `err no variable NAME in this
-    build`, a build without a variable table `err no variable table`. A
-    recording keeps the line with the name, so a replay finds the variable in
-    any build.
+    variable), a name the build neither defines nor pins is `err no variable
+    NAME in this build`, a build without a variable table `err no variable
+    table`. A recording keeps the line with the name, so a replay finds the
+    variable in any build.
   - `save PATH`; `load PATH` resumes the state and answers at the next stop,
     one frame into it (`ok frame F vblank V`), or `err` with the reason
     (no notice on screen). The frame count is the run's own and is not in a
@@ -421,16 +424,27 @@ CI can hold retail inputs.
   `.data`: `gGraphics_sViewportX`, `D_800907D8`) is in the executable at an
   address of the build's own, and its retail address reads the guest RAM
   beside it (0, with the Deck on screen; a poke there did nothing). The
-  build writes those to `symbols/<build id>.vars.txt` (`address size name`,
-  every data and bss symbol between the `game_data`/`game_bss` markers, on
-  every target; a separate file, since the table state relocation reads
-  would have to find them in the same place in two builds), and the client
-  (`Game.locate`) asks the game first with `peek @NAME 1`: the game answers
-  from that file, and only a name it does not know falls back to the retail
-  table. A name neither has is a `KeyError`; a game with no variable table
-  (an Android APK does not carry the file) a `ControlError` naming the
-  variable, not a guess. Module-owned (`ovl_*`) variables are not in the
-  file and resolve by retail address as before.
+  build writes those to `symbols/<build id>.vars.txt` on every target: one
+  `address size name` line for every variable it defines that a client may
+  name (every data and bss symbol between the `game_data`, `game_bss` and
+  `ovl_*` markers, and the ones the retail table names that native code or
+  read-only data defines outside them) and one `address 0 name pinned` line
+  for each global it pins to its retail guest address. It is a separate file,
+  since the table state relocation reads would have to find the variables in
+  the same place in two builds. The client (`Game.locate`) asks the game with
+  `peek @NAME 1`: a defined name is then read in the process, a pinned one
+  at the retail address the game gives (so the retail table is not
+  consulted), and any other name is a `KeyError`; a game with no variable
+  table is a `ControlError` naming the variable, not a guess, and a name
+  with a `+` or other characters a C name does not have a `ValueError` (the
+  offset is `peek`'s argument). An executable too old to be asked (it
+  answers `usage`) gets the retail table, with a warning on stderr that says
+  it is wrong for small data. The file is shipped with the build: in the
+  desktop package (`symbols/`), in the APK (`build/symbols/<id>.vars.txt`,
+  unpacked by `android.c`) and by `tools/pc/android/device_run.py`. The
+  translated ARM64 backend has no table (`Memories_SymbolTablePath` in
+  `state_translated.c` always fails), so by name it raises until that backend
+  writes and loads its own.
   `tests/pc/control_small_data_runtime.py` is the gate.
 - **`state()`:** the mode (and its flags), the opponent
   (`gDuel_bOpponentID`), the starchips, the deck (`gDuel_awPlayerDeck`),

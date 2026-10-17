@@ -287,29 +287,43 @@ def run(command):
         sys.exit(f"{' '.join(command[:6])} ...\n{result.stderr}")
     return result.stdout
 
-def variable_table(rows):
-    """The "address size name" lines of the game's variables, from nm's rows
-    (address, size, type, C name): those in game_data and game_bss, between
-    the markers the link provides. PE symbols carry no sizes: a variable runs
-    to the next one, or to the end of its section."""
+def variable_table(rows, pinned, addresses):
+    """The lines of symbols/<id>.vars.txt (src/pc/debug/symbols.c): every
+    variable the build defines that a client may name, "address size name",
+    and every one it pins to its retail guest address, "address 0 name pinned".
+    The defined ones are those in game_data and game_bss and the modules'
+    ovl_* sections (between the markers the link provides: all of the small
+    data) and those the retail table names (`addresses`) that native code or
+    read-only data defines elsewhere (gRand_dwSeed). `rows` are nm's:
+    (address, size, type, C name). PE symbols carry no sizes: a variable runs
+    to the next higher address, or to the end of its section, and names at the
+    same address share the extent."""
+    import bisect
     by_name = {name: address for address, _, _, name in rows}
-    variables, seen = [], {}
-    for section in ("game_data", "game_bss"):
-        start, stop = by_name.get(f"__start_{section}"), by_name.get(f"__stop_{section}")
-        if start is None or stop is None:
-            continue
-        inside = sorted(row for row in rows if row[2] in "DdBb" and start <= row[0] < stop
-                        and not row[3].startswith(("__start_", "__stop_")))
-        ends, next_address = [], stop
-        for address, _, _, _ in reversed(inside):   # the next higher address, for each
-            ends.append(next_address)
-            if address < next_address:
-                next_address = address
-        for (address, size, _, name), end in zip(inside, reversed(ends)):
-            size = size or end - address
-            seen[name] = seen.get(name, 0) + 1
-            variables.append(f"{address:08x} {size:08x} {name if seen[name] == 1 else f'{name}#{seen[name]}'}\n")
-    return variables
+    ranges = [(by_name[name], by_name["__stop_" + name[len("__start_"):]]) for name in sorted(by_name)
+              if name.startswith(("__start_game_data", "__start_game_bss", "__start_ovl_"))
+              and "__stop_" + name[len("__start_"):] in by_name]
+    every = sorted({row[0] for row in rows})
+    variables, taken = [], set()
+    def add(address, size, name, limit):
+        if not size:
+            above = bisect.bisect_right(every, address)
+            size = min(every[above] if above < len(every) else limit, limit) - address
+        variables.append((address, size, name))
+        taken.add((address, name))
+    for start, stop in ranges:
+        for address, size, kind, name in rows:
+            if kind in "DdBb" and start <= address < stop and not name.startswith(("__start_", "__stop_")):
+                add(address, size, name, stop)
+    for address, size, kind, name in rows:
+        if kind in "DdBbRr" and name in addresses and (address, name) not in taken:
+            add(address, size, name, 0xFFFFFFFF)
+    lines, seen = [], {}
+    for address, size, name in sorted(variables):
+        seen[name] = seen.get(name, 0) + 1
+        lines.append(f"{address:08x} {size:08x} {name if seen[name] == 1 else f'{name}#{seen[name]}'}\n")
+    lines += [f"{address:08x} 00000000 {name} pinned\n" for name, address in sorted(pinned.items())]
+    return lines
 
 def flags_changed(path, flags):
     """When these flags were last different: path keeps them, rewritten
@@ -1424,7 +1438,7 @@ def main():
         parts = line.split()
         if len(parts) == 4 and c_name(parts[3]):
             nm_rows.append((int(parts[0], 16), int(parts[1], 16), parts[2], c_name(parts[3])))
-        elif len(parts) == 3 and parts[2].startswith(("__start_game_", "__stop_game_")):   # the link's markers: no size
+        elif len(parts) == 3 and parts[2].startswith(("__start_game_", "__stop_game_", "__start_ovl_", "__stop_ovl_")):   # the link's markers: no size
             nm_rows.append((int(parts[0], 16), 0, parts[1], parts[2]))
         if len(parts) != 4 or not c_name(parts[3]):
             continue
@@ -1458,7 +1472,7 @@ def main():
     # above, whose hash is the build id and whose data entries a state
     # carried between builds must find in the same place.
     with open(f"{options.build}/symbols/{build_id}.vars.txt", "w") as handle:
-        handle.writelines(variable_table(nm_rows))
+        handle.writelines(variable_table(nm_rows, pinned, addresses))
     with open(f"{options.build}/buildid", "w") as handle:
         handle.write(build_id + "\n")
     # The commit, for crash reports (src/pc/debug/monitor.c): "unknown" in
@@ -1480,7 +1494,8 @@ def main():
         # which android.c unpacks into the program directory.
         import package_android
         assets = {"build/buildid": f"{options.build}/buildid", "build/commit": f"{options.build}/commit",
-                  f"build/symbols/{build_id}.txt": f"{options.build}/symbols/{build_id}.txt"}
+                  f"build/symbols/{build_id}.txt": f"{options.build}/symbols/{build_id}.txt",
+                  f"build/symbols/{build_id}.vars.txt": f"{options.build}/symbols/{build_id}.vars.txt"}
         assets.update(package_android.program_files(options.build, ("mods", "languages")))
         if ANDROID_ABI in ANDROID_PACKAGED:
             package_android.package(options.build, ANDROID_ABI, f"{options.build}/libmain.so", output, assets)

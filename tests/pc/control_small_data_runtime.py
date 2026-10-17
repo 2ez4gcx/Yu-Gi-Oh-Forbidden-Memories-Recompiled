@@ -17,7 +17,11 @@ and the view slides between them by gGraphics_sViewportX, 0 on the Chest and
   * a read or write past the variable's end is an error, not the next
     variable, and a name nothing knows is a KeyError;
   * a pinned global (D_8009B26C, the mode) still reads by name as at its
-    retail address.
+    retail address, which the game's table gives;
+  * a variable native code defines outside game_data (gRand_dwSeed, which
+    runs on after a poke) and a module's (gCampaignMap_Location, an ovl_*
+    section) are found in the process, not at their retail addresses;
+  * a name with an offset in it ("gFoo+4") is refused, not sent.
 An executable from before the fix reads 0 on the Deck and fails these. It
 needs the disc, so it is a local gate like the replays (notes/agent-control.md).
 
@@ -90,6 +94,20 @@ def main() -> int:
         check("a write past the variable's end is an error",
               raises(ControlError, lambda: game.poke("gGraphics_sViewportX", bytes(3))))
         check("a name nothing knows is a KeyError", raises(KeyError, lambda: game.peek("gNoSuchVariable", 1)))
+        check("a name with an offset in it is refused, not sent", raises(ValueError, lambda: game.peek("gFoo+4", 1)))
+        # A variable the native code defines, outside game_data: the live one
+        # runs on after a poke, and the retail address it is listed at does not.
+        game.poke("gRand_dwSeed", (1234).to_bytes(4, "little"))
+        game.step(30)
+        check("a variable native code defines (gRand_dwSeed) is the live one",
+              game.u32("gRand_dwSeed") != 1234 and isinstance(game.locate("gRand_dwSeed"), str))
+        # A module's variable (an ovl_* section): in the process as well.
+        game.poke("gCampaignMap_Location", bytes([9]))
+        check("a module's variable (gCampaignMap_Location) is in the process, not at its retail address",
+              isinstance(game.locate("gCampaignMap_Location"), str) and game.u8("gCampaignMap_Location") == 9
+              and game.peek(0x8016960C, 1) != bytes([9]))
+        check("a pinned global is at the retail address the build gives",
+              game.locate("D_8009B26C") == MODE)
         check("a pinned global still reads by name, as at its retail address",
               game.u8("D_8009B26C") == game.peek(MODE, 1)[0] != 0)
     failed = [what for what, ok in checks if not ok]

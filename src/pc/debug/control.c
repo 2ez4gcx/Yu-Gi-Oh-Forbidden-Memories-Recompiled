@@ -193,6 +193,11 @@ static uint8_t *variable(const ControlCommand *command, char *error, size_t size
 {
     uintptr_t address, extent;
     int found = Symbols_FindVariable(command->symbol, &address, &extent);
+    if (found == 1) {   /* the client reads the address from here: yfm_control.Game.locate */
+        snprintf(error, size, "%.60s is pinned at retail address %08x: peek and poke it there",
+                 command->symbol, (unsigned)address);
+        return NULL;
+    }
     if (found) {
         snprintf(error, size, found == -2 ? "no variable table in this build (symbols/<id>.vars.txt), so %.60s "
                                             "cannot be found" : "no variable %.60s in this build",

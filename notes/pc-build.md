@@ -3032,9 +3032,10 @@ bit-identical. How (details in `src/pc/guest/state.h`):
   grew). Every build files all of its functions and the game objects'
   variables in `tmp/pc/game32/symbols/<build id>.txt`, the id being the
   table's hash (also written to `tmp/pc/game32/buildid`, which the runtime
-  reads; beside it, `<build id>.vars.txt` names the game's own variables
-  and where this build keeps them, for the control channel's `peek @NAME`,
-  notes/agent-control.md); the state header carries the id (format version 3; version 1
+  reads; beside it, `<build id>.vars.txt` names the variables the build
+  defines (game, module and native) and pins, and where, for the control
+  channel's `peek @NAME`, notes/agent-control.md; it is shipped with the
+  build); the state header carries the id (format version 3; version 1
   carried the game-source fingerprint, version 2 the build id of a game
   compiled without the indirect-branch thunks).
   A state from another build is

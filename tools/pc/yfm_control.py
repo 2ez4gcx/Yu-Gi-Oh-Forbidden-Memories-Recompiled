@@ -25,6 +25,7 @@ import argparse
 import json
 import os
 from pathlib import Path
+import re
 import socket
 import struct
 import subprocess
@@ -70,13 +71,16 @@ JUMP_MODES = {"title": MODE["menu"], "debug": MODE["debug"], "duel": MODE["duel"
               "build_deck": MODE["build_deck"], "library": MODE["library"], "password": MODE["password"],
               "map": MODE["campaign_map"], "credits": MODE["credits"], "options": MODE["options"]}
 
-# Guest addresses by name. config/pc/guest_addresses.txt has the retail
-# address of every global, and is read when present (a checkout); these are
-# the fallbacks, from the headers named. A name is only found there when the
-# running game does not know it as a variable of its own: a variable a game
-# unit defines (all of the small data, .sdata and .sbss: gGraphics_sViewportX)
-# is not at its retail address in a build, only a pinned one is, so peek and
-# poke ask the game first (Game.locate; the build's symbols/<id>.vars.txt).
+# Guest addresses by name. A variable a game unit (or the port's native code)
+# defines, all of the small data (.sdata and .sbss: gGraphics_sViewportX)
+# and a module's among them (gCampaignMap_Location), is not at its retail
+# address in a build, only a pinned one is. The build says which is which in
+# symbols/<id>.vars.txt, and peek and poke ask the game (Game.locate): a
+# defined name is read in the process, a pinned one at the retail address the
+# game gives, and a name the build has neither way is an error. This table,
+# config/pc/guest_addresses.txt (read when present, a checkout) with these
+# fallbacks from the headers named, is only for an executable too old to be
+# asked, which warns.
 FALLBACK = {
     "D_8009B26C": 0x8009B26C,             # main_mode_state.h: the active mode and its flags
     "gDuel_bOpponentID": 0x8009B361,      # the duellist the next duel is against
@@ -102,6 +106,10 @@ SIDE_SIZE, RECORD_SIZE, HAND_SIZE, DECK_SIZE, CARDS = 0x20, 0x1C, 5, 40, 722
 # five hand slots (D_800907CC), then the field (D_800907D8): five monster
 # zones and five spell and trap zones.
 HAND_RECORDS, MONSTER_RECORDS, SPELL_RECORDS = range(0, 5), range(5, 10), range(10, 15)
+
+
+# What a variable's name can be: C's, and the build's #2 for a repeated static.
+VARIABLE_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*(#[0-9]+)?")
 
 
 class ControlError(RuntimeError):
@@ -569,22 +577,31 @@ class Game:
         if not isinstance(where, str):
             return where
         if where not in self._located:
+            if not VARIABLE_NAME.fullmatch(where):
+                raise ValueError(f"{where!r} is not a variable name (letters, digits, _ and # only; "
+                                 "use an address, or peek's offset argument, for an offset)")
             try:
                 self.command(f"peek @{where} 1")
                 self._located[where] = f"@{where}"
             except ControlError as error:
                 reason = str(error)
-                if "no variable table" in reason:
+                pinned = re.search(r"is pinned at retail address ([0-9a-f]{8})", reason)
+                if pinned:   # guest memory: the build's own table says where
+                    self._located[where] = int(pinned.group(1), 16)
+                elif "no variable table" in reason:
                     raise ControlError(f"{where}: {reason}; its retail address would be a guess") from None
-                if "usage: peek" in reason:   # an executable from before @NAME
-                    print(f"yfm_control: this game cannot look up {where} (older than @NAME): using its retail "
-                          "address, wrong for small data", file=sys.stderr)
-                elif f"no variable {where} in this build" not in reason:
+                elif "usage: peek" in reason:   # an executable from before @NAME
+                    print(f"yfm_control: WARNING: this game cannot look up {where} (older than @NAME): using its "
+                          "retail address, which is wrong for small data and a module's variables", file=sys.stderr)
+                    if where not in self.symbols:
+                        raise KeyError(f"no variable named {where!r}: not in config/pc/guest_addresses.txt nor "
+                                       "yfm_control.FALLBACK") from None
+                    self._located[where] = self.symbols[where]
+                elif f"no variable {where} in this build" in reason:
+                    raise KeyError(f"no variable named {where!r}: this build neither defines it nor pins it "
+                                   "(symbols/<id>.vars.txt)") from None
+                else:
                     raise
-                if where not in self.symbols:
-                    raise KeyError(f"no variable named {where!r}: not in the game's symbols/<id>.vars.txt, "
-                                   "config/pc/guest_addresses.txt nor yfm_control.FALLBACK") from None
-                self._located[where] = self.symbols[where]
         return self._located[where]
 
     def address(self, where: int | str) -> int:

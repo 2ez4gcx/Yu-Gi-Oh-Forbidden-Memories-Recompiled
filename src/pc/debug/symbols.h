@@ -9,9 +9,12 @@ int Symbols_Load(void);
  * target, which holds the small data too. Not the retail addresses
  * (config/pc/guest_addresses.txt): a variable a game unit defines sits in the
  * executable's game_data or game_bss, only an undefined one is pinned to its
- * retail address. 0 with the address and extent (0: unknown) of the first
- * variable of that name; -1 when there is none; -2 when the build has no
- * variable table at all. */
+ * retail address. The table names every variable the build defines, the
+ * small data and the modules' among them, and every one it pins to its retail
+ * guest address. 0 with the address and extent (0: unknown) of the first
+ * variable of that name in this process; 1 with its retail guest address when
+ * the build pins it (it is guest memory, not the process's); -1 when the build
+ * has no such variable; -2 when it has no variable table at all. */
 int Symbols_FindVariable(const char *name, uintptr_t *address, uintptr_t *size);
 const char *Symbols_Lookup(uintptr_t address, uintptr_t *offset);
 /* Code loaded after startup (a mod's object file, src/pc/mods): its

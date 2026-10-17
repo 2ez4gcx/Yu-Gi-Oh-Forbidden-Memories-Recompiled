@@ -31,12 +31,19 @@ int Symbols_Load(void)
 #endif
     file = fopen(path, "r");
     if (!file) return -1;
-    while (!feof(file)) {
+    for (;;) {
         RuntimeSymbol symbol;
-        unsigned address, size;
-        if (fscanf(file, "%x %x %71s", &address, &size, symbol.name) != 3) break;
-        symbol.address = base + address;
-        symbol.size = size;
+        unsigned long long address, size;
+        char line[1100], kind = 'F';
+        if (!fgets(line, sizeof(line), file)) break;
+        if (line[0] == '#') continue;   /* the translated game's table, version 2 (tools/pc/translated_symbols.py) */
+        if (sscanf(line, "%llx %llx %c %*s %*s %*s %71s", &address, &size, &kind, symbol.name) != 4 &&
+            sscanf(line, "%llx %llx %71s", &address, &size, symbol.name) != 3) {
+            break;
+        }
+        if (kind == 'S' || kind == 'X') continue;   /* a section's start, not a symbol */
+        symbol.address = base + (uintptr_t)address;
+        symbol.size = (uintptr_t)size;
         if (symbol_count == room) {
             RuntimeSymbol *grown;
             room = room ? room * 2 : 2048;

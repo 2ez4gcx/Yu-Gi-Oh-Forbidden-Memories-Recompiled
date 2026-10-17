@@ -70,6 +70,9 @@ ORDINARY = {
     "src/pc/guest/image_loader.c",
     "src/pc/mods/hooks.c",
     "src/pc/mods/object_loader.c",
+    # The crash-report table: host memory of its own, never a registered
+    # heap region, so a save state neither holds nor replaces it.
+    "src/pc/debug/symbols.c",
 }
 
 

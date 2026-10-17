@@ -1,0 +1,17 @@
+{
+  "llvm_major": 22,
+  "version": "22.1.8",
+  "toolchain": "llvm-mingw 20260922 (clang 22): tools/pc/build_mod.py LLVM_MINGW_RELEASE and LLVM_MINGW_CLANG",
+  "platforms": {
+    "linux": {
+      "method": "release",
+      "url": "https://github.com/llvm/llvm-project/releases/download/llvmorg-22.1.8/LLVM-22.1.8-Linux-X64.tar.xz",
+      "sha256": null
+    },
+    "windows": {
+      "method": "source",
+      "url": "https://github.com/llvm/llvm-project/releases/download/llvmorg-22.1.8/llvm-project-22.1.8.src.tar.xz",
+      "sha256": null
+    }
+  }
+}

@@ -247,8 +247,8 @@ jobs:
   # The guest pass the SDKs ship, one per system (tools/pc/build_sdk_guest_ir.py;
   # tools/pc/sdk_llvm.json pins the LLVM). The game itself is translated with
   # LLVM 21 and stays so; a mod's clang writes the IR the pass reads and
-  # compiles what it writes, and the SDK's clang is llvm-mingw's (22), so the
-  # SDK's pass is built against LLVM 22. Linux: the official release archive's
+  # compiles what it writes, and the SDK's clang is llvm-mingw's (23), so the
+  # SDK's pass is built against LLVM 23. Linux: the official release archive's
   # headers and static libraries (the pass links statically, to run on any
   # distribution). Windows: the official Windows archive is built for the MSVC
   # C++ ABI, which llvm-mingw cannot link, so the three libraries the pass
@@ -520,13 +520,16 @@ jobs:
       # A bundled code mod through the game's own guest pass (the NDK's clang
       # 21, LLVM 21), for diffing against the same mod through the SDK's pass
       # (sdk-mod-ir-*, the package job): *.raw.ll from clang, *.ll from the
-      # pass. A check only: it does not stop the release.
+      # pass. A check only: it does not stop the release. The APK build just
+      # built this mod with the same inputs, so its object is in the cache and
+      # a build would write no IR: the cache goes first.
       - name: Android code mod through the game's guest pass
         continue-on-error: true
-        run: >-
-          MEMORIES_MOD_CC="$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin/clang"
-          python tools/pc/build_mod.py mods/hand-camera --target aarch64-translated
-          --game tmp/pc/android-arm64-v8a --out tmp/mod-ir21/out --ir-out tmp/mod-ir21/ir
+        run: |
+          rm -rf tmp/pc/mod-build
+          MEMORIES_MOD_CC="$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin/clang" \
+            python tools/pc/build_mod.py mods/hand-camera --target aarch64-translated \
+            --game tmp/pc/android-arm64-v8a --out tmp/mod-ir21/out --ir-out tmp/mod-ir21/ir
       - name: Upload the game pass's IR
         if: always()
         uses: actions/upload-artifact@v4

@@ -413,7 +413,17 @@ int Memories_NativeStateLoad(const char *path, char *why, size_t size)
     if (!Memories_StateCompatibleMods(&state)) { reason = "this state has different mods"; goto refused; }
     if (!Memories_StateCompatibleLanguage(&state, path, why, size)) { free(image); return -1; }
     pending_memory = Memories_NativeMemoryPrepare(&state, why, size);
-    if (!pending_memory) { Memories_NativeSymbolsClear(); free(image); return -1; }
+    if (!pending_memory) {
+        if (other_build && why && size) {
+            /* An update that added or resized a variable: the player is
+             * told that, the layout detail goes to the log. */
+            fprintf(stderr, "memories-pc: ARM64 state: %s\n", why);
+            snprintf(why, size, "this state was made with another build of the game, whose saved variables "
+                     "differ from this one's; save states don't carry over across this update (memory card "
+                     "saves do)");
+        }
+        Memories_NativeSymbolsClear(); free(image); return -1;
+    }
     if (other_build) {
         /* The words apply() relocates, classified as it will: the stack
          * and the saved registers as stack, the saved regions word by

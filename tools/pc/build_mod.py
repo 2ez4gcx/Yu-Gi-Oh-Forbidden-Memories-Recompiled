@@ -81,10 +81,13 @@ only where its inputs are the same, never because it is newer. A memo in
 tmp/pc/mod-build/.memo finds the key again without the preprocessor while
 none of the files it read has changed."""
 import argparse, concurrent.futures, filecmp, functools, glob, hashlib, json, os, re, shutil, subprocess, sys, tempfile, time
-import build_process
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Before the first import of a sibling module: Windows' embeddable Python
+# (it has a ._pth file) and `python -I -P` start without the script's folder
+# on sys.path, and sdk/build-mod.bat runs the former.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import build_process
 # In the repository, or the copy in the sdk/ directory beside a game
 # (sdk/tools/build_mod.py, with the headers in sdk/include).
 SHIPPED = not os.path.isdir(os.path.join(ROOT, "src/pc/mods/sdk"))

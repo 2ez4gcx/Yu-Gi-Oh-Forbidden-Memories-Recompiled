@@ -53,6 +53,22 @@ class Toolchain(unittest.TestCase):
         for url in build_mod.LLVM_MINGW_DOWNLOADS.values():
             self.assertIn(f"/download/{build_mod.LLVM_MINGW_RELEASE}/llvm-mingw-{build_mod.LLVM_MINGW_RELEASE}-", url)
 
+    def test_sdk_pins_follow_the_game_toolchain(self):
+        """sdk/toolchain-pins.json, which sdk/build-mod.bat and build-mod.sh
+        download from, is the toolchain the game itself is built with."""
+        here = os.path.dirname(os.path.abspath(__file__))
+        with open(os.path.join(here, "sdk", "toolchain-pins.json"), encoding="utf-8") as handle:
+            pins = json.load(handle)["llvm_mingw"]
+        with open(os.path.join(here, "sdk_llvm.json"), encoding="utf-8") as handle:
+            sdk_llvm = json.load(handle)
+        self.assertEqual(pins["release"], build_mod.LLVM_MINGW_RELEASE)
+        self.assertEqual(pins["clang"], build_mod.LLVM_MINGW_CLANG)
+        self.assertEqual(pins["clang"], sdk_llvm["llvm_major"], "the guest pass is built for this clang's LLVM")
+        self.assertEqual((pins["windows"]["url"], pins["windows"]["sha256"]), fetch_tools.RELEASES["llvm-mingw"][:2])
+        self.assertEqual((pins["linux"]["url"], pins["linux"]["sha256"]), build_win32_deps.TOOLCHAIN_ARCHIVE)
+        for system, url in build_mod.LLVM_MINGW_DOWNLOADS.items():
+            self.assertEqual(pins[system]["url"], url)
+
     def test_names_what_is_missing(self):
         self.assertEqual(build_mod.missing_64bit(), ["clang", "ld.lld", "llvm-objcopy"])
         self.program("clang")

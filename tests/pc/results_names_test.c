@@ -10,6 +10,7 @@
  * window, a disc or the mods; the stubs below stand for everything else. */
 #include "pc/text/translation.c"
 #include <assert.h>
+#include <stdarg.h>
 
 /* --- stubs ---------------------------------------------------------------- */
 
@@ -67,19 +68,39 @@ int Glyphs_Base(int code)
 uint32_t Glyphs_SortCharacter(int code) { return (uint32_t)code; }
 void Glyphs_AddFont(const char *path) { (void)path; }
 
+/* What the module says about a span too long to copy (once, at load). */
+static int noted_span, logged_span;
 const char *Mods_Id(int mod) { (void)mod; return "test"; }
 int Mods_LoadedCount(void) { return 0; }
 int Mods_Loaded(int index) { return index; }
 int Mods_Active(int mod) { (void)mod; return 1; }
 int Mods_File(int mod, const char *key, int index, char *path, size_t size, const char **name)
 { (void)mod; (void)key; (void)index; (void)path; (void)size; (void)name; return 0; }
-void Mods_Note(const char *id, const char *format, ...) { (void)id; (void)format; }
+void Mods_Note(const char *id, const char *format, ...)
+{
+    char line[512];
+    va_list arguments;
+    (void)id;
+    va_start(arguments, format);
+    vsnprintf(line, sizeof(line), format, arguments);
+    va_end(arguments);
+    if (strstr(line, "span")) noted_span++;
+}
 int Language_Current(void) { return 0; }
 const char *Language_Label(int language) { (void)language; return ""; }
 char *Language_Listing(size_t *length) { (void)length; return NULL; }
 void Language_Drop(void) {}
-int Log_Wanted(LogChannel channel) { (void)channel; return 0; }
-void Log_Printf(LogChannel channel, const char *format, ...) { (void)channel; (void)format; }
+int Log_Wanted(LogChannel channel) { (void)channel; return 1; }
+void Log_Printf(LogChannel channel, const char *format, ...)
+{
+    char line[512];
+    va_list arguments;
+    (void)channel;
+    va_start(arguments, format);
+    vsnprintf(line, sizeof(line), format, arguments);
+    va_end(arguments);
+    if (strstr(line, "span")) logged_span++;
+}
 
 const unsigned char *CardDrops_Text(int id) { (void)id; return NULL; }
 const unsigned char *CardPassword_Text(int id) { (void)id; return NULL; }
@@ -153,9 +174,19 @@ static const char listing[] =
 
 static unsigned char retail_dummy[16];
 
-static const TextUnit *the_unit(void) { return units[0]; }
+static int current; /* which unit the helpers look at */
+static const TextUnit *the_unit(void) { return units[current]; }
 
-static size_t string_at(int id) { return (size_t)(overrides[id] - the_unit()->data); }
+static size_t string_at(int id)
+{
+    const TextUnit *unit = the_unit();
+    int i;
+    for (i = 0; i < unit->string_count; i++) {
+        if (unit->strings[i].id == id) return unit->strings[i].offset;
+    }
+    assert(!"no such string");
+    return 0;
+}
 
 static size_t label_at(unsigned name)
 {
@@ -395,6 +426,228 @@ static void forget_text(void)
     arena_used = 0;
 }
 
+/* --- how a call is known, and what a copy can and cannot do ------------------ */
+
+static void load(const char *text)
+{
+    FILE *file = fopen("results_names_test.tmp", "wb");
+    assert(file);
+    fputs(text, file);
+    fclose(file);
+    add_unit(0, "results_names_test.tmp", "results_names_test.tmp");
+    remove("results_names_test.tmp");
+}
+
+/* Only a label of the dialogue bank's, L050E, on text that is not string
+ * 0x3E (which the translation has none of): the label alone says it is YOU. */
+static const char label_listing[] =
+    "@bank dialog\n"
+    "\n"
+    "[0044]\n"
+    "{f8 04 01}\n"
+    "{f8 06 F8 FF}  {f8 02 30}{call L050E}{f8 02 30}{call L051C}{end}\n"
+    "\n"
+    "{:L050E}\n"
+    "EU{end}\n"
+    "\n"
+    "[003F]  {:L051C}\n"
+    "COM{end}\n";
+
+/* String 0x3E by a label of its own, not L050E: the string alone says it. */
+static const char string_listing[] =
+    "@bank dialog\n"
+    "\n"
+    "[0044]\n"
+    "{f8 04 01}\n"
+    "{f8 06 F8 FF}  {f8 02 30}{call LAAAA}{f8 02 30}{call L051C}{end}\n"
+    "\n"
+    "[003E]  {:LAAAA}\n"
+    "VOCE{end}\n"
+    "\n"
+    "[003F]  {:L051C}\n"
+    "COM{end}\n";
+
+/* Two calls to YOU, the second after a step that cannot take a cell more:
+ * neither moves, and the label is what is drawn at both. */
+static const char partial_listing[] =
+    "@bank dialog\n"
+    "\n"
+    "[003E]  {:L050E}\n"
+    "VOCE{end}\n"
+    "\n"
+    "[003F]  {:L051C}\n"
+    "COM{end}\n"
+    "\n"
+    "[0044]\n"
+    "{f8 04 01}\n"
+    "{f8 06 F8 FF}  {f8 02 30}{call L050E}{f8 02 30}{call L051C}{f8 01 20}"
+    "{f8 06 F8 FF}  {f8 02 F8}{call L050E}{end}\n";
+
+/* The unit of the three that the copies are tried on. */
+static const char three_listing[] =
+    "@bank dialog\n"
+    "\n"
+    "[003E]  {:L050E}\n"
+    "VOCE{end}\n"
+    "\n"
+    "[003F]  {:L051C}\n"
+    "COM{end}\n"
+    "\n"
+    "[0044]\n"
+    "{f8 04 01}\n"
+    "{f8 06 F8 FF}  {f8 02 30}{call L050E}{f8 02 30}{call L051C}{end}\n";
+
+static void a_label_alone_says_it(void)
+{
+    const unsigned char *own, *copy;
+    size_t you, com;
+    ptrdiff_t delta;
+    load(label_listing);
+    assert(unit_count == 1 && !overrides[0x3E]);
+    own = the_unit()->data + string_at(0x44);
+    set("Weevil", "Joe", 0, 1);
+    copy = Text_Resolve(0x44, retail_dummy);
+    assert(copy != own);
+    delta = copy - own;
+    you = call_to(0x050E, 0x44, 0);
+    com = call_to(0x051C, 0x44, 0);
+    /* Two letters of EU, three of Joe: a cell less before it. */
+    assert(is_name(at_call(you, delta), "Joe"));
+    assert(the_unit()->data[you + delta - 1] == 0x30 - 8);
+    assert(is_name(at_call(com, delta), "Weevil"));
+    forget_text();
+}
+
+static void a_string_alone_says_it(void)
+{
+    const unsigned char *own, *copy;
+    size_t you;
+    ptrdiff_t delta;
+    load(string_listing);
+    assert(unit_count == 1 && overrides[0x3E]);
+    own = the_unit()->data + string_at(0x44);
+    set("Weevil", "Joe", 0, 1);
+    copy = Text_Resolve(0x44, retail_dummy);
+    assert(copy != own);
+    delta = copy - own;
+    you = call_to(0xAAAA, 0x44, 0);
+    assert(is_name(at_call(you, delta), "Joe"));
+    assert(the_unit()->data[you + delta - 1] == 0x30 + 8);
+    forget_text();
+}
+
+static void a_side_moves_whole_or_not_at_all(void)
+{
+    const unsigned char *own, *copy;
+    size_t you0, you1, com;
+    ptrdiff_t delta;
+    load(partial_listing);
+    own = the_unit()->data + string_at(0x44);
+    set("Weevil", "Joe", 0, 1);
+    copy = Text_Resolve(0x44, retail_dummy);
+    assert(copy != own);
+    delta = copy - own;
+    you0 = call_to(0x050E, 0x44, 0);
+    you1 = call_to(0x050E, 0x44, 1);
+    com = call_to(0x051C, 0x44, 0);
+    /* 0xF8 + 8 does not fit a byte: the first call, which could, stays. */
+    assert(the_unit()->data[you1 - 1] == 0xF8);
+    assert(the_unit()->data[you0 + delta - 1] == the_unit()->data[you0 - 1]);
+    assert(is_label(at_call(you0, delta), 0x050E) && is_label(at_call(you1, delta), 0x050E));
+    assert(is_name(at_call(com, delta), "Weevil"));
+    forget_text();
+}
+
+static void a_span_past_the_copy_is_said(void)
+{
+    enum { LINES = 700 };
+    size_t size = sizeof(three_listing) + LINES * 26 + 64;
+    char *big = malloc(size), *at;
+    size_t you;
+    int i;
+    assert(big);
+    at = big + sprintf(big, "@bank dialog\n\n[003E]  {:L050E}\nVOCE{end}\n\n[003F]  {:L051C}\nCOM{end}\n\n[0044]\n"
+                            "{f8 04 01}\n{f8 06 F8 FF}  {f8 02 30}{call L050E}{f8 02 30}{call L051C}\n");
+    for (i = 0; i < LINES; i++) at += sprintf(at, "AAAAAAAAAAAAAAAAAAAAAAAA\n");
+    strcpy(at, "{end}\n");
+    noted_span = logged_span = 0;
+    load(big);
+    free(big);
+    assert(the_unit()->results_to - the_unit()->results_from > TEXT_UNIT_RESULTS);
+    assert(noted_span == 1 && logged_span == 1);   /* once, at load */
+    set("Weevil", "Joe", 0, 1);
+    you = call_to(0x050E, 0x44, 0);
+    assert(Text_Resolve(0x44, retail_dummy) == the_unit()->data + string_at(0x44));
+    assert(Text_Resolve(0x44, retail_dummy) == the_unit()->data + string_at(0x44));
+    assert(noted_span == 1 && logged_span == 1);
+    assert(is_label(at_call(you, 0), 0x050E));
+    forget_text();
+}
+
+static void a_third_unit_takes_a_copys_place(void)
+{
+    const unsigned char *own[3];
+    size_t you;
+    int i;
+    for (i = 0; i < 3; i++) load(three_listing);
+    assert(unit_count == 3);
+    set("Weevil", "Joe", 0, 1);
+    for (i = 0; i < 3; i++) {
+        current = i;
+        own[i] = the_unit()->data + string_at(0x44);
+    }
+    for (i = 0; i < 3; i++) assert(unit_results_copy(own[i]) != NULL);
+    /* Two copies, round and round: the third took the first's place. */
+    assert(!unit_results_of(units[0]) && unit_results_of(units[1]) && unit_results_of(units[2]));
+    for (i = 1; i < 3; i++) {
+        const unsigned char *copy;
+        current = i;
+        copy = unit_results_copy(own[i]);
+        you = call_to(0x050E, 0x44, 0);
+        assert(is_name(at_call(you, copy - own[i]), "Joe"));
+    }
+    /* A cursor in the first unit's own text, its copy gone: the label, never
+     * the third's bytes. */
+    current = 0;
+    you = call_to(0x050E, 0x44, 0);
+    assert(is_label(at_call(you, 0), 0x050E));
+    current = 0;
+    forget_text();
+}
+
+/* A YOU that ends in a code with its operands cut off by the unit's end is
+ * not measured past it: the label stays. */
+static const char cut_listing[] =
+    "@bank dialog\n"
+    "\n"
+    "[0044]\n"
+    "{f8 04 01}\n"
+    "{f8 06 F8 FF}  {f8 02 30}{call L050E}{f8 02 30}{call L051C}{end}\n"
+    "\n"
+    "[003F]  {:L051C}\n"
+    "COM{end}\n"
+    "\n"
+    "[003E]  {:L050E}\n"
+    "{f8 03 01}\n";
+
+static void a_code_cut_by_the_end_is_not_read(void)
+{
+    const unsigned char *own, *copy;
+    size_t you, com;
+    ptrdiff_t delta;
+    load(cut_listing);
+    own = the_unit()->data + string_at(0x44);
+    set("Weevil", "Joe", 0, 1);
+    copy = Text_Resolve(0x44, retail_dummy);
+    assert(copy != own);
+    delta = copy - own;
+    you = call_to(0x050E, 0x44, 0);
+    com = call_to(0x051C, 0x44, 0);
+    assert(is_label(at_call(you, delta), 0x050E));
+    assert(is_name(at_call(com, delta), "Weevil"));
+    forget_text();
+}
+
 int main(void)
 {
     FILE *file = fopen("results_names_test.tmp", "wb");
@@ -419,6 +672,12 @@ int main(void)
     assert(unit_count == 1 && overrides[0x44] && !overrides[0x3E]);
     the_games_own_words();
     forget_text();
+    a_label_alone_says_it();
+    a_string_alone_says_it();
+    a_side_moves_whole_or_not_at_all();
+    a_span_past_the_copy_is_said();
+    a_third_unit_takes_a_copys_place();
+    a_code_cut_by_the_end_is_not_read();
     puts("results_names_test: ok");
     return 0;
 }

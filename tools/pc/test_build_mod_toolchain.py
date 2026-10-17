@@ -112,6 +112,28 @@ class Toolchain(unittest.TestCase):
         self.assertIn("nothing was built: no compiler found", text)
         self.assertIn("Not found: clang, ld.lld, llvm-objcopy.", text)
 
+    def main_output(self, *arguments):
+        out = io.StringIO()
+        with mock.patch.object(sys, "argv", ["build_mod.py", *arguments]), mock.patch.object(build_mod, "build", return_value="x.o"), \
+                contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+            build_mod.main()
+        return out.getvalue()
+
+    def test_last_line_says_what_was_built_and_what_not(self):
+        """sdk/build-mod.bat tells the modder to read it: a build that left objects out says so last."""
+        self.program("gcc")   # only the 32-bit object can be built
+        self.assertIn("build_mod: built i386; NOT built: x86_64-windows, aarch64-translated (the message above says why)",
+                      self.main_output(self.mod()))
+        with mock.patch.object(build_mod, "programs", lambda: (None, True)), \
+                mock.patch.object(build_mod, "find_objcopy", lambda: "llvm-objcopy"), \
+                mock.patch.object(build_mod, "translation_problem", lambda *a, **k: "no guest pass"):
+            self.assertIn("build_mod: built i386, x86_64-windows; NOT built: aarch64-translated", self.main_output(self.mod()))
+            self.assertEqual(self.main_output(self.mod(), "--target", "i386").strip(), "build_mod: built i386")
+        with mock.patch.object(build_mod, "programs", lambda: (None, True)), \
+                mock.patch.object(build_mod, "find_objcopy", lambda: "llvm-objcopy"), \
+                mock.patch.object(build_mod, "translation_problem", lambda *a, **k: None):
+            self.assertEqual(self.main_output(self.mod()).strip(), "build_mod: built i386, x86_64-windows, aarch64-translated")
+
     def test_asked_for_a_64bit_target(self):
         self.program("gcc")   # the 32-bit object could be built; the one asked for cannot
         text = self.run_main(self.mod(), "--target", "aarch64")

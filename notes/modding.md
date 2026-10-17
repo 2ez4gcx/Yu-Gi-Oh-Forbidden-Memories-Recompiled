@@ -2072,14 +2072,15 @@ What it needs:
 | Targets | Tools |
 |---|---|
 | `i386`, `x86_64-windows` | clang, with `ld.lld` beside it or on PATH, and `llvm-objcopy` (beside clang, beside the file a `clang` link points to, or on PATH) |
-| `aarch64-translated` | the same, with a clang **no newer than 21**, and the game's guest pass, `memories-guest-ir` ([Android code mods](#android-code-mods-aarch64-translated)); left out with what is missing when not named |
+| `aarch64-translated` | the same, with a clang **no newer than the LLVM of the game's guest pass**, `memories-guest-ir`, which a release's SDK carries (built for llvm-mingw's clang 22: [Android code mods](#android-code-mods-aarch64-translated)); left out with what is missing when not named |
 | `i386` only | the above, or on Linux gcc with 32-bit support |
 
 The simplest way to have the i386 and x86_64-windows objects is the
 toolchain the game itself is built with, [llvm-mingw 20260922](https://github.com/mstorsjo/llvm-mingw/releases/tag/20260922):
 on Windows `llvm-mingw-20260922-ucrt-x86_64.zip` (its clang builds the Linux
-object format too; it is clang 22, too new for the Android object, which
-needs clang 21 or older: [Android code mods](#android-code-mods-aarch64-translated)), on Linux x86-64
+object format too; it is clang 22, which the guest pass in the SDK is built
+for, so it also builds the Android object: [Android code
+mods](#android-code-mods-aarch64-translated)), on Linux x86-64
 `llvm-mingw-20260922-ucrt-ubuntu-22.04-x86_64.tar.xz`. Unpack it and put its
 `bin` folder on PATH, or set `MEMORIES_MOD_CC` to its `clang`. On Linux the
 distribution's packages do as well: `clang`, `lld` and `llvm` (which has
@@ -2395,20 +2396,34 @@ the game's export table.
 
 What it needs, besides `ld.lld` and `llvm-objcopy`:
 
-* **clang 21 or older.** The guest pass is built against LLVM 21.1.8 and
-  reads its IR; a newer clang's may not parse. When the clang that builds the
-  other objects is newer (llvm-mingw 20260922's is), `build_mod.py` takes the
-  Android NDK's when `ANDROID_NDK_ROOT` (or `ANDROID_NDK_HOME`) names one
-  (NDK r29's clang is 21), or `MEMORIES_MOD_CC` names the compiler outright.
-* **The guest pass**, `memories-guest-ir`. No release ships it yet: it
-  is built from a source checkout, with `python tools/pc/llvm_guest.py`,
-  which prints the file's path (it fetches the official LLVM 21.1.8
-  release on Linux and macOS; on Windows `MEMORIES_GUEST_LLVM` names an
-  LLVM 21.1.8 build and `MEMORIES_GUEST_CXX` its C++ compiler). Then
-  `MEMORIES_GUEST_IR` names it, or it is copied into the SDK's `tools`
-  folder, where `build_mod.py` looks too. In a checkout, `--target
-  aarch64-translated` builds it when LLVM 21 is already there; no mod
-  build downloads anything.
+* **A clang no newer than the LLVM the guest pass is built against.** The
+  clang writes the IR the pass reads and compiles the IR the pass writes
+  back, and LLVM reads the IR of its own version or an older one, never a
+  newer. A release's SDK carries a pass built against LLVM 22, the LLVM of
+  its toolchain's clang (llvm-mingw 20260922): that clang goes with it, and
+  so does an older one (the Android NDK r29's is 21; a distribution's, e.g.
+  18, may do, though a clang older than the pass has to read the IR it
+  writes: if it cannot, the error says so and llvm-mingw's is the way out).
+  A pass built from a source checkout is built against the game's own LLVM
+  21.1.8 and wants clang 21 or older: llvm-mingw's 22 is refused there, and
+  `build_mod.py` takes the Android NDK's when `ANDROID_NDK_ROOT` (or
+  `ANDROID_NDK_HOME`) names one, or `MEMORIES_MOD_CC` names the compiler
+  outright. `memories-guest-ir --llvm-major` prints which LLVM a pass is
+  built against. Apple's clang numbers its versions its own way, so
+  `build_mod.py` cannot compare it: it tries it, and if the IR does not
+  parse it says so and points to Homebrew's LLVM clang.
+* **The guest pass**, `memories-guest-ir`. Every release's SDK carries it in
+  its `tools` folder (`memories-guest-ir.exe` in the Windows SDK), where
+  `build_mod.py` looks: a Windows modder needs the SDK and its llvm-mingw
+  (the toolchain above) and nothing to build. The game itself is still
+  translated with LLVM 21; the game and a mod meet through the game's
+  tables (below), not through a compiler version. In a source checkout it
+  is built with `python tools/pc/llvm_guest.py`, which prints the file's
+  path (it fetches the official LLVM 21.1.8 release on Linux and macOS; on
+  Windows `MEMORIES_GUEST_LLVM` names an LLVM 21.1.8 build and
+  `MEMORIES_GUEST_CXX` its C++ compiler); `MEMORIES_GUEST_IR` names any
+  pass. In a checkout, `--target aarch64-translated` builds it when LLVM 21
+  is already there; no mod build downloads anything.
 * **The game's tables**: `mod_translation.json` and `mod_signatures.json`
   with the export list, from the Android game build
   (`tmp/pc/android-arm64-v8a`, or `--game`) or the SDK, which carries them

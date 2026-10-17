@@ -99,7 +99,12 @@ archive once, cached as `tmp/pc/llvm-linux`, for the guest pass; notes/pc-build.
 signing" below), uploads it signed as
 `yfm-redecomp-<version>-android-arm64.apk`. On a version tag, all jobs must
 succeed before the final job creates a **draft** GitHub release and attaches
-the packages.
+the packages. Each SDK carries the guest pass of its system
+(`sdk/tools/memories-guest-ir[.exe]`, built against the LLVM of the SDK's
+llvm-mingw clang by the `sdk-guest-ir` job: `tools/pc/sdk_llvm.json` pins it,
+notes/pc-build.md "The SDK's guest pass"), and the `package` job builds a
+bundled code mod for Android from the packed SDK to prove it
+(`sdk-mod-ir-*` artifacts).
 Reruns can update a draft but refuse to replace an already published release.
 Draft assets are not public until the draft is published; published release
 assets are the persistent download, subject to the repository's visibility.

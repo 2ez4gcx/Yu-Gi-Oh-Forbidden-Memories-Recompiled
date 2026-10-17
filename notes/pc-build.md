@@ -4705,6 +4705,32 @@ or 0xC0000000 starts the game all the same.
   (one whose `llvm-config` finds its headers under `include/` and its
   libraries under `lib/`) and `MEMORIES_GUEST_CXX` the C++ compiler
   (llvm-mingw's `clang++`, linked `-static`). The NDK's clang emits the IR.
+- **The SDK's guest pass** (2026-10-17). A mod's clang writes the IR the pass
+  reads and compiles the IR it writes, and LLVM reads the IR of its own
+  version or older, so the pass an SDK ships is built against the LLVM of
+  the SDK's own clang (llvm-mingw 20260922: clang 22 -> LLVM 22), where the
+  game stays translated with LLVM 21 (`llvm_guest.py`, untouched): the game
+  and a mod meet through `mod_translation.json`/`mod_signatures.json`, not a
+  compiler version. `tools/pc/build_sdk_guest_ir.py` builds it, pinned by
+  `tools/pc/sdk_llvm.json` (version, URL and SHA-256 per system; `--pin` fills
+  the digests from the release's published ones): on Linux from the official
+  release archive (headers, `llvm-config` and the static libraries unpacked
+  as `llvm_guest.py` does; the build stops saying what is missing if the
+  archive lacks them) with the system's `c++`, `-static`; on Windows from the
+  official source release, whose three libraries it needs (`LLVMCore`,
+  `LLVMIRReader`, `LLVMSupport`) are built with the SDK's llvm-mingw (the
+  official Windows archive is built for the MSVC C++ ABI, which llvm-mingw
+  cannot link), `-static` too. It runs the result (`--llvm-major`, then the
+  three operations on a unit) before it counts. `memories-guest-ir
+  --llvm-major` is what `build_mod.py` holds the modder's clang against
+  (no newer than that). `package.py --guest-ir` puts it in each SDK
+  (`sdk/tools/memories-guest-ir[.exe]`; `test_package.py` requires it), and
+  the release workflow's `sdk-guest-ir` job builds one per system. The
+  `package` job then builds `mods/hand-camera` for Android from the packed
+  SDK with llvm-mingw alone (`check_sdk_mod.py`), and uploads the IR clang
+  and the pass wrote (`sdk-mod-ir-<system>`); the `android` job uploads the
+  same mod's through the game's own LLVM 21 pass (`sdk-mod-ir-llvm21`), to
+  diff.
 - **The fixed game** is still built with `--android-memory fixed` (or
   `MEMORIES_ANDROID_MEMORY=fixed`), for comparison and for the aarch64
   code mods; everything below about 0xC0000000 and the guest ranges is

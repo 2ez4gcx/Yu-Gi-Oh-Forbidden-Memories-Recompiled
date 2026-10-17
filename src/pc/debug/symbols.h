@@ -14,8 +14,10 @@ int Symbols_Load(void);
  * guest address. 0 with the address and extent (0: unknown) of the first
  * variable of that name in this process; 1 with its retail guest address when
  * the build pins it (it is guest memory, not the process's); -1 when the build
- * has no such variable; -2 when it has no variable table at all. */
-int Symbols_FindVariable(const char *name, uintptr_t *address, uintptr_t *size);
+ * has no such variable; -2 when it has no variable table at all. *read_only
+ * (when given) says a found variable is a constant in a read-only page: it
+ * may be read, and writing it crashes the game. */
+int Symbols_FindVariable(const char *name, uintptr_t *address, uintptr_t *size, int *read_only);
 const char *Symbols_Lookup(uintptr_t address, uintptr_t *offset);
 /* Code loaded after startup (a mod's object file, src/pc/mods): its
  * functions, so crash and hang reports can name them. One call per object. */

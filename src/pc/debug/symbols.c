@@ -8,10 +8,11 @@
 typedef struct RuntimeSymbol {
     uintptr_t address, size;
     char name[72];
-    int pinned;   /* a variable: at its retail guest address, not in this process */
+    int pinned;      /* a variable: at its retail guest address, not in this process */
+    int read_only;   /* a variable: a constant of the build, in a read-only page */
 } RuntimeSymbol;
 
-/* One "address size name [pinned]" line of a table. 1 with the entry, 0 at
+/* One "address size name [pinned|ro]" line of a table. 1 with the entry, 0 at
  * the end of the file, -1 for a line to skip: a name too long for the entry
  * (%71s used to cut it and read the rest as the next line) or a line that does
  * not fit the buffer, whose rest is dropped. */
@@ -32,6 +33,7 @@ static int read_entry(FILE *file, RuntimeSymbol *symbol)
     symbol->address = address;
     symbol->size = size;
     symbol->pinned = fields == 4 && !strcmp(flag, "pinned");
+    symbol->read_only = fields == 4 && !strcmp(flag, "ro");
     strcpy(symbol->name, name);
     return 1;
 }
@@ -42,7 +44,7 @@ static RuntimeSymbol *variables;   /* by address, like symbols: the game's data 
 static size_t variable_count;
 
 /* symbols/<id>.vars.txt beside the table at `table`: "address size name" for
- * a variable the build defines, "address 0 name pinned" for one it pins to its
+ * a variable the build defines ("address size name ro" in read-only data), "address 0 name pinned" for one it pins to its
  * retail guest address. */
 static void load_variables(const char *table)
 {
@@ -75,7 +77,7 @@ static void load_variables(const char *table)
     fclose(file);
 }
 
-int Symbols_FindVariable(const char *name, uintptr_t *address, uintptr_t *size)
+int Symbols_FindVariable(const char *name, uintptr_t *address, uintptr_t *size, int *read_only)
 {
     size_t at;
     if (!variable_count) return -2;
@@ -83,6 +85,7 @@ int Symbols_FindVariable(const char *name, uintptr_t *address, uintptr_t *size)
         if (!strcmp(variables[at].name, name)) {
             *address = variables[at].address;
             *size = variables[at].size;
+            if (read_only) *read_only = variables[at].read_only;
             return variables[at].pinned;
         }
     }
@@ -152,6 +155,7 @@ int Symbols_Add(const SymbolsEntry *entries, size_t count)
         symbol.address = entries[i].address;
         symbol.size = entries[i].size;
         symbol.pinned = 0;
+        symbol.read_only = 0;
         snprintf(symbol.name, sizeof(symbol.name), "%s", entries[i].name);
         at = total;
         while (at > 0 && merged[at - 1].address > symbol.address) {

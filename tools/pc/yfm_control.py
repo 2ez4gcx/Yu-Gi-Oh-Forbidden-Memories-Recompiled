@@ -108,8 +108,11 @@ SIDE_SIZE, RECORD_SIZE, HAND_SIZE, DECK_SIZE, CARDS = 0x20, 0x1C, 5, 40, 722
 HAND_RECORDS, MONSTER_RECORDS, SPELL_RECORDS = range(0, 5), range(5, 10), range(10, 15)
 
 
-# What a variable's name can be: C's, and the build's #2 for a repeated static.
-VARIABLE_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*(#[0-9]+)?")
+# What a variable's name can be: C's, a function's static as the compiler
+# names it (Main_RunPasswordMenu.passwords: GCC may add a number to it on
+# Linux, which changes from one build to the next) and the build's #2 for a
+# repeated static. Not a '+' (peek's offset argument) nor a blank.
+VARIABLE_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_.]*(#[0-9]+)?")
 
 
 class ControlError(RuntimeError):
@@ -568,17 +571,21 @@ class Game:
 
     def locate(self, where: int | str) -> int | str:
         """What peek and poke send for `where`: a guest address as it is, and
-        a name as its retail guest address when it is a pinned global, or as
-        "@name" when the game keeps the variable itself (its own data: the
-        small data, which is not at its retail address in a build). A name
-        neither the game nor the retail table knows is a KeyError, and a game
-        with no variable table (a build without symbols/<id>.vars.txt) a
-        ControlError: neither falls back to a guess."""
+        a name as "@name" when the game keeps the variable itself (what the
+        build defines: the small data, a module's, native code's, which is
+        not at its retail address), as the retail guest address the game gives
+        when the build pins it, and as the retail address of the table
+        (config/pc/guest_addresses.txt) when the build has the name in neither
+        way (no code of the game's refers to it: guest RAM is its only copy).
+        A name nobody has is a KeyError, one that is not a name a ValueError,
+        and a game with no variable table (a build without
+        symbols/<id>.vars.txt) a ControlError: neither falls back to a
+        guess."""
         if not isinstance(where, str):
             return where
         if where not in self._located:
             if not VARIABLE_NAME.fullmatch(where):
-                raise ValueError(f"{where!r} is not a variable name (letters, digits, _ and # only; "
+                raise ValueError(f"{where!r} is not a variable name (letters, digits, _, . and # only; "
                                  "use an address, or peek's offset argument, for an offset)")
             try:
                 self.command(f"peek @{where} 1")
@@ -598,8 +605,14 @@ class Game:
                                        "yfm_control.FALLBACK") from None
                     self._located[where] = self.symbols[where]
                 elif f"no variable {where} in this build" in reason:
-                    raise KeyError(f"no variable named {where!r}: this build neither defines it nor pins it "
-                                   "(symbols/<id>.vars.txt)") from None
+                    # The build's table is whole: a name in it is neither
+                    # defined nor pinned when no code of the game's refers to
+                    # it, and its only copy is the retail one in guest RAM.
+                    if where not in self.symbols:
+                        raise KeyError(f"no variable named {where!r}: this build neither defines nor pins it "
+                                       "(symbols/<id>.vars.txt) and the retail table "
+                                       "(config/pc/guest_addresses.txt) does not have it") from None
+                    self._located[where] = self.symbols[where]
                 else:
                     raise
         return self._located[where]

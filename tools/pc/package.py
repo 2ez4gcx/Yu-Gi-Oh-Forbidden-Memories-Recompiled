@@ -281,7 +281,11 @@ def stage(system, label, exports=None):
     # Its variable table too (<id>.vars.txt): the control channel names the
     # game's variables from it (notes/agent-control.md), and without it
     # Game.peek by name fails.
-    shutil.copy2(current[:-len(".txt")] + ".vars.txt", os.path.join(folder, "symbols"))
+    variables = current[:-len(".txt")] + ".vars.txt"
+    if not os.path.isfile(variables):
+        sys.exit(f"{variables}: the build has no variable table (build_game32.py writes it beside the symbol "
+                 "table; this build directory is from before): build again")
+    shutil.copy2(variables, os.path.join(folder, "symbols"))
     shutil.copy2(os.path.join(ROOT, "tools/pc/release/README.txt"), folder)
     if system == "windows-x64":
         with open(os.path.join(folder, "README.txt"), encoding="utf-8") as handle:

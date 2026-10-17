@@ -37,8 +37,9 @@ int main(void)
 {
     static char text[2048];
     uintptr_t address, size, offset;
+    int ro = 0;
     size_t at;
-    CHECK(Symbols_FindVariable("gVar", &address, &size) == -2);   /* nothing loaded: no table at all */
+    CHECK(Symbols_FindVariable("gVar", &address, &size, &ro) == -2);   /* nothing loaded: no table at all */
 
     write(TABLE, "01000000 00000010 func\n"
                  "01000020 00000004 gone_for_a_long_name_the_entry_cannot_hold_gone_for_a_long_name_the_entry_cannot_hold 01000040 4 after\n"
@@ -46,6 +47,7 @@ int main(void)
     at = (size_t)snprintf(text, sizeof(text), "02000000 00000004 gVar\n"
                           "02000010 00000002 gVar\n"
                           "8009b26c 00000000 D_8009B26C pinned\n"
+                          "02000050 00000004 gConstant ro\n"
                           "02000020 00000008 gLongLine_");
     memset(text + at, 'x', 600);   /* a line that does not fit the reader: dropped whole */
     at += 600;
@@ -60,12 +62,14 @@ int main(void)
     CHECK(Symbols_Lookup(0x01000040, &offset) == NULL);   /* and its tail is not an entry */
     CHECK(!strcmp(Symbols_Lookup(0x01000100, &offset), "next"));
 
-    CHECK(Symbols_FindVariable("gVar", &address, &size) == 0 && address == 0x02000000 && size == 4);
-    CHECK(Symbols_FindVariable("D_8009B26C", &address, &size) == 1 && address == 0x8009B26C);
-    CHECK(Symbols_FindVariable("gAfterLongLine", &address, &size) == 0 && address == 0x02000030);
-    CHECK(Symbols_FindVariable("gNoNewlineAtTheEnd", &address, &size) == 0 && address == 0x02000040);
-    CHECK(Symbols_FindVariable("gHidden", &address, &size) == -1);
-    CHECK(Symbols_FindVariable("gNoSuchVariable", &address, &size) == -1);
+    CHECK(Symbols_FindVariable("gVar", &address, &size, &ro) == 0 && address == 0x02000000 && size == 4);
+    CHECK(Symbols_FindVariable("D_8009B26C", &address, &size, &ro) == 1 && address == 0x8009B26C);
+    CHECK(Symbols_FindVariable("gAfterLongLine", &address, &size, &ro) == 0 && address == 0x02000030);
+    CHECK(Symbols_FindVariable("gNoNewlineAtTheEnd", &address, &size, &ro) == 0 && address == 0x02000040);
+    CHECK(Symbols_FindVariable("gConstant", &address, &size, &ro) == 0 && ro == 1 && address == 0x02000050);
+    CHECK(Symbols_FindVariable("gVar", &address, &size, &ro) == 0 && ro == 0);
+    CHECK(Symbols_FindVariable("gHidden", &address, &size, &ro) == -1);
+    CHECK(Symbols_FindVariable("gNoSuchVariable", &address, &size, &ro) == -1);
     remove(TABLE);
     remove(VARIABLES);
     printf("symbols: all passed\n");

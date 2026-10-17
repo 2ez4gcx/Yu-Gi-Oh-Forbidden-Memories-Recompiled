@@ -189,10 +189,11 @@ static uint8_t *guest(uint32_t address, uint32_t length, int *ram)
  * process keeps the variable (the game's small data is not at its retail
  * address). NULL with the reason in `error`; the extent is checked, so a read
  * never goes on into the next variable. */
-static uint8_t *variable(const ControlCommand *command, char *error, size_t size)
+static uint8_t *variable(const ControlCommand *command, int write, char *error, size_t size)
 {
     uintptr_t address, extent;
-    int found = Symbols_FindVariable(command->symbol, &address, &extent);
+    int read_only = 0;
+    int found = Symbols_FindVariable(command->symbol, &address, &extent, &read_only);
     if (found == 1) {   /* the client reads the address from here: yfm_control.Game.locate */
         snprintf(error, size, "%.60s is pinned at retail address %08x: peek and poke it there",
                  command->symbol, (unsigned)address);
@@ -201,6 +202,11 @@ static uint8_t *variable(const ControlCommand *command, char *error, size_t size
     if (found) {
         snprintf(error, size, found == -2 ? "no variable table in this build (symbols/<id>.vars.txt), so %.60s "
                                             "cannot be found" : "no variable %.60s in this build",
+                 command->symbol);
+        return NULL;
+    }
+    if (write && read_only) {   /* a write would fault: the page is read-only */
+        snprintf(error, size, "%.60s is read-only (a constant of the build): it can be read, not written",
                  command->symbol);
         return NULL;
     }
@@ -261,7 +267,7 @@ static int poke(const ControlCommand *command, char *error, size_t error_size)
     uint8_t *at;
     int ram = 0;
     if (command->symbol) {
-        if (!(at = variable(command, error, error_size))) return -1;
+        if (!(at = variable(command, 1, error, error_size))) return -1;
         memcpy(at, data, command->length);
         return 0;
     }
@@ -339,7 +345,7 @@ static int handle(char *text)
         send_line(reply);
         return 0;
     case CONTROL_PEEK:
-        if (command.symbol) at = variable(&command, error, sizeof(error));
+        if (command.symbol) at = variable(&command, 0, error, sizeof(error));
         else if (!(at = guest(command.address, command.length, &ram))) {
             snprintf(error, sizeof(error), "outside guest RAM and the scratchpad");
         }

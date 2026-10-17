@@ -287,14 +287,16 @@ def run(command):
         sys.exit(f"{' '.join(command[:6])} ...\n{result.stderr}")
     return result.stdout
 
-def variable_table(rows, pinned, addresses):
+def variable_table(rows, pinned, addresses, owned):
     """The lines of symbols/<id>.vars.txt (src/pc/debug/symbols.c): every
     variable the build defines that a client may name, "address size name",
     and every one it pins to its retail guest address, "address 0 name pinned".
     The defined ones are those in game_data and game_bss and the modules'
     ovl_* sections (between the markers the link provides: all of the small
-    data) and those the retail table names (`addresses`) that native code or
-    read-only data defines elsewhere (gRand_dwSeed). `rows` are nm's:
+    data) and those the retail table names (`addresses`) that the game's or
+    the port's own objects (`owned`: not a library's, whose `open` is not the
+    game's) define elsewhere (gRand_dwSeed); the ones in read-only data are
+    marked "ro", since a write to them faults. `rows` are nm's:
     (address, size, type, C name). PE symbols carry no sizes: a variable runs
     to the next higher address, or to the end of its section, and names at the
     same address share the extent."""
@@ -305,23 +307,23 @@ def variable_table(rows, pinned, addresses):
               and "__stop_" + name[len("__start_"):] in by_name]
     every = sorted({row[0] for row in rows})
     variables, taken = [], set()
-    def add(address, size, name, limit):
+    def add(address, size, name, limit, flag=""):
         if not size:
             above = bisect.bisect_right(every, address)
             size = min(every[above] if above < len(every) else limit, limit) - address
-        variables.append((address, size, name))
+        variables.append((address, size, name, flag))
         taken.add((address, name))
     for start, stop in ranges:
         for address, size, kind, name in rows:
             if kind in "DdBb" and start <= address < stop and not name.startswith(("__start_", "__stop_")):
                 add(address, size, name, stop)
     for address, size, kind, name in rows:
-        if kind in "DdBbRr" and name in addresses and (address, name) not in taken:
-            add(address, size, name, 0xFFFFFFFF)
+        if kind in "DdBbRr" and name in addresses and name in owned and (address, name) not in taken:
+            add(address, size, name, 0xFFFFFFFF, " ro" if kind in "Rr" else "")
     lines, seen = [], {}
-    for address, size, name in sorted(variables):
+    for address, size, name, flag in sorted(variables):
         seen[name] = seen.get(name, 0) + 1
-        lines.append(f"{address:08x} {size:08x} {name if seen[name] == 1 else f'{name}#{seen[name]}'}\n")
+        lines.append(f"{address:08x} {size:08x} {name if seen[name] == 1 else f'{name}#{seen[name]}'}{flag}\n")
     lines += [f"{address:08x} 00000000 {name} pinned\n" for name, address in sorted(pinned.items())]
     return lines
 
@@ -1174,7 +1176,7 @@ def main():
         if os.path.exists(obj(source) + ".aliased"):
             with open(obj(source) + ".aliased") as handle:
                 undefined.update(handle.read().split())
-    native_defined, _, native_undefined = symbols([obj(s) for s in NATIVE])
+    native_defined, native_tentative, native_undefined = symbols([obj(s) for s in NATIVE])
     with open("config/slus_01411/functions.csv") as handle:
         rows = list(csv.DictReader(handle))
     functions = {row["name"]: row["status"] for row in rows}
@@ -1472,7 +1474,8 @@ def main():
     # above, whose hash is the build id and whose data entries a state
     # carried between builds must find in the same place.
     with open(f"{options.build}/symbols/{build_id}.vars.txt", "w") as handle:
-        handle.writelines(variable_table(nm_rows, pinned, addresses))
+        handle.writelines(variable_table(nm_rows, pinned, addresses,
+                                       game_defined | tentative | native_defined | native_tentative))
     with open(f"{options.build}/buildid", "w") as handle:
         handle.write(build_id + "\n")
     # The commit, for crash reports (src/pc/debug/monitor.c): "unknown" in

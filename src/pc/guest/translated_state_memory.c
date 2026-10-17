@@ -6,6 +6,7 @@
 #include "translated_state_memory.h"
 #include "translated_runtime.h"
 #include "state_io.h"
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
@@ -199,22 +200,24 @@ int Memories_NativeMemoryApply(MemoriesNativeMemoryState *pending)
     return 0;
 }
 /* One native word of a saved state, where it belongs now: an address in
- * the game's image moves with the image (by the two builds' symbol tables
- * for another build's state, translated_state_symbols.c), one in a saved
- * region moves with that region. `fallback`, when not NULL, is what the
- * word holds in this build: a word of a game global (a constant table of
- * string or function addresses) that another build's table cannot carry
- * takes this build's own value when that is an address in its image. */
+ * the old image (classified by the OLD image's size) moves with the image,
+ * or for another build's state by the two symbol tables
+ * (translated_state_symbols.c), whose answer is certain or a refusal; an
+ * address in a saved region moves with that region. The pre-load check
+ * (Memories_NativeSymbolsScan over the same words with the same `stack`)
+ * has refused every state with a word that cannot be carried, so one here
+ * is a broken invariant, not a guess to make. */
 static uint64_t relocate_word(MemoriesNativeMemoryState *pending, uint64_t word, uintptr_t old_image,
-                              uintptr_t new_image, size_t image_size, const uint64_t *fallback)
+                              uintptr_t new_image, size_t old_size, int stack)
 {
-    if (word >= old_image && word - old_image < image_size) {
+    if (word >= old_image && word - old_image < old_size) {
         uint64_t mapped = word - old_image;
-        if (!Memories_NativeSymbolsActive() || !Memories_NativeSymbolsMap(word - old_image, &mapped))
-            return new_image + mapped;
-        if (fallback && *fallback >= new_image && *fallback - new_image < Memories_NativeSymbolsImageSize())
-            return *fallback;
-        return word;
+        if (Memories_NativeSymbolsActive() && Memories_NativeSymbolsMap(word - old_image, stack, &mapped)) {
+            fprintf(stderr, "memories-pc: ARM64 state: offset 0x%llx passed the pre-load check and cannot be "
+                    "carried\n", (unsigned long long)(word - old_image));
+            abort();
+        }
+        return new_image + mapped;
     }
     if (pending->count && word >= pending->relocations[0].host) {
         /* Upper bound selects the owning region at a shared endpoint.
@@ -236,69 +239,35 @@ static uint64_t relocate_word(MemoriesNativeMemoryState *pending, uint64_t word,
     return word;
 }
 void Memories_NativeMemoryRelocate(MemoriesNativeMemoryState *pending, void *data, size_t size,
-                                  uintptr_t old_image, uintptr_t new_image, size_t image_size)
+                                  uintptr_t old_image, uintptr_t new_image, size_t old_size, int stack)
 {
     uint8_t *bytes = data;
     /* Scan full native words only. PS1 addresses and integers stay 32 bits. */
     for (size_t offset = 0; offset <= size && size - offset >= sizeof(uint64_t); offset += sizeof(uint64_t)) {
         uint64_t word, relocated;
         memcpy(&word, bytes + offset, sizeof(word));
-        relocated = relocate_word(pending, word, old_image, new_image, image_size, NULL);
+        relocated = relocate_word(pending, word, old_image, new_image, old_size, stack);
         if (word != relocated) memcpy(bytes + offset, &relocated, sizeof(relocated));
     }
 }
-/* A game global of this build that a saved region is restored into: its
- * own values can stand in for another build's addresses (relocate_word). */
-static int own_global(const MemoriesNativeMemoryState *pending, unsigned i)
-{
-    return Memories_NativeSymbolsActive() && !owned(pending->saved[i].flags) && !pending->created[i];
-}
-size_t Memories_NativeMemoryUncarried(MemoriesNativeMemoryState *pending, uintptr_t old_image, size_t image_size)
+size_t Memories_NativeMemoryUncarried(MemoriesNativeMemoryState *pending, uintptr_t old_image)
 {
     size_t missing = 0;
-    for (unsigned i = 0; i < pending->count; ++i) {
-        const uint8_t *saved = pending->payload[i];
-        const uint8_t *now = (const uint8_t *)pending->current[i];
-        size_t length = pending->saved[i].length;
-        if (!saved) continue;
-        for (size_t offset = 0; offset + sizeof(uint64_t) <= length; offset += sizeof(uint64_t)) {
-            uint64_t word, mapped, own;
-            memcpy(&word, saved + offset, sizeof(word));
-            if (word < old_image || word - old_image >= image_size || !Memories_NativeSymbolsMap(word - old_image, &mapped))
-                continue;
-            if (own_global(pending, i)) {
-                memcpy(&own, now + offset, sizeof(own));
-                if (own >= Memories_NativeImageBase() && own - Memories_NativeImageBase() < Memories_NativeSymbolsImageSize())
-                    continue;
-            }
-            missing++;
-        }
-    }
+    for (unsigned i = 0; i < pending->count; ++i)
+        if (pending->payload[i])
+            missing += Memories_NativeSymbolsScan(pending->payload[i], pending->saved[i].length, old_image, 0, 1);
     return missing;
 }
 /* Copy only guest game globals and managed heap payloads. Subsystems keep
  * explicit serializers; OS objects in native globals are never copied. */
 void Memories_NativeMemoryRestorePayloads(MemoriesNativeMemoryState *pending,
-                                         uintptr_t old_image, uintptr_t new_image, size_t image_size)
+                                         uintptr_t old_image, uintptr_t new_image, size_t old_size)
 {
     for (unsigned i = 0; i < pending->count; ++i) {
-        uint8_t *host = (uint8_t *)pending->current[i];
-        const uint8_t *saved = pending->payload[i];
-        size_t length = pending->saved[i].length;
-        int own = own_global(pending, i);
-        if (!saved) continue;
-        for (size_t offset = 0; offset < length;) {
-            uint64_t word, before, relocated;
-            if (length - offset < sizeof(uint64_t)) {
-                memcpy(host + offset, saved + offset, length - offset);
-                break;
-            }
-            memcpy(&word, saved + offset, sizeof(word));
-            memcpy(&before, host + offset, sizeof(before));
-            relocated = relocate_word(pending, word, old_image, new_image, image_size, own ? &before : NULL);
-            memcpy(host + offset, &relocated, sizeof(relocated));
-            offset += sizeof(uint64_t);
-        }
+        if (!pending->payload[i]) continue;
+        void *host = (void *)pending->current[i];
+        memcpy(host, pending->payload[i], pending->saved[i].length);
+        Memories_NativeMemoryRelocate(pending, host, pending->saved[i].length, old_image, new_image, old_size, 0);
     }
 }
 void Memories_NativeMemoryRemapGuests(MemoriesNativeMemoryState *pending, uint32_t from, uint32_t to, uint32_t size)

@@ -51,14 +51,13 @@ static uint8_t *pending_image;
 static size_t pending_size;
 static MemoriesNativeMemoryState *pending_memory;
 static uintptr_t restore_image_base;
-static size_t restore_image_size;
 
 void Memories_NativeStateRelocateField(const char *tag, void *data, size_t size)
 {
     if (!pending_memory || !strcmp(tag, "soft_gpu") || !strcmp(tag, "gte") ||
         !strcmp(tag, "arm64-jump-floats")) return;
     Memories_NativeMemoryRelocate(pending_memory, data, size, saved_entry.image_base,
-                                 restore_image_base, restore_image_size);
+                                 restore_image_base, saved_entry.image_size, 0);
 }
 
 #ifndef __APPLE__
@@ -207,7 +206,6 @@ static void apply(void)
     uintptr_t old_image = saved_entry.image_base;
     executable(&now);
     restore_image_base = now.image_base;
-    restore_image_size = now.image_size;
     hold(1);
     if (Memories_NativeMemoryApply(pending_memory)) {
         fprintf(stderr, "memories-pc: cannot recreate ARM64 state allocations\n");
@@ -218,8 +216,8 @@ static void apply(void)
      * is still a full pointer and adjacent counters never straddle fields. */
     chunk = Memories_StateFindChunk(&state, "arm64-stack", &length);
     Memories_NativeMemoryRelocate(pending_memory, (void *)chunk, length,
-                                 old_image, now.image_base, now.image_size);
-    Memories_NativeMemoryRestorePayloads(pending_memory, old_image, now.image_base, now.image_size);
+                                 old_image, now.image_base, saved_entry.image_size, 1);
+    Memories_NativeMemoryRestorePayloads(pending_memory, old_image, now.image_base, saved_entry.image_size);
     /* These serializers restore host-owned shop state and remap its text
      * before the saved PS1 memory is installed, as in the fixed backend. */
     DeckMenu_ShopState(&state);
@@ -232,7 +230,7 @@ static void apply(void)
     chunk = Memories_StateFindChunk(&state, "memory", &length);
     memcpy(GuestRuntime_Memory(), chunk, length);
     Memories_NativeMemoryRelocate(pending_memory, &saved_entry.context, 13 * sizeof(uint64_t),
-                                 old_image, now.image_base, now.image_size);
+                                 old_image, now.image_base, saved_entry.image_size, 1);
     chunk = Memories_StateFindChunk(&state, "arm64-stack", &length);
     memcpy((void *)(uintptr_t)saved_entry.context.sp, chunk, length);
     Memories_NativeMemoryFree(pending_memory); pending_memory = NULL;
@@ -415,17 +413,28 @@ int Memories_NativeStateLoad(const char *path, char *why, size_t size)
     pending_memory = Memories_NativeMemoryPrepare(&state, why, size);
     if (!pending_memory) { Memories_NativeSymbolsClear(); free(image); return -1; }
     if (other_build) {
-        /* Every chunk at every byte, but the saved regions word by word
-         * with this build's own values beside them (they are restored so,
-         * Memories_NativeMemoryRestorePayloads). */
-        size_t missing = Memories_NativeMemoryUncarried(pending_memory, saved_entry.image_base,
-                                                        saved_entry.image_size);
+        /* The words apply() relocates, classified as it will: the stack
+         * and the saved registers as stack, the saved regions word by
+         * word, and the subsystems' chunks, whose fields relocate at any
+         * offset, at every byte. Not "memory" (PS1 RAM, copied as it is:
+         * a guest store of a host address is lowered to a 4-byte token or
+         * aborts, the only saved native frames are on the game stack, and
+         * the same build's loads have never relocated it), nor the chunks
+         * relocation skips (Memories_NativeStateRelocateField). */
+        size_t missing = Memories_NativeMemoryUncarried(pending_memory, saved_entry.image_base);
+        missing += Memories_NativeSymbolsScan((const uint8_t *)&saved_entry.context, 13 * sizeof(uint64_t),
+                                              saved_entry.image_base, 1, 1);
         for (at = 16; at + 20 <= state.image_size;) {
             uint32_t bytes;
+            char tag[17] = {0};
             memcpy(&bytes, image + at + 16, sizeof(bytes));
-            if (strncmp((const char *)image + at, "arm64-regions", 16))
-                missing += Memories_NativeSymbolsScan(image + at + 20, bytes, saved_entry.image_base,
-                                                      saved_entry.image_size);
+            memcpy(tag, image + at, 16);
+            if (!strcmp(tag, "arm64-stack"))
+                missing += Memories_NativeSymbolsScan(image + at + 20, bytes, saved_entry.image_base, 1, 1);
+            else if (strcmp(tag, "arm64-regions") && strcmp(tag, "arm64-entry") && strcmp(tag, "arm64-symbols") &&
+                     strcmp(tag, "memory") && strcmp(tag, "soft_gpu") && strcmp(tag, "gte") &&
+                     strcmp(tag, "arm64-jump-floats"))
+                missing += Memories_NativeSymbolsScan(image + at + 20, bytes, saved_entry.image_base, 0, 0);
             at += 20 + bytes;
         }
         if (missing) {

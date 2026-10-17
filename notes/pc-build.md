@@ -4648,21 +4648,27 @@ or 0xC0000000 starts the game all the same.
   fixed game's states for one launch when it loaded elsewhere) is not
   built. The log says `libgame.so at <address> (translated)`: a crash
   address is symbolized as its offset from that. **Across builds** (an app
-  update, 2026-10-17): `symbols/<id>.txt` holds functions and data as
-  offsets into `libgame.so` (linked at 0); crash reports add the load
-  address (`debug/symbols.c`), and every state carries its build's table
-  (`arm64-symbols`). A state of another build is carried over by name
-  (`translated_state_symbols.c`): an address in a function or variable
-  moves with it (inside one whose size changed, only its start), one in
-  the gap after a symbol moves with it when the gap is the same size
-  (ld.lld's `__CortexA53843419_<offset>` erratum veneers go by the
-  instruction they stand in for: to the new build's veneer for it, or to
-  the instruction itself where it needs none now), and a word of a game global that neither carries takes this
-  build's own value there when that is an address in its image (constant
-  tables of string literals). Anything else refuses the load, before
-  anything is applied, with how many addresses changed. A state of the
-  fixed-memory game (v0.3.0) is refused: "this state uses another
-  architecture or state format".
+  update, 2026-10-17): `symbols/<id>.txt` is version 2
+  (`tools/pc/translated_symbols.py`): every function, data object and
+  section start of `libgame.so` (linked at 0) by offset, statics qualified
+  by their unit (`duel.c:put`), with a hash of each one's content and of
+  the gap after it (dynamically relocated words and the instruction fields
+  that depend on placement left out). Crash reports add the load address
+  (`debug/symbols.c`, an ordinary unit, so its table is never in a state).
+  Every state carries its build's table (`arm64-symbols`). A state of
+  another build is either carried right or refused
+  (`translated_state_symbols.c`): a function's start goes to the function
+  of that name; a return address inside a function only on the native
+  stack and only when the function's content is the same; the start or
+  inside of a data object, or the gap after it (string pools), only when
+  its content (and the gap's) is the same; a name that is not unique,
+  aliases that split, code padding and veneers, and anything past the old
+  image are refused. The pre-load check classifies exactly the words
+  apply() relocates, with the old image's size, and the load is refused,
+  with how many addresses changed, before anything is applied; PS1 RAM
+  (`memory`) is copied as it is and not scanned, as the same build's loads
+  never relocated it. A state of the fixed-memory game (v0.3.0) is
+  refused: "this state uses another architecture or state format".
 - **Code mods** (2026-10-16, [modding.md, "Android code
   mods"](modding.md#android-code-mods-aarch64-translated)) are
   `<library>.aarch64-translated.o`: each unit of the mod through the guest

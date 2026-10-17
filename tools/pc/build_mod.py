@@ -53,7 +53,8 @@ The 64-bit targets need clang (the same one builds all three) and differ:
                   unit is (LLVM's AArch64 back end mis-sizes stores through a
                   4-byte pointer)
   aarch64-translated  through the game's guest pass (aarch64-translated,
-                  below), which needs clang 21 or older and the pass itself
+                  below), which needs the pass itself (the SDK ships it) and
+                  a clang no newer than the LLVM the pass is built against
   both            -fms-extensions: the game's stored pointers stay 4 bytes
                   (G32, src/port_ptr.h); src/pc/mods/prelude64.h first, which
                   also declares the guest tables mods reach most, so a mod
@@ -150,10 +151,12 @@ TRANSLATED_FLAGS = ["-std=gnu11", "-O0", "-fno-common", "-fno-stack-protector", 
                     "-ffp-contract=off", "-fwrapv", "-DMEMORIES_PC", "-DMEMORIES_MOD", "-DMEMORIES_TRANSLATED",
                     "-D_LANGUAGE_C", "-DLANGUAGE_C", "-Wall", "-Wno-unused-function", "-Wno-missing-braces",
                     "-Wno-gnu-folding-constant", "-Wno-pointer-to-int-cast"]
-# The newest LLVM whose IR the guest pass reads: it is built against
-# LLVM 21 (tools/pc/macos_toolchain.json), and a newer clang's IR may not
-# parse there.
-TRANSLATED_CLANG_MAX = 21
+# The LLVM a guest pass is taken to be built against when it cannot say (one
+# built before memories-guest-ir had --llvm-major): the game's own,
+# tools/pc/macos_toolchain.json. The pass in an SDK is built against the LLVM
+# of the SDK's clang (tools/pc/sdk_llvm.json: llvm-mingw's, LLVM_MINGW_CLANG
+# below); in a checkout, tools/pc/llvm_guest.py builds it against the game's.
+GUEST_LLVM_DEFAULT = 21
 
 
 # The toolchain the game itself is built with, which has clang, ld.lld and
@@ -162,6 +165,9 @@ TRANSLATED_CLANG_MAX = 21
 # fetch. Named here for a modder who has none (toolchain_help), since the
 # SDK ships neither script; test_build_mod_toolchain.py keeps them the same.
 LLVM_MINGW_RELEASE = "20260922"
+# That release's clang, and so the LLVM the SDK's guest pass is built against
+# (tools/pc/sdk_llvm.json; test_build_mod_toolchain.py keeps them the same).
+LLVM_MINGW_CLANG = 22
 LLVM_MINGW_DOWNLOADS = {
     "windows": "https://github.com/mstorsjo/llvm-mingw/releases/download/20260922/"
                "llvm-mingw-20260922-ucrt-x86_64.zip",
@@ -673,19 +679,78 @@ def through_pass(command, source, obj):
 # build_arm64.py writes and the SDK carries), and the pass itself from
 # MEMORIES_GUEST_IR, the SDK's tools/memories-guest-ir, or in the repository
 # llvm_guest.py, which builds it.
+#
+# The clang writes the IR the pass reads and compiles the IR the pass writes
+# (the same clang, start to end), and LLVM reads the IR of its own version
+# or an older one, never a newer. So the clang may not be newer than the LLVM
+# the pass is built against (`memories-guest-ir --llvm-major`): the SDK's pass
+# is built against its llvm-mingw's clang, the checkout's against the game's
+# LLVM 21 (where the NDK's clang 21 goes, not llvm-mingw's 22).
 
 _translation = {}   # translation_problem's findings, for the games being built for
 
 
-def clang_major(path):
-    """The major version of the clang at `path`, or None."""
+@functools.lru_cache(maxsize=None)
+def clang_version_text(path):
+    """What `path --version` prints, "" when it cannot run."""
     try:
-        text = subprocess.run([path, "--version"], capture_output=True, text=True, encoding="utf-8",
+        return subprocess.run([path, "--version"], capture_output=True, text=True, encoding="utf-8",
                               errors="replace").stdout
     except OSError:
+        return ""
+
+
+def is_apple_clang(path):
+    """Whether `path` is Apple's clang, whose version numbers (Apple clang 17)
+    are Xcode's, not LLVM's: no LLVM major can be read off them."""
+    return "Apple clang" in clang_version_text(path)
+
+
+def clang_major(path):
+    """The LLVM major version of the clang at `path`, or None: also for
+    Apple's, which is_apple_clang tells apart."""
+    if is_apple_clang(path):
         return None
-    match = re.search(r"clang version (\d+)", text)
+    match = re.search(r"clang version (\d+)", clang_version_text(path))
     return int(match.group(1)) if match else None
+
+
+@functools.lru_cache(maxsize=None)
+def tool_llvm_major(tool):
+    """The LLVM major version the guest pass `tool` is built against (its
+    --llvm-major), or None for one that cannot say (built before it could)."""
+    try:
+        result = subprocess.run([tool, "--llvm-major"], capture_output=True, text=True, timeout=60)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    text = result.stdout.strip()
+    return int(text) if result.returncode == 0 and text.isdigit() else None
+
+
+def guest_pass_major(tool=None):
+    """The LLVM major version of the guest pass in use (`tool`, else the one
+    translation_problem found, else one built before in this checkout),
+    GUEST_LLVM_DEFAULT when it cannot say."""
+    tool = tool or _translation.get("tool") or guest_ir_tool(False)[0]
+    return (tool_llvm_major(tool) if tool else None) or GUEST_LLVM_DEFAULT
+
+
+def clang_fits(path, major, pass_major):
+    """Whether a clang (`major`, its LLVM version) can go with a guest pass of
+    LLVM `pass_major`: no newer than the pass. Apple's has no LLVM version
+    to compare: it is tried, and the first IR that does not parse says so
+    (hint_for)."""
+    return is_apple_clang(path) if major is None else major <= pass_major
+
+
+def pick_clang(candidates, pass_major):
+    """The first of `candidates` ([(clang, its major)]) that fits the pass and
+    has ld.lld: one with a version before any Apple's."""
+    for versioned in (True, False):
+        for path, major in candidates:
+            if (major is not None) == versioned and clang_fits(path, major, pass_major) and linker_for(path):
+                return path
+    return None
 
 
 def ndk_clang():
@@ -717,10 +782,10 @@ def translated_candidates():
 
 def translated_clang():
     """The clang for aarch64-translated: the first candidate no newer than
-    TRANSLATED_CLANG_MAX, with ld.lld beside it or on PATH."""
-    for path, major in translated_candidates():
-        if major is not None and major <= TRANSLATED_CLANG_MAX and linker_for(path):
-            return path
+    the guest pass's LLVM (pick_clang), with ld.lld beside it or on PATH."""
+    path = pick_clang(translated_candidates(), guest_pass_major())
+    if path:
+        return path
     sys.exit(translation_problem(None) or "build_mod: no clang for aarch64-translated")
 
 
@@ -753,11 +818,52 @@ def guest_ir_tool(build_tool=True):
 
 
 GUEST_IR_HELP = (
-    "The guest pass is memories-guest-ir: tools/pc/llvm/guest_ir.cpp of the game's source, built against "
-    "LLVM 21.1.8. In a checkout of the source, `python tools/pc/llvm_guest.py` builds it and prints where it "
-    "is (on Windows with MEMORIES_GUEST_LLVM naming an LLVM 21.1.8 build and MEMORIES_GUEST_CXX the C++ "
-    "compiler it was built with; on Linux and macOS it uses the official LLVM 21.1.8 release). Set "
-    "MEMORIES_GUEST_IR to that file, or put it in the SDK's tools folder, and run build_mod.py again.")
+    "The guest pass is memories-guest-ir (tools/pc/llvm/guest_ir.cpp of the game's source). A release's SDK "
+    "carries it in its tools folder, built for the clang of the toolchain the SDK names (llvm-mingw "
+    + LLVM_MINGW_RELEASE + ", clang " + str(LLVM_MINGW_CLANG) + "): unpack the whole SDK, or a newer release's. In a "
+    "checkout of the source, `python tools/pc/llvm_guest.py` builds it against the game's LLVM 21.1.8 and "
+    "prints where it is (on Windows with MEMORIES_GUEST_LLVM naming an LLVM 21.1.8 build and "
+    "MEMORIES_GUEST_CXX the C++ compiler it was built with; on Linux and macOS it uses the official LLVM "
+    "21.1.8 release). Set MEMORIES_GUEST_IR to a pass, or put it in the SDK's tools folder, and run "
+    "build_mod.py again.")
+
+
+def clang_problem(candidates, tool, major):
+    """Why no clang of `candidates` goes with the guest pass `tool` (LLVM
+    `major`), and which would."""
+    found = "; ".join(f"{path} is clang {each}" if each is not None else
+                      f"{path} is Apple's clang (no ld.lld beside it or on PATH)" if is_apple_clang(path) else
+                      f"{path} gives no version" for path, each in candidates) or "no clang was found"
+    ways = []
+    if major >= LLVM_MINGW_CLANG:
+        ways.append(f"llvm-mingw {LLVM_MINGW_RELEASE}'s clang is {LLVM_MINGW_CLANG}, the toolchain the game is built "
+                    f"with ({LLVM_MINGW_DOWNLOADS['windows' if os.name == 'nt' else 'linux']}; put its bin folder on "
+                    "PATH or set MEMORIES_MOD_CC to its clang)")
+    if major >= 21:
+        ways.append("the Android NDK r29's clang is 21 (set ANDROID_NDK_ROOT to the NDK, with MEMORIES_MOD_CC "
+                    "unset: build_mod.py then takes its clang when the other one does not fit)")
+    ways.append(f"or set MEMORIES_MOD_CC to a clang of LLVM {major} or older, with ld.lld beside it")
+    return (f"build_mod: the Android object ({TRANSLATED}) needs a clang of LLVM {major} or older, with ld.lld: "
+            f"the guest pass ({tool}) is built against LLVM {major}, which reads the IR of its own clang version or "
+            f"an older one, and the clang compiles the IR the pass writes ({found}). Use one of: " + "; ".join(ways) + ".")
+
+
+def hint_for(clang, stage):
+    """A line for a failure of the guest pass or of the clang on the IR it
+    wrote (`stage`: "pass" or "clang"), when the clang could be the cause."""
+    pass_major = guest_pass_major()
+    if is_apple_clang(clang):
+        return (f"\n{clang} is Apple's clang, whose version numbers are not LLVM's, so build_mod.py cannot tell "
+                f"whether it matches the guest pass (LLVM {pass_major}). If the error above is about the IR, use an "
+                f"LLVM clang of version {pass_major} or older instead (Homebrew: brew install llvm lld, then "
+                "MEMORIES_MOD_CC=$(brew --prefix llvm)/bin/clang).")
+    major = clang_major(clang)
+    if stage == "pass" and major is not None and major > pass_major:
+        return f"\n{clang} is clang {major}, newer than the guest pass's LLVM {pass_major}: use a clang {pass_major} or older."
+    if stage == "clang" and major is not None and major < pass_major:
+        return (f"\n{clang} is clang {major}, older than the guest pass's LLVM {pass_major}, whose IR it may not "
+                f"read: if the error above is about the IR, use a clang {pass_major}.")
+    return ""
 
 
 def translation_problem(games, build_tool=True):
@@ -765,19 +871,14 @@ def translation_problem(games, build_tool=True):
     With `games`, it also finds the game's tables (mod_translation.json and
     mod_signatures.json in the first of `games` that has them) and keeps
     them, with the pass, for the build."""
-    candidates = translated_candidates()
-    if not any(major is not None and major <= TRANSLATED_CLANG_MAX and linker_for(path)
-               for path, major in candidates):
-        found = "; ".join(f"{path} is clang {major}" if major is not None else f"{path} gives no version"
-                          for path, major in candidates) or "no clang was found"
-        return (f"build_mod: the Android object ({TRANSLATED}) needs clang {TRANSLATED_CLANG_MAX} or older, with "
-                f"ld.lld: the game's guest pass reads LLVM {TRANSLATED_CLANG_MAX}'s IR, and a newer clang's may "
-                f"not parse there ({found}). The Android NDK r29's clang is {TRANSLATED_CLANG_MAX}: set "
-                "ANDROID_NDK_ROOT to the NDK (build_mod.py takes its clang when the other one is newer), or "
-                "MEMORIES_MOD_CC to its toolchains/llvm/prebuilt/<host>/bin/clang.")
+    # The pass first: which clangs fit depends on the LLVM it is built against.
     tool, why = guest_ir_tool(build_tool)
     if not tool:
         return f"build_mod: the Android object ({TRANSLATED}) needs the game's guest pass: {why}.\n{GUEST_IR_HELP}"
+    candidates = translated_candidates()
+    major = guest_pass_major(tool)
+    if not pick_clang(candidates, major):
+        return clang_problem(candidates, tool, major)
     if games is None:
         return None
     for build in games:
@@ -818,8 +919,9 @@ def translated_libc(build):
         return set()
 
 
-def guest_pass(operation, text, **options):
-    """One operation of the guest pass (llvm_guest.process, without its cache)."""
+def guest_pass(operation, text, hint="", **options):
+    """One operation of the guest pass (llvm_guest.process, without its cache);
+    `hint` is added to what a failure says."""
     tool = translation_context()["tool"]
     with tempfile.TemporaryDirectory() as folder:
         source, output, config = (os.path.join(folder, name) for name in ("input.ll", "output", "options.json"))
@@ -830,7 +932,7 @@ def guest_pass(operation, text, **options):
         result = subprocess.run([tool, operation, source, output, config], capture_output=True, text=True,
                                 encoding="utf-8", errors="replace")
         if result.returncode:
-            sys.exit(f"build_mod: the guest pass ({operation}) failed:\n{result.stderr.strip()}")
+            sys.exit(f"build_mod: the guest pass ({operation}) failed:\n{result.stderr.strip()}{hint}")
         with open(output, encoding="utf-8") as handle:
             result = handle.read()
     return json.loads(result) if operation == "inspect" else result
@@ -869,7 +971,8 @@ def translate_unit(command, source, obj, index):
     run(command + ["-S", "-emit-llvm", source, "-o", raw])
     with open(raw, encoding="utf-8") as handle:
         text = handle.read()
-    text = guest_pass("normalize", text, renames=context["aliases"], drop_definitions=[], export_functions=[])
+    text = guest_pass("normalize", text, hint_for(command[0], "pass"), renames=context["aliases"],
+                      drop_definitions=[], export_functions=[])
     entry = check_signatures(guest_pass("inspect", text)["signatures"], context["signatures"], source)
     text = guest_pass("normalize", text, renames=context["runtime"], drop_definitions=[], export_functions=[])
     text = guest_pass("translate", text, pins=context["pins"], registration=f"MemoriesModRegisterUnit_{index}",
@@ -877,8 +980,11 @@ def translate_unit(command, source, obj, index):
     ir = obj[:-2] + ".ll"
     with open(ir, "w", encoding="utf-8", newline="\n") as handle:
         handle.write(text)
-    run([command[0], *TARGET_FLAGS[TRANSLATED], "-O2", "-fno-strict-aliasing", "-Wno-unused-command-line-argument",
-         "-x", "ir", "-c", ir, "-o", obj])
+    try:
+        run([command[0], *TARGET_FLAGS[TRANSLATED], "-O2", "-fno-strict-aliasing",
+             "-Wno-unused-command-line-argument", "-x", "ir", "-c", ir, "-o", obj])
+    except SystemExit as failed:
+        sys.exit(f"{failed.code}{hint_for(command[0], 'clang')}")
     return entry
 
 
@@ -1080,6 +1186,10 @@ def main():
                              "aarch64-translated, the Android app's, or i386 alone when the compiler is gcc). "
                              "aarch64 (the fixed-memory Android game, not shipped) and macos (the translated "
                              "macOS ARM64 dylib, build_mod_arm64.py) are built only when named")
+    parser.add_argument("--ir-out", metavar="DIR",
+                        help="keep the LLVM IR of an aarch64-translated build in DIR: each unit's <name>.raw.ll "
+                             "from clang and <name>.ll as the guest pass wrote it (a build that is already up to "
+                             "date writes none)")
     parser.add_argument("--game", action="append",
                         help="a game build directory to check the mod's names against (repeatable, for one "
                              "--target; default: the target's builds in tmp/pc when they exist)")
@@ -1119,8 +1229,8 @@ def main():
             build_arm64_mod(options.directory, options.out,
                             game=options.game[0] if options.game else None)
             continue
-        output = build(options.directory, options.out, games=options.game, target=target,
-                       build_tool=target in (options.target or ()))
+        output = build(options.directory, options.out, objects_dir=options.ir_out if target == TRANSLATED else None,
+                       games=options.game, target=target, build_tool=target in (options.target or ()))
         if not output:
             print(f"{options.directory}: no C sources; a data-only mod needs no build")
             break

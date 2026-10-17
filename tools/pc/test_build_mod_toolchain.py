@@ -8,11 +8,13 @@ the test's own).
 - It names exactly what is missing of clang, ld.lld and llvm-objcopy.
 - Without any of them, and no gcc, it builds nothing and says so; asked for
   a 64-bit target by name without them, it builds nothing either."""
-import contextlib, io, os, pathlib, shutil, stat, sys, tempfile, unittest
+import contextlib, io, json, os, pathlib, shutil, stat, subprocess, sys, tempfile, unittest
 from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import build_mod, build_win32_deps, fetch_tools
+
+TOOL_LLVM_MAJOR = build_mod.tool_llvm_major.__wrapped__   # what the tests below replace
 
 EXE = ".exe" if os.name == "nt" else ""
 
@@ -23,8 +25,13 @@ class Toolchain(unittest.TestCase):
         self.addCleanup(shutil.rmtree, self.bin, ignore_errors=True)
         environment = {name: value for name, value in os.environ.items() if name != "MEMORIES_MOD_CC"}
         environment["PATH"] = self.bin
+        # The LLVM the guest pass says it is built against (--llvm-major): the
+        # programs here are empty files that do not run, so tests set it
+        # (None: a pass that cannot say).
+        self.pass_major = None
         patches = [mock.patch.dict(os.environ, environment, clear=True),
-                   mock.patch.object(build_mod, "LLVM_MINGW", os.path.join(self.bin, "no-llvm-mingw"))]
+                   mock.patch.object(build_mod, "LLVM_MINGW", os.path.join(self.bin, "no-llvm-mingw")),
+                   mock.patch.object(build_mod, "tool_llvm_major", lambda tool: self.pass_major)]
         for patch in patches:
             patch.start()
             self.addCleanup(patch.stop)
@@ -109,16 +116,115 @@ class Toolchain(unittest.TestCase):
         with mock.patch.dict(os.environ, {"MEMORIES_MOD_CC": os.path.join(self.bin, "nowhere", "clang" + EXE)}):
             self.assertIn("which is not there", build_mod.toolchain_help(build_mod.missing_64bit()))
 
-    def test_translated_needs_clang_21(self):
-        """aarch64-translated: a clang newer than the guest pass's LLVM is
-        named with its version, with the NDK's as the way out."""
+    def with_pass(self, candidates, major):
+        """translation_problem(None) for a guest pass built against LLVM
+        `major` (None: one that cannot say) and these [(clang, its major)]."""
+        self.pass_major = major
+        tool = self.program("memories-guest-ir")
+        with mock.patch.object(build_mod, "translated_candidates", lambda: candidates), \
+                mock.patch.dict(os.environ, {"MEMORIES_GUEST_IR": tool}):
+            return build_mod.translation_problem(None)
+
+    def test_translated_clang_follows_the_pass(self):
+        """aarch64-translated: the clang may not be newer than the LLVM the
+        guest pass is built against (the pass reads that clang's IR, and the
+        clang reads what the pass writes). The game's own pass is LLVM 21:
+        llvm-mingw's clang 22 is refused, with the NDK's as the way out; an
+        SDK's pass is LLVM 22, built for llvm-mingw's clang."""
         clang = self.program("clang")
         self.program("ld.lld")
-        with mock.patch.object(build_mod, "translated_candidates", lambda: [(clang, 22)]):
-            text = build_mod.translation_problem(None)
-        self.assertIn("needs clang 21 or older", text)
+        text = self.with_pass([(clang, 22)], 21)
+        self.assertIn("needs a clang of LLVM 21 or older", text)
         self.assertIn(f"{clang} is clang 22", text)
         self.assertIn("ANDROID_NDK_ROOT", text)
+        self.assertNotIn("llvm-mingw " + build_mod.LLVM_MINGW_RELEASE, text)   # newer than the pass: no way out
+        self.assertIsNone(self.with_pass([(clang, 21)], 21))
+        self.assertIsNone(self.with_pass([(clang, 22)], 22))
+        self.assertIsNone(self.with_pass([(clang, 21)], 22))   # older than the pass: allowed
+        text = self.with_pass([(clang, 23)], 22)
+        self.assertIn("needs a clang of LLVM 22 or older", text)
+        self.assertIn("llvm-mingw " + build_mod.LLVM_MINGW_RELEASE, text)
+        self.assertIn(build_mod.LLVM_MINGW_DOWNLOADS["windows" if os.name == "nt" else "linux"], text)
+        self.assertIn("MEMORIES_MOD_CC", text)
+        # A pass that cannot say is taken for the game's LLVM.
+        self.assertIsNone(self.with_pass([(clang, 21)], None))
+        self.assertIn("needs a clang of LLVM 21 or older", self.with_pass([(clang, 22)], None))
+        # Without ld.lld no clang fits, whatever its version.
+        os.remove(os.path.join(self.bin, "ld.lld" + EXE))
+        self.assertIn("needs a clang of LLVM 22 or older", self.with_pass([(clang, 22)], 22))
+
+    def test_translated_apple_clang(self):
+        """Apple's clang has Xcode's version numbers, no LLVM major: it is not
+        compared, only tried, and after any clang with a version that fits."""
+        apple = self.program("clang")
+        self.program("ld.lld")
+        other = self.program("other-clang")
+        said = {apple: "Apple clang version 17.0.0 (clang-1700.0.13.5)\nTarget: arm64-apple-darwin24.0.0\n"}
+        with mock.patch.object(build_mod, "clang_version_text", lambda path: said.get(path, "")):
+            self.assertIsNone(build_mod.clang_major(apple))   # not 17
+            self.assertTrue(build_mod.is_apple_clang(apple))
+            self.assertIsNone(self.with_pass([(apple, None)], 21))
+            self.assertIsNone(self.with_pass([(apple, None)], 22))
+            self.assertEqual(build_mod.pick_clang([(apple, None), (other, 21)], 21), other)   # the numbered one first
+            self.assertEqual(build_mod.pick_clang([(apple, None), (other, 22)], 21), apple)
+            hint = build_mod.hint_for(apple, "pass")
+            self.assertIn("Apple's clang", hint)
+            self.assertIn("LLVM 21", hint)
+            self.assertIn("brew install llvm", hint)
+            # A program that prints no version at all is not Apple's.
+            self.assertIn("gives no version", self.with_pass([(other, None)], 21))
+
+    def test_clang_version_strings(self):
+        said = {"a": "clang version 22.1.8 (https://github.com/llvm/llvm-project.git ca79)\nTarget: x86_64-w64-windows-gnu\n",
+                "b": "Ubuntu clang version 18.1.3 (1ubuntu1)\nTarget: x86_64-pc-linux-gnu\n",
+                "c": "Homebrew clang version 21.1.8\nTarget: arm64-apple-darwin24.0.0\n",
+                "d": "Apple clang version 16.0.0 (clang-1600.0.26.6)\n",
+                "e": "gcc (Ubuntu 13.2.0) 13.2.0\n"}
+        with mock.patch.object(build_mod, "clang_version_text", lambda path: said[path]):
+            self.assertEqual([build_mod.clang_major(name) for name in "abcde"], [22, 18, 21, None, None])
+            self.assertEqual([build_mod.is_apple_clang(name) for name in "abcde"], [False, False, False, True, False])
+
+    def test_hint_for_a_clang_the_pass_cannot_work_with(self):
+        clang = self.program("clang")
+        self.pass_major = 21
+        with mock.patch.dict(os.environ, {"MEMORIES_GUEST_IR": self.program("memories-guest-ir")}):
+            with mock.patch.object(build_mod, "clang_version_text", lambda path: "clang version 22.1.8\n"):
+                self.assertIn("newer than the guest pass's LLVM 21", build_mod.hint_for(clang, "pass"))
+                self.assertEqual(build_mod.hint_for(clang, "clang"), "")
+            with mock.patch.object(build_mod, "clang_version_text", lambda path: "clang version 19.1.0\n"):
+                self.assertIn("older than the guest pass's LLVM 21", build_mod.hint_for(clang, "clang"))
+                self.assertEqual(build_mod.hint_for(clang, "pass"), "")
+
+    def test_the_pass_says_its_llvm(self):
+        """tool_llvm_major asks the pass (--llvm-major); a pass that cannot
+        say (an older build, a program that does not run) is None, which
+        build_mod.py takes for the game's LLVM."""
+        def run(code, out):
+            return lambda command, **options: subprocess.CompletedProcess(command, code, out, "")
+        for code, out, expected in ((0, "22\n", 22), (0, "21", 21), (1, "", None), (1, "22\n", None),
+                                    (0, "LLVM 22", None), (0, "", None)):
+            with mock.patch.object(build_mod.subprocess, "run", run(code, out)):
+                self.assertEqual(TOOL_LLVM_MAJOR("tool"), expected, (code, out))
+        def missing(command, **options):
+            raise FileNotFoundError(command[0])
+        with mock.patch.object(build_mod.subprocess, "run", missing):
+            self.assertIsNone(TOOL_LLVM_MAJOR("tool"))
+        tool = self.program("memories-guest-ir")
+        for major, expected in ((22, 22), (None, build_mod.GUEST_LLVM_DEFAULT)):
+            self.pass_major = major
+            self.assertEqual(build_mod.guest_pass_major(tool), expected)
+
+    def test_the_sdk_pass_is_built_for_its_clang(self):
+        """tools/pc/sdk_llvm.json pins the LLVM of the SDK's guest pass: the
+        major of the clang in the toolchain the SDK names (llvm-mingw)."""
+        with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "sdk_llvm.json"), encoding="utf-8") as handle:
+            config = json.load(handle)
+        self.assertEqual(config["llvm_major"], build_mod.LLVM_MINGW_CLANG)
+        self.assertEqual(config["version"].split(".")[0], str(config["llvm_major"]))
+        for name, entry in config["platforms"].items():
+            self.assertIn(f"/llvmorg-{config['version']}/", entry["url"], name)
+            self.assertIn(entry["method"], ("release", "source"), name)
+        self.assertEqual(set(config["platforms"]), {"linux", "windows"})
 
     def test_translated_needs_the_guest_pass(self):
         clang = self.program("clang")

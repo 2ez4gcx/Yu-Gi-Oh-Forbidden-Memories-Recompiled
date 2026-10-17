@@ -573,7 +573,7 @@ static void a_span_past_the_copy_is_said(void)
     noted_span = logged_span = 0;
     load(big);
     free(big);
-    assert(the_unit()->results_to - the_unit()->results_from > TEXT_UNIT_RESULTS);
+    assert(TextListing_Extra(the_unit())->results_to - TextListing_Extra(the_unit())->results_from > TEXT_UNIT_RESULTS);
     assert(noted_span == 1 && logged_span == 1);   /* once, at load */
     set("Weevil", "Joe", 0, 1);
     you = call_to(0x050E, 0x44, 0);

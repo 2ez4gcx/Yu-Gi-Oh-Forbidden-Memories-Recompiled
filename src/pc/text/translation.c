@@ -664,10 +664,10 @@ static const unsigned char *unit_side_name(int id)
 /* The last control code of `unit` that starts before `at`, or -1. */
 static int control_before(const TextUnit *unit, uint32_t at)
 {
-    int low = 0, high = unit->control_count - 1, found = -1;
+    int low = 0, high = TextListing_Extra(unit)->control_count - 1, found = -1;
     while (low <= high) {
         int middle = (low + high) / 2;
-        if (unit->controls[middle] < at) {
+        if (TextListing_Extra(unit)->controls[middle] < at) {
             found = middle;
             low = middle + 1;
         } else {
@@ -688,7 +688,7 @@ static int unit_step_before(UnitResults *r, uint32_t call, int shift, int apply)
 {
     const unsigned char *original = r->unit->data;
     int last = control_before(r->unit, call), step;
-    uint32_t at = last < 0 ? 0 : r->unit->controls[last];
+    uint32_t at = last < 0 ? 0 : TextListing_Extra(r->unit)->controls[last];
     if (call < r->from + 4 || call >= r->from + r->size) return 0;
     if (last >= 0 && at >= r->from && at + 3 <= call && original[at] == 0xF8 && original[at + 1] == 0x02) {
         step = r->data[at + 2 - r->from] - shift;
@@ -743,13 +743,13 @@ static void note_results(TextUnit *unit, const char *mod, const char *name)
         if (string->offset < from) from = string->offset;
         if (string->offset > last) last = string->offset;
     }
-    unit->results_from = unit->results_to = 0;
+    TextListing_Extra(unit)->results_from = TextListing_Extra(unit)->results_to = 0;
     if (from == (size_t)-1) return;
     for (i = 0; i < unit->string_count; i++) {
         if (unit->strings[i].offset > last && unit->strings[i].offset < to) to = unit->strings[i].offset;
     }
-    unit->results_from = from;
-    unit->results_to = to;
+    TextListing_Extra(unit)->results_from = from;
+    TextListing_Extra(unit)->results_to = to;
     if (to - from > TEXT_UNIT_RESULTS) {
         LOG(LOG_MODS, "text: %s: %s: the result strings 40-45 span %lu bytes, more than %d: the duel results show no names",
             mod ? mod : "language", name ? name : "", (unsigned long)(to - from), TEXT_UNIT_RESULTS);
@@ -771,8 +771,8 @@ static const unsigned char *unit_results_copy(const unsigned char *own)
     const TextUnit *unit = unit_at(text_address(own), &at);
     UnitResults *r;
     int i;
-    if (!side_name(TEXT_COM) || !unit || at < unit->results_from || at >= unit->results_to ||
-        unit->results_to - unit->results_from > TEXT_UNIT_RESULTS) {
+    if (!side_name(TEXT_COM) || !unit || at < TextListing_Extra(unit)->results_from || at >= TextListing_Extra(unit)->results_to ||
+        TextListing_Extra(unit)->results_to - TextListing_Extra(unit)->results_from > TEXT_UNIT_RESULTS) {
         return NULL;
     }
     r = unit_results_of(unit);
@@ -781,21 +781,21 @@ static const unsigned char *unit_results_copy(const unsigned char *own)
         next = (next + 1) % TEXT_UNIT_COPIES;
     }
     r->unit = unit;
-    r->from = unit->results_from;
-    r->size = unit->results_to - unit->results_from;
+    r->from = TextListing_Extra(unit)->results_from;
+    r->size = TextListing_Extra(unit)->results_to - TextListing_Extra(unit)->results_from;
     r->room = 0x7FFF;
     r->need = 0;
     r->you = r->won = 1;
     memcpy(r->data, unit->data + r->from, r->size);
     for (i = 0; i < unit->target_count; i++) {
-        uint32_t call = unit->target_calls[i];
+        uint32_t call = TextListing_Extra(unit)->target_calls[i];
         int base, id, shift;
         if (call == TEXT_NO_CALL || call < r->from || call >= r->from + r->size) continue;
         id = side_of(unit->targets[i], &base);
         if (id == TEXT_COM) {
             /* The step before COM, shorter by the name's letters past the label's. */
             int last = control_before(unit, call);
-            uint32_t step_at = last < 0 ? 0 : unit->controls[last];
+            uint32_t step_at = last < 0 ? 0 : TextListing_Extra(unit)->controls[last];
             shift = (side_letters() - base) * TEXT_RESULTS_LETTER;
             if (shift > r->need) r->need = shift;
             if (last >= 0 && step_at >= r->from && step_at + 3 <= call && unit->data[step_at] == 0xF8 &&
@@ -817,7 +817,7 @@ static const unsigned char *unit_results_copy(const unsigned char *own)
     }
     /* A side whose calls can all move does; else none of them does. */
     for (i = 0; i < unit->target_count; i++) {
-        uint32_t call = unit->target_calls[i];
+        uint32_t call = TextListing_Extra(unit)->target_calls[i];
         int base, id;
         if (call == TEXT_NO_CALL || call < r->from || call >= r->from + r->size) continue;
         id = side_of(unit->targets[i], &base);
@@ -1095,8 +1095,8 @@ unsigned char *Text_Retarget(unsigned char *cursor, unsigned target)
             unsigned char *dest = target < (unsigned)unit->target_count ? unit->targets[target]
                                                                        : unit->data + unit->size - 1;
             /* From the unit's result strings: the names go in. */
-            if (address - text_address(unit->data) >= unit->results_from &&
-                address - text_address(unit->data) < unit->results_to) {
+            if (address - text_address(unit->data) >= TextListing_Extra(unit)->results_from &&
+                address - text_address(unit->data) < TextListing_Extra(unit)->results_to) {
                 return unit_results_target(unit, NULL, dest);
             }
             return dest;

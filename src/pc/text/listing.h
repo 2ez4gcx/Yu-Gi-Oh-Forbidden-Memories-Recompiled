@@ -27,13 +27,23 @@ typedef struct {
     uint32_t offset;       /* into data */
 } TextLabel;
 
-#define TEXT_NO_CALL 0xFFFFFFFFu
-
 typedef struct {
     unsigned char *data;
     size_t size;
     unsigned char **targets;   /* by operand */
     int target_count;
+    TextString *strings;
+    int string_count;
+    TextLabel *labels;         /* for the listings compiled after this one */
+    int label_count;
+    int not_utf8_lines, first_not_utf8_line;   /* left out, for the mod's status */
+} TextUnit;
+
+/* What the port keeps beside a unit that TextListing_Compile made. TextUnit
+ * itself is the mods' layout (tools/pc/check_mod_abi.py) and stays as it was,
+ * so this is a record of its own, in the same allocation. */
+#define TEXT_NO_CALL 0xFFFFFFFFu
+typedef struct {
     /* Where each target is jumped from, by operand: the offset into data of
      * the {call} or {jump} that has it, else TEXT_NO_CALL (a choice's, a
      * flag's). With the offsets of the unit's control codes (F6-FF, which a
@@ -42,15 +52,11 @@ typedef struct {
     uint32_t *target_calls;
     uint32_t *controls;
     int control_count;
-    TextString *strings;
-    int string_count;
-    TextLabel *labels;         /* for the listings compiled after this one */
-    int label_count;
-    int not_utf8_lines, first_not_utf8_line;   /* left out, for the mod's status */
     /* The span of data the result screens' strings (0x40-0x45) take, up to
      * the next string; 0, 0 when the unit has none. Set by translation.c. */
     size_t results_from, results_to;
-} TextUnit;
+} TextUnitExtra;
+TextUnitExtra *TextListing_Extra(const TextUnit *unit);
 
 /* The glyph code for a character (-1 for none), and what to say about a
  * line of the listing. */

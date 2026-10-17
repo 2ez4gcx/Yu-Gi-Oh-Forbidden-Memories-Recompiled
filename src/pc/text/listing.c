@@ -21,6 +21,15 @@ int TextListing_Bank(unsigned id)
     return -1;
 }
 
+/* A unit and what the port keeps beside it (listing.h): one allocation, the
+ * unit first, so that its layout is the public one. */
+typedef struct {
+    TextUnit unit;
+    TextUnitExtra extra;
+} TextUnitFull;
+
+TextUnitExtra *TextListing_Extra(const TextUnit *unit) { return &((TextUnitFull *)unit)->extra; }
+
 typedef struct {
     int bank;
     unsigned name;       /* LXXXX: XXXX */
@@ -474,7 +483,7 @@ TextUnit *TextListing_Compile(const char *text, size_t length, const uint32_t ba
         pending = 1;
     }
     if (inside && buffer) c.string_count = first_string;
-    unit = calloc(1, sizeof(*unit));
+    unit = calloc(1, sizeof(TextUnitFull));
     if (c.failed || !unit) {
         free(unit);
         free(c.data);
@@ -489,11 +498,11 @@ TextUnit *TextListing_Compile(const char *text, size_t length, const uint32_t ba
     unit->size = c.size;
     unit->strings = c.strings;
     unit->string_count = c.string_count;
-    unit->controls = c.marks;
-    unit->control_count = c.mark_count;
+    TextListing_Extra(unit)->controls = c.marks;
+    TextListing_Extra(unit)->control_count = c.mark_count;
     unit->targets = calloc((size_t)(c.fixup_count ? c.fixup_count : 1), sizeof(*unit->targets));
-    unit->target_calls = calloc((size_t)(c.fixup_count ? c.fixup_count : 1), sizeof(*unit->target_calls));
-    if (c.fixup_count > 0xFFFF || !unit->targets || !unit->target_calls) {
+    TextListing_Extra(unit)->target_calls = calloc((size_t)(c.fixup_count ? c.fixup_count : 1), sizeof(*TextListing_Extra(unit)->target_calls));
+    if (c.fixup_count > 0xFFFF || !unit->targets || !TextListing_Extra(unit)->target_calls) {
         say(&c, "too many jumps in one listing");
         free(c.labels);
         free(c.fixups);
@@ -518,7 +527,7 @@ TextUnit *TextListing_Compile(const char *text, size_t length, const uint32_t ba
         /* Undefined, or a plain offset: the retail text at that offset. */
         if (!where) where = (unsigned char *)(uintptr_t)(bases[fixup->bank] + fixup->value);
         unit->targets[i] = where;
-        unit->target_calls[i] = fixup->call_at == (size_t)-1 ? TEXT_NO_CALL : (uint32_t)fixup->call_at;
+        TextListing_Extra(unit)->target_calls[i] = fixup->call_at == (size_t)-1 ? TEXT_NO_CALL : (uint32_t)fixup->call_at;
         c.data[fixup->position] = (unsigned char)(i & 0xFF);
         c.data[fixup->position + 1] = (unsigned char)(i >> 8);
     }
@@ -548,8 +557,8 @@ void TextListing_Free(TextUnit *unit)
     if (!unit) return;
     free(unit->data);
     free(unit->targets);
-    free(unit->target_calls);
-    free(unit->controls);
+    free(TextListing_Extra(unit)->target_calls);
+    free(TextListing_Extra(unit)->controls);
     free(unit->strings);
     free(unit->labels);
     free(unit);

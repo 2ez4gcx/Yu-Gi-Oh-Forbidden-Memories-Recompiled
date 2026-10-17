@@ -52,13 +52,19 @@ class Archive(unittest.TestCase):
     def test_the_source_release_is_unpacked_without_its_tests(self):
         files = {"llvm/CMakeLists.txt": b"x", "llvm/include/llvm/IR/Module.h": b"x", "llvm/lib/IR/Core.cpp": b"x",
                  "llvm/test/CodeGen/x.ll": b"x", "llvm/unittests/y.cpp": b"x", "llvm/docs/z.rst": b"x",
-                 "cmake/modules/a.cmake": b"x", "third-party/b/c.h": b"x", "clang/lib/d.cpp": b"x", "README.md": b"x"}
+                 "cmake/modules/a.cmake": b"x", "third-party/b/c.h": b"x", "clang/lib/d.cpp": b"x", "README.md": b"x",
+                 # libc's headers APFloat.cpp includes (shared/math.h and what it includes), not its tests
+                 "libc/shared/math.h": b"x", "libc/src/__support/FPUtil/FPBits.h": b"x", "libc/hdr/errno_macros.h": b"x",
+                 "libc/include/llvm-libc-macros/math-macros.h": b"x", "libc/test/src/math/e.cpp": b"x",
+                 "libc/docs/f.rst": b"x", "libc/CMakeLists.txt": b"x"}
         target = os.path.join(self.folder, "src")
         top, _ = sdk.stream_parts(self.make(files, "llvm-project-23.1.2.src"), sdk.SOURCE_PARTS, target, sdk.SOURCE_SKIP)
         found = sorted(os.path.relpath(os.path.join(directory, name), target).replace(os.sep, "/")
                        for directory, _, names in os.walk(target) for name in names)
-        self.assertEqual(found, ["cmake/modules/a.cmake", "llvm/CMakeLists.txt", "llvm/include/llvm/IR/Module.h",
-                                 "llvm/lib/IR/Core.cpp", "third-party/b/c.h"])
+        self.assertEqual(found, ["cmake/modules/a.cmake", "libc/hdr/errno_macros.h",
+                                 "libc/include/llvm-libc-macros/math-macros.h", "libc/shared/math.h",
+                                 "libc/src/__support/FPUtil/FPBits.h", "llvm/CMakeLists.txt",
+                                 "llvm/include/llvm/IR/Module.h", "llvm/lib/IR/Core.cpp", "third-party/b/c.h"])
 
     def test_release_is_fetched_checked_and_dropped(self):
         archive = self.make(self.GOOD)

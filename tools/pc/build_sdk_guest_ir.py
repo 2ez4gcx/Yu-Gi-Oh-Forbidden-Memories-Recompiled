@@ -57,8 +57,11 @@ COMPONENTS = ("core", "irreader", "support")
 RELEASE_PARTS = ("bin/llvm-config", "include/llvm/", "include/llvm-c/", "lib/libLLVM")
 # What of the source release the build needs: not the tests, documentation
 # or examples (nine tenths of it, and the deepest paths, which a Windows
-# extraction may not manage), none of which the build includes.
-SOURCE_PARTS = ("llvm/", "cmake/", "third-party/")
+# extraction may not manage), none of which the build includes. LLVM 23's
+# configure stops without libc/ (cmake/Modules/FindLibcCommonUtils.cmake),
+# and APFloat.cpp (LLVMSupport) includes libc's shared/math.h, whose headers
+# are all under these four of libc's folders (none of its tests or tools).
+SOURCE_PARTS = ("llvm/", "cmake/", "third-party/", "libc/shared/", "libc/src/", "libc/include/", "libc/hdr/")
 SOURCE_SKIP = ("llvm/test/", "llvm/unittests/", "llvm/docs/", "llvm/benchmarks/", "llvm/examples/")
 # The targets of the source build (llvm-config tells the flags of these).
 BUILD_TARGETS = ("LLVMCore", "LLVMIRReader", "LLVMSupport", "llvm-config")

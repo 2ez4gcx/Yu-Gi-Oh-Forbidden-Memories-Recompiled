@@ -375,6 +375,26 @@ static void the_games_own_words(void)
     assert(at_call(com, 0) == (const unsigned char *)(uintptr_t)(0x801B0000u + 0x051C));
 }
 
+/* Forgets the text, as a fresh start has it (the arena's bytes are the
+ * region's, not the heap's). */
+static void forget_text(void)
+{
+    int i;
+    for (i = 0; i < unit_count; i++) {
+        TextUnit *unit = units[i];
+        if (!arena || unit->data < arena || unit->data >= arena + ARENA_SIZE) free(unit->data);
+        unit->data = NULL;
+        TextListing_Free(unit);
+    }
+    free(units);
+    free(overrides);
+    units = NULL;
+    overrides = NULL;
+    unit_count = 0;
+    memset(unit_results, 0, sizeof(unit_results));
+    arena_used = 0;
+}
+
 int main(void)
 {
     FILE *file = fopen("results_names_test.tmp", "wb");
@@ -389,9 +409,7 @@ int main(void)
     what_cannot_be_shown();
     nothing_changes();
     /* Another translation, as a fresh start has it. */
-    unit_count = 0;
-    memset(overrides, 0, 0x10000 * sizeof(*overrides));
-    memset(unit_results, 0, sizeof(unit_results));
+    forget_text();
     file = fopen("results_names_test.tmp", "wb");
     assert(file);
     fputs(game_listing, file);
@@ -400,6 +418,7 @@ int main(void)
     remove("results_names_test.tmp");
     assert(unit_count == 1 && overrides[0x44] && !overrides[0x3E]);
     the_games_own_words();
+    forget_text();
     puts("results_names_test: ok");
     return 0;
 }

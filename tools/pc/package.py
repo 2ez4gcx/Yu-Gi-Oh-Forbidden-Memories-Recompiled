@@ -44,6 +44,13 @@ builds). So packing the default three needs the Android build of the same
 tree first (build_game32.py --target android-arm64-v8a --release; notes/
 pc-release.md, "Local commands").
 
+Every SDK also carries the guest pass (sdk/tools/memories-guest-ir[.exe]),
+which build_mod.py runs an Android (aarch64-translated) object through: a
+program of the archive's system, built against the LLVM of the SDK's own
+clang (tools/pc/build_sdk_guest_ir.py; the release workflow's sdk-guest-ir
+job), named with --guest-ir (default: tmp/pc/sdk-guest-ir). Packing stops,
+before anything is built, without one.
+
     python3 tools/pc/package.py android-arm64  # the Android app, signed
 
 android-arm64 is not among the default ones (it needs the Android SDK, the
@@ -226,6 +233,39 @@ def exports_unavailable(systems, exports_from=(), skipped=None):
     return None
 
 
+# What starts a program of each system (the guest pass in an SDK).
+PROGRAM_MAGIC = {"windows": b"MZ", "windows-x64": b"MZ", "linux": b"\x7fELF"}
+GUEST_IR = "memories-guest-ir"
+
+
+def guest_ir_for(system, paths=()):
+    """The guest pass (tools/pc/build_sdk_guest_ir.py) for `system`'s SDK
+    among `paths` (default: the one built for this host), or None: a program
+    of that system's kind, by its first bytes."""
+    paths = list(paths) or [os.path.join(ROOT, "tmp", "pc", "sdk-guest-ir", GUEST_IR + (".exe" if sys.platform == "win32" else ""))]
+    for path in paths:
+        try:
+            with open(path, "rb") as handle:
+                if handle.read(len(PROGRAM_MAGIC[system])) == PROGRAM_MAGIC[system]:
+                    return os.path.abspath(path)
+        except OSError:
+            continue
+    return None
+
+
+def guest_ir_unavailable(systems, paths=()):
+    """Before anything is built: why an SDK of `systems` could not get its
+    guest pass, or None."""
+    for system in systems:
+        if system != "android-arm64" and not guest_ir_for(system, paths):
+            return (f"the {system} SDK needs the guest pass (a {system} program memories-guest-ir"
+                    f"{'.exe' if system.startswith('windows') else ''}): none of "
+                    f"{', '.join(shown(path) for path in paths) or 'tmp/pc/sdk-guest-ir'} is one. Build it on "
+                    "that system with `python tools/pc/build_sdk_guest_ir.py` (the release workflow's sdk-guest-ir "
+                    "job) or name it with --guest-ir")
+    return None
+
+
 def sdk_exports(system, exports_from=()):
     """{target: its export list} for the other targets than `system`'s own,
     each from a game build of the same tree as `system`'s (export_folders).
@@ -259,7 +299,7 @@ def sdk_exports(system, exports_from=()):
     return lists
 
 
-def stage(system, label, exports=None):
+def stage(system, label, exports=None, guest_ir=None):
     build_dir, executable, extras = BUILDS[system]
     build_dir = os.path.join(ROOT, build_dir)
     folder = os.path.join(DIST, "stage", system, f"{NAME}-{label}{FOLDER.get(system, '')}")
@@ -271,6 +311,13 @@ def stage(system, label, exports=None):
         strip(os.path.join(folder, executable))
     for name in ("mods", "sdk", "languages"):
         shutil.copytree(os.path.join(build_dir, name), os.path.join(folder, name))
+    # The guest pass build_mod.py runs the Android object through, where it
+    # looks for it (beside build_mod.py).
+    if guest_ir:
+        target = os.path.join(folder, "sdk", "tools", GUEST_IR + (".exe" if system.startswith("windows") else ""))
+        os.makedirs(os.path.dirname(target), exist_ok=True)
+        shutil.copyfile(guest_ir, target)
+        os.chmod(target, 0o755)
     # The other targets' export lists, beside this game's own (sdk_exports).
     for target, path in (exports or {}).items():
         shutil.copyfile(path, os.path.join(folder, "sdk", f"exports.{target}.txt"))
@@ -362,7 +409,7 @@ def pack(system, folder):
             info.uid = info.gid = 0
             info.uname = info.gname = ""
             if info.isfile():
-                info.mode = 0o755 if info.name.endswith("/memories-pc") else 0o644
+                info.mode = 0o755 if info.name.endswith(("/memories-pc", "/sdk/tools/" + GUEST_IR)) else 0o644
             return info
         with tarfile.open(base, "w:gz") as archive:
             archive.add(folder, os.path.basename(folder), filter=executable)
@@ -379,6 +426,10 @@ def main():
     parser.add_argument("--exports-from", action="append", default=[], metavar="BUILD",
                         help="another target's game build folder (its sdk/exports.<target>.txt and source) to take "
                              "that target's export list from for the SDK (repeatable; default: tmp/pc's builds)")
+    parser.add_argument("--guest-ir", action="append", default=[], metavar="FILE",
+                        help="a memories-guest-ir for the SDKs (tools/pc/build_sdk_guest_ir.py makes it, for the "
+                             "system it runs on; repeatable, each SDK takes the one of its system; default: the "
+                             "one in tmp/pc/sdk-guest-ir)")
     options = parser.parse_args()
     systems = options.systems or ["windows", "windows-x64", "linux"]
     if set(systems) - set(BUILDS):
@@ -403,7 +454,8 @@ def main():
         # same tree in tmp/pc/win64, or --exports-from).
         print(f"package: windows-x64 skipped: {missing}; the other archives are packed", file=sys.stderr)
         systems = [system for system in systems if system != "windows-x64"]
-    unavailable = exports_unavailable(systems, options.exports_from, missing)
+    unavailable = (exports_unavailable(systems, options.exports_from, missing) or
+                   guest_ir_unavailable(systems, options.guest_ir))
     if unavailable:
         sys.exit(f"package: {unavailable}; nothing was packed")
     if not options.no_build:
@@ -414,7 +466,7 @@ def main():
     exports = {system: sdk_exports(system, options.exports_from) for system in systems if system != "android-arm64"}
     made = []
     for system in systems:
-        made.append(pack_apk(label) if system == "android-arm64" else pack(system, stage(system, label, exports[system])))
+        made.append(pack_apk(label) if system == "android-arm64" else pack(system, stage(system, label, exports[system], guest_ir_for(system, options.guest_ir))))
     shutil.rmtree(os.path.join(DIST, "stage"), ignore_errors=True)
     for path in made:
         print(f"{os.path.relpath(path, ROOT)}: {os.path.getsize(path) / 1e6:.1f} MB")

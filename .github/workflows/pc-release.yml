@@ -28,8 +28,10 @@ jobs:
     if: github.event_name != 'workflow_dispatch' || inputs.platform != 'macos-arm64'
     # Each archive's SDK carries every mod target's export list
     # (tools/pc/package.py): the arm64 game's from the android job, the
-    # 64-bit Windows game's from sdk-exports-x64, built from this commit.
-    needs: [android, sdk-exports-x64]
+    # 64-bit Windows game's from sdk-exports-x64, built from this commit; and
+    # the guest pass of its system (sdk-guest-ir), which build_mod.py runs the
+    # Android object through.
+    needs: [android, sdk-exports-x64, sdk-guest-ir]
     strategy:
       fail-fast: false
       matrix:
@@ -70,7 +72,8 @@ jobs:
             tmp/pc/linux-sysroot-downloads
             tmp/pc/sdl-source
             tmp/pc/sdl-m32-portable
-          key: release-linux-${{ runner.os }}-${{ hashFiles('tools/pc/build_linux_sysroot.py', 'tools/pc/fetch_tools.py') }}
+            tmp/pc/llvm-mingw
+          key: release-linux-${{ runner.os }}-${{ hashFiles('tools/pc/build_linux_sysroot.py', 'tools/pc/fetch_tools.py', 'tools/pc/build_win32_deps.py') }}
       - name: Cache Windows dependencies
         if: runner.os == 'Windows'
         uses: actions/cache@v4
@@ -99,12 +102,34 @@ jobs:
         with:
           name: sdk-exports-x86_64-windows
           path: tmp/sdk-exports/win64
+      - uses: actions/download-artifact@v4
+        with:
+          name: sdk-guest-ir-${{ matrix.system }}
+          path: tmp/sdk-guest-ir
       - name: Build and package
         run: >-
           python tools/pc/package.py "${{ matrix.system }}" --skip-smoke --version "$PACKAGE_VERSION"
           --exports-from tmp/sdk-exports/android-arm64-v8a --exports-from tmp/sdk-exports/win64
+          --guest-ir "tmp/sdk-guest-ir/memories-guest-ir${{ matrix.system == 'windows' && '.exe' || '' }}"
       - name: Test archive structure
         run: python tools/pc/test_package.py --archives dist
+      # What a modder does with the SDK alone: unpack it and build a bundled
+      # code mod for Android with its own llvm-mingw clang and guest pass (no
+      # NDK, no checkout's pass). The IR from clang (*.raw.ll) and from the
+      # pass (*.ll) is kept: diff it against sdk-mod-ir-llvm21 (the same mod
+      # through the game's own LLVM 21 pass, the android job).
+      - name: Android code mod from the packed SDK
+        run: |
+          archive=$(ls "dist/yfm-redecomp-$PACKAGE_VERSION-${{ matrix.system }}".zip "dist/yfm-redecomp-$PACKAGE_VERSION-${{ matrix.system }}".tar.gz 2>/dev/null | head -n 1)
+          python tools/pc/check_sdk_mod.py "$archive" --ir-out tmp/sdk-mod-ir
+      - name: Upload the SDK pass's IR
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sdk-mod-ir-${{ matrix.system }}
+          path: tmp/sdk-mod-ir
+          if-no-files-found: warn
+          retention-days: 14
       # The SDK just built against every release in tools/pc/mod_compat.txt:
       # a mod made with one of them must still load and run (no disc needed).
       - name: Mods from earlier releases
@@ -216,6 +241,60 @@ jobs:
           path: |
             dist/*.zip
             dist/*.tar.gz
+          if-no-files-found: error
+          retention-days: 14
+
+  # The guest pass the SDKs ship, one per system (tools/pc/build_sdk_guest_ir.py;
+  # tools/pc/sdk_llvm.json pins the LLVM). The game itself is translated with
+  # LLVM 21 and stays so; a mod's clang writes the IR the pass reads and
+  # compiles what it writes, and the SDK's clang is llvm-mingw's (22), so the
+  # SDK's pass is built against LLVM 22. Linux: the official release archive's
+  # headers and static libraries (the pass links statically, to run on any
+  # distribution). Windows: the official Windows archive is built for the MSVC
+  # C++ ABI, which llvm-mingw cannot link, so the three libraries the pass
+  # needs are built from the official source release with llvm-mingw itself.
+  # The unpacked or built LLVM is cached by the pin; the job fails, saying
+  # what is missing, if the archive lacks the headers or libraries, or if
+  # sdk_llvm.json has no sha256 yet (`python tools/pc/build_sdk_guest_ir.py
+  # --pin`).
+  sdk-guest-ir:
+    if: github.event_name != 'workflow_dispatch' || inputs.platform != 'macos-arm64'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - system: linux
+            runner: ubuntu-24.04
+          - system: windows
+            runner: windows-2022
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      # libz.a and libzstd.a: the pass links statically.
+      - name: Linux build tools
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install --yes --no-install-recommends zlib1g-dev libzstd-dev
+      - name: Cache the LLVM the pass is built against
+        uses: actions/cache@v4
+        with:
+          path: |
+            tmp/pc/sdk-llvm
+            tmp/pc/tools/llvm-mingw
+          key: sdk-llvm-${{ runner.os }}-${{ hashFiles('tools/pc/sdk_llvm.json', 'tools/pc/fetch_tools.py') }}
+      - name: Build the guest pass
+        run: python tools/pc/build_sdk_guest_ir.py --out tmp/pc/sdk-guest-ir --jobs 4
+      - name: Upload the guest pass
+        uses: actions/upload-artifact@v4
+        with:
+          name: sdk-guest-ir-${{ matrix.system }}
+          path: tmp/pc/sdk-guest-ir/memories-guest-ir*
           if-no-files-found: error
           retention-days: 14
 
@@ -437,6 +516,24 @@ jobs:
             tmp/pc/android-arm64-v8a/sdk/mod_signatures.json
             tmp/pc/android-arm64-v8a/source
           if-no-files-found: error
+          retention-days: 14
+      # A bundled code mod through the game's own guest pass (the NDK's clang
+      # 21, LLVM 21), for diffing against the same mod through the SDK's pass
+      # (sdk-mod-ir-*, the package job): *.raw.ll from clang, *.ll from the
+      # pass. A check only: it does not stop the release.
+      - name: Android code mod through the game's guest pass
+        continue-on-error: true
+        run: >-
+          MEMORIES_MOD_CC="$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin/clang"
+          python tools/pc/build_mod.py mods/hand-camera --target aarch64-translated
+          --game tmp/pc/android-arm64-v8a --out tmp/mod-ir21/out --ir-out tmp/mod-ir21/ir
+      - name: Upload the game pass's IR
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sdk-mod-ir-llvm21
+          path: tmp/mod-ir21/ir
+          if-no-files-found: warn
           retention-days: 14
       # The secrets reach this step only. The keystore goes to the runner's
       # temporary folder, readable by this user only, its path stays in this

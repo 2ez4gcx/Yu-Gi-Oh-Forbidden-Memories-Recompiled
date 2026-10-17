@@ -10,12 +10,16 @@ import zipfile
 TARGETS = ("i386", "x86_64-windows", "aarch64-translated")
 
 
-def read_member(path, name):
+def read_bytes(path, name):
     if path.suffix == ".zip":
         with zipfile.ZipFile(path) as archive:
-            return archive.read(name).decode()
+            return archive.read(name)
     with tarfile.open(path) as archive:
-        return archive.extractfile(name).read().decode()
+        return archive.extractfile(name).read()
+
+
+def read_member(path, name):
+    return read_bytes(path, name).decode()
 
 
 def check_exe(image):
@@ -114,6 +118,21 @@ def check(path):
     # The Android game's guest-pass tables, for its aarch64-translated object.
     tables = {"sdk/mod_translation.json", "sdk/mod_signatures.json"}
     assert tables <= contents, f"the SDK lacks the Android game's tables: {sorted(tables - contents)}"
+    # The guest pass, which build_mod.py runs the Android object through
+    # (tools/pc/build_sdk_guest_ir.py): without it a modder cannot build that
+    # object from the SDK. A program of this archive's system, a real one
+    # (the LLVM it carries makes it megabytes), executable on Linux.
+    guest_ir = "sdk/tools/memories-guest-ir" + (".exe" if windows else "")
+    assert "sdk/tools/build_mod.py" in contents, "the SDK lacks tools/build_mod.py"
+    assert guest_ir in contents, f"the SDK lacks the guest pass ({guest_ir}): the Android object cannot be built from it"
+    program = read_bytes(path, f"{next(iter(roots))}/{guest_ir}")
+    assert program[:2] == b"MZ" if windows else program[:4] == b"\x7fELF", \
+        f"{guest_ir} is not a {'Windows' if windows else 'Linux'} program"
+    assert len(program) > 1_000_000, f"{guest_ir} is only {len(program)} bytes"
+    if not windows:
+        with tarfile.open(path) as archive:
+            member = archive.getmember(f"{next(iter(roots))}/{guest_ir}")
+            assert member.mode & 0o111, f"{guest_ir} must be executable"
     shipped = {name: read_member(path, f"{next(iter(roots))}/{name}") for name in sorted(lists)}
     assert all(len(text.split()) > 1000 for text in shipped.values()), "an SDK export list is (nearly) empty"
     if not wide:

@@ -291,9 +291,10 @@ def cleaned(flags):
     static library (missing_static says when there is none)."""
     result = []
     for flag in flags:
-        # A shared library may be named by its versioned file (libxml2.so.2).
+        # A shared library may be named by its versioned file (libxml2.so.2,
+        # libzstd.1.dylib), an import library by libz.dll.a.
         # Read as written, whatever the host's own idea of an absolute path.
-        library = re.fullmatch(r"(?:[A-Za-z]:)?/(?:.*/)?lib([^/]+?)\.(?:so(?:\.\d+)*|a|dylib)", flag)
+        library = re.fullmatch(r"(?:[A-Za-z]:)?/(?:.*/)?lib([^/]+?)\.(?:so(?:\.\d+)*|dll\.a|a|(?:\d+\.)*dylib)", flag)
         if library and not library.group(1).startswith("LLVM"):
             result.append("-l" + library.group(1))
         else:

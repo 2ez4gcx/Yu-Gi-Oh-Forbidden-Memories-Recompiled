@@ -156,6 +156,8 @@ class Archive(unittest.TestCase):
         self.assertEqual(sdk.cleaned(["/usr/lib/libtinfo.so.6.4", "C:/llvm/lib/libz.a", "/usr/lib/notalib.so"]),
                          ["-ltinfo", "-lz", "/usr/lib/notalib.so"])
         self.assertEqual(sdk.cleaned(["-lLLVMCore", "-lpsapi"]), ["-lLLVMCore", "-lpsapi"])
+        self.assertEqual(sdk.cleaned(["C:/msys64/mingw64/lib/libz.dll.a", "/opt/homebrew/lib/libzstd.1.dylib"]),
+                         ["-lz", "-lzstd"])
 
     def test_a_system_library_without_a_static_one_is_named(self):
         have = {"libz.a": "/usr/lib/x86_64-linux-gnu/libz.a", "libm.a": "/usr/lib/x86_64-linux-gnu/libm.a"}

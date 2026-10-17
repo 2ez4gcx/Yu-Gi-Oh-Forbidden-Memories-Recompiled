@@ -249,7 +249,10 @@ def host_compiler(binary, source):
         text=True,
     )
     cxx = os.environ.get("MEMORIES_GUEST_CXX", "c++")
-    linker = ["-B" + str(llvm / "bin"), "-fuse-ld=lld"] if not host_llvm() and sys.platform.startswith("linux") else []
+    # By the folder's own lld, not by where the folder came from: the official
+    # archive unpacked by hand and named with MEMORIES_GUEST_LLVM wants it too.
+    linker = (["-B" + str(llvm / "bin"), "-fuse-ld=lld"]
+              if sys.platform.startswith("linux") and (llvm / "bin/ld.lld").exists() else [])
     command = [cxx, str(source), *shlex.split(llvm_config.replace("\\", "/")), *linker, "-O2",
                *(["-static"] if sys.platform == "win32" else []), "-o", str(binary)]
     fingerprint = hashlib.sha256(json.dumps({

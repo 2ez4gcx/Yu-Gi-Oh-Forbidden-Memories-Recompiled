@@ -18,6 +18,7 @@
  * (translated_state_memory.c). Built in every game (it needs nothing of the
  * translated one) and used by the translated one only. */
 #include "translated_state_symbols.h"
+#include "pc/compat/fs.h"   /* fopen through the UTF-8 file boundary (Windows) */
 #include "state.h"
 #include <stdio.h>
 #include <stdlib.h>

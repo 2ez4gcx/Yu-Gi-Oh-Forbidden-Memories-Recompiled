@@ -4664,7 +4664,8 @@ or 0xC0000000 starts the game all the same.
   its content (and the gap's) is the same; a name that is not unique,
   aliases that split, code padding and veneers, and anything past the old
   image are refused. The pre-load check classifies exactly the words
-  apply() relocates, with the old image's size, and the load is refused,
+  apply() relocates (the stack, the saved registers and the saved
+  `jmp_buf`s by the stack's rule), with the old image's size, and the load is refused,
   with how many addresses changed, before anything is applied; PS1 RAM
   (`memory`) is copied as it is and not scanned, as the same build's loads
   never relocated it. A state of the fixed-memory game (v0.3.0) is

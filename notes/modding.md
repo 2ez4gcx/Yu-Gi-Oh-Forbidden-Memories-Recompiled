@@ -2059,16 +2059,29 @@ No Python and no compiler? The release's `sdk` folder has a script that
 fetches what it needs once and builds every object your mod needs, the
 Android one included.
 
-**Windows.** Unpack the release and open its `sdk` folder. Drag your mod's
+**Windows.** 64-bit Windows 10 version 1803 (April 2018) or newer, or 11.
+Unpack the release and open its `sdk` folder. Drag your mod's
 folder (the one with `mod.json` and the `.c` files) onto `build-mod.bat`.
 Or double-click `build-mod.bat`, drag the folder into the window when it
-asks, and press Enter. When it says `done`, the objects (`<library>.o`,
-`<library>.x86_64-windows.o`, `<library>.aarch64-translated.o`) are next
-to your mod's files, ready to play or to send. The window waits for a key
-when it was opened by a double-click.
+asks, and press Enter. When it ends, its last lines say which objects
+(`<library>.o`, `<library>.x86_64-windows.o`,
+`<library>.aarch64-translated.o`) were built, next to your mod's files and
+ready to play or to send, and which were not, and why. The window waits for a
+key when it was opened by a double-click. A release downloaded with a browser
+carries its mark of coming from the internet, and Windows SmartScreen may ask
+once when you start `build-mod.bat` ("More info", then "Run anyway"); the
+zip's *Properties*, *Unblock* before unpacking avoids the question. Windows 11
+for ARM runs the x64 downloads through its own emulation (not tested). If the
+folder you unpacked into has accents or another alphabet in its path, or a very
+long one, move it to something like `C:\yfm-sdk`: `tar` cannot unpack there.
 
 **Linux.** `sdk/build-mod.sh my-mod`. It needs `python3` (3.8 or newer),
-`curl` or `wget`, and `tar` with `xz`, on x86-64; nothing else.
+`curl` or `wget`, and `tar` with `xz`, on x86-64 with glibc 2.34 or newer and
+the libstdc++ of GCC 11 or newer (Ubuntu 22.04, Debian 12, Fedora 35 or
+newer): llvm-mingw's Linux build is made on Ubuntu 22.04 and its `clang`
+asks for exactly that (read from the version names in the program, not run
+on older systems). On Debian 11 or Ubuntu 20.04 the script says that `clang`
+does not start; use a clang 23 of your own through `MEMORIES_SDK_TOOLCHAIN`.
 
 **The first run downloads, once.** The files go into `sdk/toolchain/` beside
 the script, and nothing is installed or changed anywhere else on the
@@ -2077,7 +2090,7 @@ run fetches them again. After the first run it works offline.
 
 | What | Size | From | Windows | Linux |
 |---|---|---|---|---|
-| llvm-mingw 20260922 (clang, `ld.lld`, `llvm-objcopy`: the toolchain the game is built with) | 191 MB Windows, 84 MB Linux; about 0.7 GB unpacked on Windows | github.com/mstorsjo/llvm-mingw | yes | yes |
+| llvm-mingw 20260922 (clang, `ld.lld`, `llvm-objcopy`: the toolchain the game is built with) | 191 MB Windows (750 MB unpacked), 84 MB Linux (630 MB unpacked) | github.com/mstorsjo/llvm-mingw | yes | yes |
 | Python 3.14.8, the embeddable package | 13 MB | python.org | yes | no (your `python3`) |
 
 Each download is checked against a SHA-256 written in the script itself
@@ -2095,7 +2108,12 @@ nothing. Run it again: a download cut short or changed on the way shows up
 like this. If it repeats, do not use the file; download it from the address
 in a browser and put it in `sdk/toolchain/downloads/` (the next run checks it
 and uses it), or use your own tools (below), and tell us. Offline, the same
-folder is where a file copied from another computer goes.
+folder is where a file copied from another computer goes. Some company
+proxies and firewalls inspect HTTPS and either change the file (the hash
+catches that) or make `curl` stop at its certificate or revocation checks
+before a byte arrives: the script only accepts `https` addresses and does
+not switch those checks off, so the answer there is the browser download, or
+asking whoever runs the network.
 
 **Your own tools** (nothing is downloaded for what you name):
 

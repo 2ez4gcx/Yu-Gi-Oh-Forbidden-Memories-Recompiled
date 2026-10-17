@@ -25,6 +25,9 @@
  * As desktop v0.3.0's state.c, this trusts that a function of the same
  * name is the function the state meant (its address is what the game
  * stored); unlike it, an interior is never trusted on size alone. */
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE   /* Dl_info, dladdr (glibc) */
+#endif
 #include "translated_state_symbols.h"
 #include "pc/compat/fs.h"   /* fopen through the UTF-8 file boundary (Windows) */
 #include "state.h"

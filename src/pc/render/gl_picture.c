@@ -226,7 +226,7 @@ static const SoftGpuRecorder recorder = {record_gp0, record_load, record_move, r
  * copies, quads drawn to copy pictures in, and draw calls, with the pixels
  * each touched; and what goes up from the CPU: VRAM whole after each
  * replay (upload_vram) and the texture pack's two maps whenever they
- * changed (sync_pack), in bytes. */
+ * changed (sync_pack), as counts: the log turns them into bytes. */
 static struct {
     unsigned resolves, blits, copies, quads, draws, vram_uploads, map_uploads;
     double resolve_px, blit_px, copy_px, quad_px;

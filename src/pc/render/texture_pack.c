@@ -2056,19 +2056,22 @@ void TexturePack_Service(void)
         /* The PNGs are read here, on the main thread between two frames:
          * the frame they are read in waits for them (TexturePack_ReadStats). */
         struct timespec t0, t1;
-        unsigned read = 0;
+        unsigned loaded = 0;
         wanted_images = 0;
         clock_gettime(CLOCK_MONOTONIC, &t0);
         /* Another reading of words already painted (prepare) is sampled
          * from its image alone: only the uploads that waited are painted. */
         for (i = 0; i < entry_count; i++) {
-            if (entries[i].wanted && load_pixels(&entries[i])) painted = 1, read++;
+            if (entries[i].wanted && load_pixels(&entries[i])) {
+                painted = 1;
+                loaded++;
+            }
         }
-        if (read) {
+        if (loaded) {
             unsigned us;
             clock_gettime(CLOCK_MONOTONIC, &t1);
             us = (unsigned)((t1.tv_sec - t0.tv_sec) * 1000000 + (t1.tv_nsec - t0.tv_nsec) / 1000);
-            read_images += read;
+            read_images += loaded;
             read_us += us;
             if (us > read_max_us) read_max_us = us;
         }

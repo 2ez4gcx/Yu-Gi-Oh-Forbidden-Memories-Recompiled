@@ -4,8 +4,8 @@ A mod is a directory, not part of the game executable. The release ships its
 own mods that way, and anyone else's mod is installed the same way: drop the
 directory in, restart, apply it in **Game > Mods**. On Android, where there
 is no folder to drop it in, **Import mod...** in the Mods panel takes the
-mod's `.zip` through the system's file picker
-([Mod manager](mods-window.md)).
+mod's `.zip` through the system's file picker, and **Remove** deletes one
+that is off or does not load any more ([Mod manager](mods-window.md)).
 
 ## Where mods live
 

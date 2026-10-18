@@ -102,6 +102,18 @@ static void make(const char *relative)
         }
 }
 
+static void file_write(const char *relative, const char *text)
+{
+    char path[2048];
+    FILE *f;
+    snprintf(path, sizeof(path), "%s/%s", root, relative);
+    f = fopen(path, "wb");
+    if (f) {
+        fputs(text, f);
+        fclose(f);
+    }
+}
+
 /* Opens and installs `items`; 1 when both worked. `why` gets the reason. */
 static int import(const ZipItem *items, int n, int *count, char *why, size_t size)
 {
@@ -423,6 +435,93 @@ int main(void)
         make("mods/kept");
         Mods_ImportCleanup(mods);
         CHECK(!strcmp(listing("mods"), "kept"));
+    }
+    /* The Mods panel's Remove (Mods_ImportRemoveInstalled): a mod's own folder
+     * in the mods folder goes, with what is in it; nothing else does. */
+    reset();
+    {
+        char why[200], path[2048], slashed[1200];
+        make("mods/gone/deep/er");
+        file_write("mods/gone/mod.json", "{}");
+        file_write("mods/gone/deep/er/x.txt", "x");
+        make("mods/kept");
+        make("outside/victim");
+        file_write("outside/victim/mod.json", "{}");
+        snprintf(path, sizeof(path), "%s/gone", mods);
+        CHECK(!Mods_ImportRemoveInstalled(mods, path, why, sizeof(why)));
+        CHECK(!exists("mods/gone") && exists("mods/kept") && exists("mods"));
+        /* The folder leaves the mods folder in one rename, to a hidden folder
+         * that is then deleted; one an earlier remove left under that name
+         * is no obstacle, and what is left of any is swept by the cleanup. */
+        make("mods/again/deep");
+        file_write("mods/again/deep/f.txt", "x");
+        make("mods/.import-removing-again/old");
+        snprintf(path, sizeof(path), "%s/again", mods);
+        CHECK(!Mods_ImportRemoveInstalled(mods, path, why, sizeof(why)));
+        CHECK(!exists("mods/again") && !exists("mods/.import-removing-again"));
+        make("mods/.import-removing-left/deep");
+        file_write("mods/.import-removing-left/deep/f.txt", "x");
+        make("mods/kept2");
+        Mods_ImportCleanup(mods);
+        CHECK(!exists("mods/.import-removing-left") && exists("mods/kept2") && exists("mods/kept"));
+        /* already gone: nothing to do */
+        snprintf(path, sizeof(path), "%s/gone", mods);
+        CHECK(!Mods_ImportRemoveInstalled(mods, path, why, sizeof(why)));
+        /* a trailing slash on the mods folder is the same folder */
+        make("mods/slash");
+        snprintf(path, sizeof(path), "%s/slash", mods);
+        snprintf(slashed, sizeof(slashed), "%s/", mods);
+        CHECK(!Mods_ImportRemoveInstalled(slashed, path, why, sizeof(why)));
+        CHECK(!exists("mods/slash"));
+        /* and so is a doubled separator (a MEMORIES_MODS_DIR ending in one) */
+        make("mods/double");
+        snprintf(path, sizeof(path), "%s//double", mods);
+        CHECK(!Mods_ImportRemoveInstalled(slashed, path, why, sizeof(why)));
+        CHECK(!exists("mods/double"));
+        snprintf(path, sizeof(path), "%s//", mods);
+        CHECK(Mods_ImportRemoveInstalled(mods, path, why, sizeof(why)) && exists("mods/kept"));
+        /* refused, and nothing touched */
+        make("mods/kept/inner");
+        snprintf(path, sizeof(path), "%s", mods);
+        CHECK(Mods_ImportRemoveInstalled(mods, path, why, sizeof(why)) && exists("mods/kept")); /* the folder itself */
+        snprintf(path, sizeof(path), "%s/", mods);
+        CHECK(Mods_ImportRemoveInstalled(mods, path, why, sizeof(why)) && exists("mods/kept"));
+        snprintf(path, sizeof(path), "%s/kept/inner", mods);
+        CHECK(Mods_ImportRemoveInstalled(mods, path, why, sizeof(why)) && exists("mods/kept/inner")); /* two deep */
+        snprintf(path, sizeof(path), "%s/../outside/victim", mods);
+        CHECK(Mods_ImportRemoveInstalled(mods, path, why, sizeof(why)) && exists("outside/victim/mod.json"));
+        snprintf(path, sizeof(path), "%s/kept/../../outside/victim", mods);
+        CHECK(Mods_ImportRemoveInstalled(mods, path, why, sizeof(why)) && exists("outside/victim/mod.json"));
+        snprintf(path, sizeof(path), "%s/..", mods);
+        CHECK(Mods_ImportRemoveInstalled(mods, path, why, sizeof(why)) && exists("outside/victim/mod.json"));
+        snprintf(path, sizeof(path), "%s/.", mods);
+        CHECK(Mods_ImportRemoveInstalled(mods, path, why, sizeof(why)) && exists("mods/kept"));
+        snprintf(path, sizeof(path), "%s/.import-abc", mods); /* the import's own, hidden */
+        make("mods/.import-abc");
+        CHECK(Mods_ImportRemoveInstalled(mods, path, why, sizeof(why)) && exists("mods/.import-abc"));
+        /* a sibling that starts with the mods folder's name */
+        snprintf(path, sizeof(path), "%s-other/x", mods);
+        make("mods-other/x");
+        CHECK(Mods_ImportRemoveInstalled(mods, path, why, sizeof(why)) && exists("mods-other/x"));
+        CHECK(Mods_ImportRemoveInstalled("", mods, why, sizeof(why)) && Mods_ImportRemoveInstalled(NULL, mods, why, sizeof(why)));
+        CHECK(Mods_ImportRemoveInstalled(mods, NULL, why, sizeof(why)) && exists("mods/kept"));
+        CHECK(Mods_ImportRemoveInstalled(mods, "", why, sizeof(why)) && exists("mods/kept"));
+        /* a file named like a mod is not a folder of one */
+        file_write("mods/afile", "x");
+        snprintf(path, sizeof(path), "%s/afile", mods);
+        CHECK(Mods_ImportRemoveInstalled(mods, path, why, sizeof(why)) && exists("mods/afile"));
+#ifndef _WIN32
+        /* a link to a folder elsewhere is refused, not followed */
+        {
+            char target[2048];
+            snprintf(target, sizeof(target), "%s/outside/victim", root);
+            snprintf(path, sizeof(path), "%s/linked", mods);
+            if (!symlink(target, path)) {
+                CHECK(Mods_ImportRemoveInstalled(mods, path, why, sizeof(why)) && exists("outside/victim/mod.json"));
+                CHECK(exists("mods/linked"));
+            }
+        }
+#endif
     }
     Mods_ImportRemoveTree(root);
     if (failures)

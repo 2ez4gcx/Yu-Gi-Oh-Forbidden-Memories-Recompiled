@@ -4251,6 +4251,14 @@ untouched: with a mouse every path is the old one, pixel for pixel.
   unpacked. `MEMORIES_IMPORT_ZIP=<file>` in `environment.txt` takes that file
   instead of the picker. The picker puts the app in the background; coming
   back is as above (the panel repainted for a second).
+- **Remove** In the Mods panel's footer, left of Import mod... (on a phone,
+  on the selected mod's page): deletes the selected mod's folder from
+  `mods/` after a question, for a mod that is off or does not load (the
+  app's files folder cannot be opened by the player to do it by hand). Not
+  a mod in use this launch, nor one that came with the game; the folder must
+  be a plain `<mods>/<name>`, never a link ([Mod
+  manager](mods-window.md)). Nothing in it is Android-specific code:
+  `ModsWindow_SetImport` is what turns the button on.
 - **HD pack...** In the Mods panel's top bar, left of Save: downloads the
   latest release's HD pack (`yfm-redecomp-hd-mod-<tag>.zip`) from GitHub and
   installs it through the importer, off, as an import ([Mod

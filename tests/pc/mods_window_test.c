@@ -239,6 +239,133 @@ static void test_import(void)
     ModsWindow_SetImport(NULL, NULL, NULL);
     test_touch = 0;
 }
+/* Remove, beside Import mod... on a touch panel: a question, then the
+ * mod's folder goes and the list drops it; a mod in use stays. */
+static int listed(const char *name)
+{
+    char line[256];
+    snprintf(line, sizeof(line), " e9edf3 %s\n", name);
+    return strstr(drawn, line) != NULL;
+}
+static int installed_count(void)
+{
+    const char *at = strstr(drawn, " installed  /  ");
+    if (!at)
+        return -1;
+    while (at > drawn && at[-1] != '\n' && at[-1] != ' ')
+        at--;
+    return atoi(at);
+}
+static void test_remove(void)
+{
+    static const ZipItem good[] = {{"rmnew/mod.json", "{\"id\": \"rmnew\", \"name\": \"Remove me\"}", 1, 0, 0, 0, 0, 0},
+                                   {"rmnew/deep/file.txt", "hello", 1, 0, 0, 0, 0, 0}};
+    static const ZipItem live[] = {{"rmlive/mod.json", "{\"id\": \"rmlive\", \"name\": \"Live one\"}", 1, 0, 0, 0, 0, 0}};
+    int x, y, mod, other;
+    const char *said;
+    snprintf(import_source, sizeof(import_source), "%s/picked.zip", root);
+    test_touch = 48;
+    /* No picker, no Remove: the desktop's panel. */
+    ModsWindow_SetImport(NULL, NULL, NULL);
+    ModsWindow_Init();
+    ModsWindow_Resize(1600, 900);
+    assert(!ModsWindow_Locate(MODS_UI_REMOVE, &x, &y));
+    draw(1600, 900);
+    assert(!strstr(drawn, "Remove"));
+    ModsWindow_SetImport(fake_pick, fake_picked, fake_fetch);
+    ModsWindow_Init();
+    ModsWindow_Resize(1600, 900);
+    assert(ModsWindow_Locate(MODS_UI_REMOVE, &x, &y));
+    /* An imported mod, off and never loaded: Remove asks, Cancel keeps it. */
+    said = import_zip(good, 2);
+    assert(strstr(said, "Imported Remove me."));
+    mod = find("rmnew");
+    assert(mod >= 0 && !Mods_InUse(mod) && folder_has("mods/rmnew/deep/file.txt"));
+    draw(1600, 900);
+    assert(listed("Remove me") && strstr(drawn, " Remove\n"));
+    tap_widget(MODS_UI_REMOVE);
+    draw(1600, 900);
+    assert(strstr(drawn, "Remove Remove me? Its folder is deleted from the mods folder, with everything in it."));
+    assert(strstr(drawn, "Cancel") && strstr(drawn, " Remove\n"));
+    /* The answer is the Apply button, which reads Remove: no second, dead one. */
+    assert(!ModsWindow_Locate(MODS_UI_REMOVE, &x, &y));
+    tap_widget(MODS_UI_CLOSE); /* Cancel */
+    assert(!Mods_Removed(mod) && folder_has("mods/rmnew/deep/file.txt"));
+    assert(ModsWindow_Locate(MODS_UI_REMOVE, &x, &y)); /* and it is back */
+    /* What is staged for the mod (its On, its load order) is unsaved changes... */
+    tap_widget(MODS_UI_ORDER + 1);
+    tap_widget(MODS_UI_TOGGLE);
+    assert(ModsWindow_Locate(MODS_UI_CLOSE, &x, &y) && click(x, y) == 0);
+    draw(1600, 900);
+    assert(strstr(drawn, "Discard your unsaved mod changes?"));
+    input(MENU_EVENT_KEY_DOWN, 0, 0, MENU_KEY_ESCAPE, NULL);
+    /* ... until the mod is removed: then they go with it. */
+    /* Yes: the folder is gone, the mod leaves the list, another is shown. */
+    tap_widget(MODS_UI_REMOVE);
+    tap_widget(MODS_UI_APPLY);
+    draw(1600, 900);
+    assert(strstr(drawn, "Removed Remove me.") && !listed("Remove me"));
+    assert(!folder_has("mods/rmnew") && folder_has("mods") && Mods_Removed(mod));
+    assert(!Mods_Enabled(mod) && Settings_GetNamed("mod.rmnew", 1) == 0);
+    assert(Mods_Failed(mod)); /* inert: nothing can apply it */
+    /* The count in the footer leaves it out. */
+    tap_widget(MODS_UI_REMOVE);
+    tap_widget(MODS_UI_CLOSE); /* Cancel clears the message */
+    draw(1600, 900);
+    assert(installed_count() == Mods_Count() - 1);
+    assert(!strstr(drawn, "Unsaved"));
+    /* Nothing staged is left behind: Close does not ask to discard. */
+    assert(ModsWindow_Locate(MODS_UI_CLOSE, &x, &y) && click(x, y) == 1);
+    /* A profile that names it (on, with a load order) leaves it alone. */
+    {
+        char path[1024];
+        FILE *f;
+        assert(Mods_ProfileSave("Default"));
+        assert(!Paths_User(path, sizeof(path), "mod-profiles/Default.txt"));
+        f = fopen(path, "a");
+        assert(f);
+        fputs("mod.rmnew=1\nmod.rmnew.order=7\n", f);
+        fclose(f);
+        tap_widget(MODS_UI_LOAD);
+        draw(1600, 900);
+        assert(strstr(drawn, "Profile loaded for review."));
+        assert(ModsWindow_Locate(MODS_UI_CLOSE, &x, &y) && click(x, y) == 1);
+        assert(!Mods_Enabled(mod) && Mods_Removed(mod));
+    }
+    /* Back again, as a new import of the same id (an updated version). */
+    said = import_zip(good, 2);
+    assert(strstr(said, "Imported Remove me.") && find("rmnew") == mod && !Mods_Removed(mod));
+    draw(1600, 900);
+    assert(listed("Remove me") && !Mods_Enabled(mod));
+    /* A mod that is on: its files are in use, so it stays, and says why. */
+    said = import_zip(live, 1);
+    other = find("rmlive");
+    assert(strstr(said, "Imported Live one.") && other >= 0);
+    Mods_SetEnabled(other, 1);
+    assert(Mods_Active(other) && Mods_InUse(other));
+    tap_widget(MODS_UI_REMOVE);
+    draw(1600, 900);
+    assert(strstr(drawn, "Live one is on, so the game is using its files."));
+    assert(!strstr(drawn, "Cancel") && !Mods_Removed(other) && folder_has("mods/rmlive/mod.json"));
+    /* Turned off, it was still used since the game started. */
+    Mods_SetEnabled(other, 0);
+    assert(Mods_InUse(other));
+    tap_widget(MODS_UI_REMOVE);
+    draw(1600, 900);
+    assert(strstr(drawn, "Live one was tried since the game started") && folder_has("mods/rmlive/mod.json"));
+    /* On a phone's two pages: Remove is on the details page, and ends on the list. */
+    ModsWindow_Resize(700, 500);
+    ModsWindow_Init();
+    ModsWindow_Resize(700, 500);
+    assert(!ModsWindow_Locate(MODS_UI_REMOVE, &x, &y)); /* the list's page: Import */
+    assert(ModsWindow_Locate(MODS_UI_FOLDER, &x, &y));
+    assert(ModsWindow_Locate(MODS_UI_ROW_FIRST, &x, &y));
+    click(x, y); /* the first row opens its page */
+    input(MENU_EVENT_BUTTON_UP, x, y, MENU_KEY_OTHER, NULL);
+    assert(ModsWindow_Locate(MODS_UI_REMOVE, &x, &y) && !ModsWindow_Locate(MODS_UI_FOLDER, &x, &y));
+    ModsWindow_SetImport(NULL, NULL, NULL);
+    test_touch = 0;
+}
 /* HD pack... with a fake network (HdNet): GitHub's answer and the .zip
  * are the test's, served in small pieces on the job's thread. */
 /* A millisecond (POSIX's nanosleep: usleep is not in every libc's C11 mode). */
@@ -867,6 +994,7 @@ int main(void)
         test_touch = 0;
     }
     test_import();
+    test_remove();
     test_hd_pack();
     ModsWindow_Init();
     {

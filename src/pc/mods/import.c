@@ -909,3 +909,58 @@ done:
     free(places);
     return ok;
 }
+
+int Mods_ImportRemoveInstalled(const char *mods, const char *directory, char *why, size_t why_size)
+{
+    char base[1024], inner[1400];
+    size_t length = mods ? strlen(mods) : 0;
+    const char *folder;
+    struct stat info;
+    if (why_size)
+        why[0] = 0;
+    if (!length || length >= sizeof(base) || !directory)
+        goto outside;
+    memcpy(base, mods, length + 1);
+    while (length > 1 && (base[length - 1] == '/' || base[length - 1] == '\\'))
+        base[--length] = 0;
+    /* <mods>/<one name>: not the mods folder, not a folder below one of
+     * its mods, not a "..", not a hidden folder (the import's own are). */
+    if (!length || strncmp(directory, base, length) || (directory[length] != '/' && directory[length] != '\\'))
+        goto outside;
+    folder = directory + length + 1;
+    while (*folder == '/' || *folder == '\\') /* "<mods>//<name>" from a MEMORIES_MODS_DIR ending in a separator */
+        folder++;
+    if (!*folder || *folder == '.' || strpbrk(folder, "/\\:"))
+        goto outside;
+    /* lstat: a link is not the mod's folder, and is never followed. */
+#ifdef _WIN32
+    if (stat(directory, &info))
+#else
+    if (lstat(directory, &info))
+#endif
+    {
+        if (errno == ENOENT)
+            return 0; /* gone already */
+        goto outside;
+    }
+    if (!S_ISDIR(info.st_mode))
+        goto outside;
+    /* Renamed first, in one step, to a hidden folder the mod scan skips and
+     * Mods_ImportCleanup sweeps (".import-*"): the mod is gone at once, and
+     * what an interrupted or failed delete leaves is no half mod in the list
+     * but a hidden folder the next start (or import) finishes off. */
+    if (snprintf(inner, sizeof(inner), "%s/.import-removing-%s", base, folder) >= (int)sizeof(inner)) {
+        snprintf(why, why_size, "The name of %s is too long to remove.", folder);
+        return -1;
+    }
+    Mods_ImportRemoveTree(inner); /* what an earlier remove of that name left */
+    if (rename(directory, inner)) {
+        snprintf(why, why_size, "Could not delete %s: try Remove again.", folder);
+        return -1;
+    }
+    Mods_ImportRemoveTree(inner);
+    return 0;
+outside:
+    snprintf(why, why_size, "That folder is not one of the mods in the mods folder.");
+    return -1;
+}

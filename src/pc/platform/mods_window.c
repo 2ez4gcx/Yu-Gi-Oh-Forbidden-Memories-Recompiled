@@ -43,7 +43,7 @@ typedef struct {
 } Rect;
 typedef struct {
     Rect search, filter, list, list_bar, detail, toggle, tabs[3], view, bar, apply, close, profile, save, load,
-        order[2], defaults, folder, back, hd;
+        order[2], defaults, folder, remove, back, hd;
     int name_y, meta_y; /* the middles of the details' name and metadata lines */
     int lift;           /* with a finger: how far a long message raises the footer's top */
 } Layout;
@@ -63,6 +63,9 @@ static int (*import_pick)(char *, size_t), (*import_picked)(char *, size_t),
 static int import_step;
 static char import_zip[1024];
 static ModsImport *import_waiting;
+/* Remove (touch panels with Import mod...): the mod its question (pending
+ * 5) is about. */
+static int remove_target = -1;
 /* HD pack... (hd_pack.h, where the platform has a network for it): what
  * the window did with the job (0 nothing, 1 asked GitHub, 2 asks the
  * player (pending 4), 3 downloads, 4 unpacks), and the share of the step
@@ -128,10 +131,20 @@ static void layout_touch(Layout *l)
         int w = max(120 * unit, width_text("Import mod...") + 24 * unit);
         l->folder = rect(l->close.x - g - w, footer, w, t);
     }
+    /* Remove, where Import is (an app cannot open its mods folder to delete
+     * one by hand): beside the selected mod's details, so on a phone it is
+     * on their page, where Import is not; else left of Import. While its
+     * question is up (pending 5) the answer is the Apply button, which reads
+     * Remove, so this one steps aside rather than showing a second, dead one. */
+    l->remove = none();
+    if (import_pick && selected >= 0 && pending != 5 && (!compact || page == 1)) {
+        int w = max(90 * unit, width_text("Remove") + 24 * unit), edge = l->folder.w ? l->folder.x : l->close.x;
+        l->remove = rect(edge - g - w, footer, w, t);
+    }
     {   /* A message of two to four lines beside the buttons (a refusal, a
          * mod that cannot run here) raises the footer's top instead of
          * being cut: the list and the details end above it. */
-        int room = (l->folder.w ? l->folder.x : l->close.x) - 20 * unit;
+        int room = (l->remove.w ? l->remove.x : l->folder.w ? l->folder.x : l->close.x) - 20 * unit;
         int lines = *status ? min(4, max(1, wrap(NULL, 0, 0, room, status, 0) / LINE)) : 1;
         l->lift = max(0, lines * LINE + 6 * unit - t);
         footer -= l->lift; /* where the list and the details end; the buttons are placed */
@@ -231,6 +244,7 @@ static void layout(Layout *l)
     l->folder = rect(width - p - 418 * unit, height - 48 * unit, 158 * unit, 30 * unit);
     l->back = rect(0, 0, 0, 0);
     l->hd = none(); /* a phone's panel only (layout_touch) */
+    l->remove = none(); /* so is Remove */
     l->name_y = l->detail.y + 24 * unit;
     l->meta_y = l->detail.y + 57 * unit;
 }
@@ -257,6 +271,8 @@ static int contains(const char *text, const char *part)
 }
 static int visible(int mod)
 {
+    if (Mods_Removed(mod))
+        return 0;
     if (filter == 1 && !wanted[mod])
         return 0;
     if (filter == 2 && wanted[mod])
@@ -327,8 +343,12 @@ void ModsWindow_Init(void)
     height = 640 * unit;
     slider_drag = -1;
     bar_drag = 0;
-    selected = Mods_Count() ? 0 : -1;
+    selected = -1;
+    for (int i = Mods_Count() - 1; i >= 0; i--)
+        if (!Mods_Removed(i))
+            selected = i; /* the first one the list shows */
     scroll = detail_scroll = tab = filter = focus = pending = 0;
+    remove_target = -1;
     query[0] = status[0] = 0;
     for (int i = 0; i < MODS_MAX; i++) {
         free(values[i]);
@@ -697,9 +717,11 @@ static void scrollbar(MenuCanvas *c, Rect track, int total, int shown, int at, i
  * footer's message line while there is no message. */
 static void counts_line(char *line, size_t size, int room)
 {
-    int enabled = 0, overlap_count = 0, overlap_warnings = 0;
-    for (int i = 0; i < Mods_Count(); i++)
+    int enabled = 0, overlap_count = 0, overlap_warnings = 0, listed = 0;
+    for (int i = 0; i < Mods_Count(); i++) {
         enabled += !!wanted[i];
+        listed += !Mods_Removed(i);
+    }
     if (enabled > 1) {
         const ModsOverlaps *found = Mods_Overlaps(wanted, ranks, (const int *const *)values);
         overlap_count = Mods_OverlapCount(found);
@@ -707,14 +729,14 @@ static void counts_line(char *line, size_t size, int room)
             overlap_warnings += Mods_OverlapSeverity(found, i) == MODS_OVERLAP_WARNING;
     }
     if (overlap_count)
-        snprintf(line, size, "%d installed  /  %d enabled  /  %d overlap%s, %d warning%s%s", Mods_Count(),
+        snprintf(line, size, "%d installed  /  %d enabled  /  %d overlap%s, %d warning%s%s", listed,
                  enabled, overlap_count, overlap_count == 1 ? "" : "s", overlap_warnings,
                  overlap_warnings == 1 ? "" : "s", changed() ? "  /  Unsaved changes" : "");
     if (overlap_count && width_text(line) > room) /* a small window: the tab has the warnings */
-        snprintf(line, size, "%d installed  /  %d enabled  /  %d overlap%s%s", Mods_Count(), enabled,
+        snprintf(line, size, "%d installed  /  %d enabled  /  %d overlap%s%s", listed, enabled,
                  overlap_count, overlap_count == 1 ? "" : "s", changed() ? "  /  Unsaved" : "");
     else if (!overlap_count)
-        snprintf(line, size, "%d installed  /  %d enabled%s", Mods_Count(), enabled,
+        snprintf(line, size, "%d installed  /  %d enabled%s", listed, enabled,
                  changed() ? "  /  Unsaved changes" : "");
 }
 /* The search, filter and profile fields with Save and Load. */
@@ -813,14 +835,14 @@ static void draw_details(MenuCanvas *c, const Layout *l)
 }
 static const char *apply_label(void)
 {
-    return pending == 4 ? "Download" : pending == 3 ? "Replace" : pending == 2 ? "Discard changes" : pending == 1 ? "Apply & restart" : "Apply changes";
+    return pending == 5 ? "Remove" : pending == 4 ? "Download" : pending == 3 ? "Replace" : pending == 2 ? "Discard changes" : pending == 1 ? "Apply & restart" : "Apply changes";
 }
 /* With a finger: the fields and the list, the details (side by side or the
  * page shown), and the footer: the message (or the counts) beside Close and
  * Apply, up to four lines in the footer's band (layout_touch raises it). */
-/* Where the footer's buttons start: the files slot when it has a button,
- * else Close. */
-static int footer_left(const Layout *l) { return l->folder.w ? l->folder.x : l->close.x; }
+/* Where the footer's buttons start: Remove when it is shown, else the
+ * files slot when it has a button, else Close. */
+static int footer_left(const Layout *l) { return l->remove.w ? l->remove.x : l->folder.w ? l->folder.x : l->close.x; }
 static void draw_touch(MenuCanvas *c, const Layout *l)
 {
     char line[512];
@@ -848,6 +870,8 @@ static void draw_touch(MenuCanvas *c, const Layout *l)
     }
     if (l->folder.w)
         button(c, l->folder, import_step == 2 ? "Importing..." : "Import mod...", 0);
+    if (l->remove.w)
+        button(c, l->remove, "Remove", 0);
     button(c, l->close, pending ? "Cancel" : "Close", 0);
     button(c, l->apply, apply_label(), changed() || pending);
 }
@@ -1269,13 +1293,96 @@ static void import_start(void)
     import_step = 1;
     put(status, sizeof(status), "Choose a mod's .zip.");
 }
+/* --- Remove ------------------------------------------------------------ */
+
+/* The selected mod's Remove was pressed: the question (pending 5), or why
+ * not. Only a mod of the player's own (an installed one) that nothing was
+ * loaded from since the game started (Mods_InUse): its code, data and
+ * pictures are files the running game holds, and they must not go away
+ * under it. A mod that is on, or was, has to be turned off and applied,
+ * and the game started again, first. Anything else can go, as it is. */
+static void remove_start(void)
+{
+    const char *name;
+    if (selected < 0 || Mods_Removed(selected))
+        return;
+    name = Mods_Name(selected);
+    if (hd_step || import_step || import_waiting) {
+        put(status, sizeof(status), "Wait for the import or the HD pack to finish first.");
+        return;
+    }
+    if (strcmp(Mods_Origin(selected), "installed")) {
+        put(status, sizeof(status), "%s came with the game, so it cannot be removed.", name);
+        return;
+    }
+    if (Mods_InUse(selected)) {
+        put(status, sizeof(status), Mods_Active(selected)
+            ? "%s is on, so the game is using its files. Turn it off, apply, restart the game, then remove it."
+            : "%s was tried since the game started, so the game may still hold its files. Turn it off, apply, "
+              "restart the game, then remove it.",
+            name);
+        return;
+    }
+    remove_target = selected;
+    pending = 5;
+    put(status, sizeof(status), "Remove %s? Its folder is deleted from the mods folder, with everything in it. "
+        "This cannot be undone.", name);
+}
+/* Remove's answer was yes: the folder goes, the mod leaves the list now
+ * (Mods_Forget keeps its slot, so no other mod's index moves), and the
+ * next mod is shown. */
+static void remove_confirm(void)
+{
+    char folder[1024], why[300], name[160];
+    int mod = remove_target, next = -1;
+    remove_target = -1;
+    pending = 0;
+    if (mod < 0 || mod >= Mods_Count() || Mods_Removed(mod) || Mods_InUse(mod)) {
+        put(status, sizeof(status), "Nothing was removed.");
+        return;
+    }
+    put(name, sizeof(name), "%s", Mods_Name(mod));
+    if (Mods_InstallDirectory(folder, sizeof(folder))) {
+        put(status, sizeof(status), "Could not open the mods folder. Nothing was removed.");
+        return;
+    }
+    if (Mods_ImportRemoveInstalled(folder, Mods_Directory(mod), why, sizeof(why))) {
+        put(status, sizeof(status), "%s It stays in the list.", why);
+        fprintf(stderr, "memories-pc: remove: %s\n", why);
+        return;
+    }
+    if (Mods_Forget(mod)) {
+        put(status, sizeof(status), "%s was removed, but it leaves the list after a restart.", name);
+        return;
+    }
+    adopt(mod); /* what was staged for it (a rank, a setting, On) goes with it: no "Unsaved changes" for a mod that is gone */
+    wanted[mod] = 0;
+    if (Settings_Save() < 0)
+        fprintf(stderr, "memories-pc: the settings could not be saved after a remove\n");
+    if (selected == mod) {
+        for (int i = mod + 1; i < Mods_Count() && next < 0; i++)
+            if (visible(i))
+                next = i;
+        for (int i = mod - 1; i >= 0 && next < 0; i--)
+            if (visible(i))
+                next = i;
+        selected = next;
+        detail_scroll = 0;
+        tab = 0;
+    }
+    if (compact)
+        page = 0;
+    scroll = max(0, min(scroll, shown_count() - rows()));
+    put(status, sizeof(status), "Removed %s.", name);
+    fprintf(stderr, "memories-pc: remove: %s\n", status);
+}
 /* --- HD pack... (hd_pack.h) -------------------------------------------- */
 
 /* The installed HD pack's index (an installed mod with its id), else -1. */
 static int hd_installed(void)
 {
     for (int j = 0; j < Mods_Count(); j++)
-        if (!strcmp(Mods_Id(j), HD_PACK_ID))
+        if (!strcmp(Mods_Id(j), HD_PACK_ID) && !Mods_Removed(j))
             return j;
     return -1;
 }
@@ -1519,6 +1626,7 @@ static void cancel_pending(void)
 {
     if (pending == 3)
         import_done();
+    remove_target = -1;
     if (pending == 4) {
         HdPack_Reset();
         hd_step = 0;
@@ -1673,6 +1781,7 @@ int ModsWindow_Locate(int id, int *x, int *y)
     case MODS_UI_APPLY: r = l.apply; break;
     case MODS_UI_FOLDER: r = l.folder; break;
     case MODS_UI_HD: r = l.hd; break;
+    case MODS_UI_REMOVE: r = l.remove; break;
     case MODS_UI_TAB: case MODS_UI_TAB + 1: case MODS_UI_TAB + 2: r = selected >= 0 ? l.tabs[id - MODS_UI_TAB] : none(); break;
     case MODS_UI_ORDER: case MODS_UI_ORDER + 1: r = selected >= 0 ? l.order[id - MODS_UI_ORDER] : none(); break;
     case MODS_UI_ROW_SELECTED: case MODS_UI_ROW_FIRST: case MODS_UI_CHECK_SELECTED: case MODS_UI_CHECK_FIRST:
@@ -1748,7 +1857,7 @@ int ModsWindow_Redraws(const MenuEvent *e)
 }
 int ModsWindow_RequestClose(void)
 {
-    if (pending == 3 || pending == 4)
+    if (pending == 3 || pending == 4 || pending == 5)
         cancel_pending();
     focus = 0;
     slider_drag = -1;
@@ -1822,6 +1931,8 @@ int ModsWindow_Event(const MenuEvent *e)
                     import_install();
                 } else if (pending == 4)
                     hd_confirm();
+                else if (pending == 5)
+                    remove_confirm();
                 else
                     apply();
             }
@@ -1862,12 +1973,16 @@ int ModsWindow_Event(const MenuEvent *e)
                 import_install();
             } else if (pending == 4)
                 hd_confirm();
+            else if (pending == 5)
+                remove_confirm();
             else if (hd_step)
                 put(status, sizeof(status), "Wait for the HD pack to finish, or stop it, before applying changes.");
             else
                 apply();
         } else if (!pending && l.hd.w && inside(l.hd, e->x, e->y)) {
             hd_tap();
+        } else if (!pending && touch && l.remove.w && inside(l.remove, e->x, e->y)) {
+            remove_start();
         } else if (!pending && touch && import_pick && inside(l.folder, e->x, e->y)) {
             if (hd_step)
                 put(status, sizeof(status), "Wait for the HD pack to finish, or stop it, before importing.");
@@ -1920,6 +2035,10 @@ int ModsWindow_Event(const MenuEvent *e)
                 if (Mods_ProfileRead(profile, wanted)) {
                     for (int i = 0; i < Mods_Count(); i++) {
                         char key[256];
+                        if (Mods_Removed(i)) { /* a profile cannot bring a removed mod back, or stage its settings */
+                            wanted[i] = 0;
+                            continue;
+                        }
                         snprintf(key, sizeof(key), "mod.%s.order", Mods_Id(i));
                         ranks[i] = Mods_ProfileValue(profile, key, num(Mods_Manifest(i), "priority", 0));
                         for (int j = 0; j < counts[i]; j++) {

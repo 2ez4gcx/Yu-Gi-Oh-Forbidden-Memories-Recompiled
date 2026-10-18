@@ -145,6 +145,68 @@ when the mod needs one).
   `pc_mod_import` checks the reader and the installer on `.zip` files it
   writes; `pc_mods_window` drives the panel's import with a fake picker.
 
+**Remove** (Android; it comes with `ModsWindow_SetImport`, so no desktop
+panel has it either): a mod that is off, or does not load (an old code mod
+this build refuses shows "Inactive" or "Error" and nothing else could take
+it away), is deleted from the app's mods folder, which no file manager can
+open on Android 11 and later. The button is in the footer beside Import
+mod... (left of it); on a phone, where Import is on the list's page, Remove
+is on the page of the selected mod. The first tap asks, in the message line
+and with the buttons as for Replace ("Remove <name>? Its folder is deleted
+from the mods folder, with everything in it. This cannot be undone."; Apply
+reads Remove, Close reads Cancel; Enter says yes and Escape no); the second
+deletes.
+- **What it deletes**: `Mods_ImportRemoveInstalled` (`import.c`) removes the
+  mod's folder only when it is `<mods folder>/<one plain name>`: not the
+  mods folder itself, not a path with `..`, a separator, a `:` or a leading
+  `.` (the import's own hidden folders), and not a link (`lstat`: a link is
+  refused, never followed; Windows has no `lstat` here and `stat` follows a
+  junction, but nothing runs this there except the tests, since the button
+  exists only on Android). The folder is renamed in one step to
+  `mods/.import-removing-<name>` (hidden: the mod scan skips it) and then
+  deleted, so a delete that fails or is cut short leaves no half mod in the
+  list but a hidden folder that `Mods_ImportCleanup` finishes off at the
+  next start (or the next import). The mods that came with the game (origin "shipped") are
+  refused: "<name> came with the game, so it cannot be
+  removed."
+- **A mod in use stays**: if anything was loaded from the mod since the game
+  started (`Mods_InUse`: it is on, or was turned off since) its code, data
+  and pictures are files the game holds, so Remove says so and deletes
+  nothing: "<name> is on, so the game is using its files. Turn it off,
+  apply, restart the game, then remove it." (or, for one that is off but was
+  tried since the game started, which includes one that is turned on and
+  failed to load: "...was tried since the game started, so the game may
+  still hold its files. Turn it off, apply, restart the game, then remove
+  it."). After that restart it was never tried, and goes. The same rule keeps
+  Replace from changing it.
+- **The list**: the mod leaves it at once, with no restart, and the next one
+  is shown. `Mods_Forget` keeps its slot in the loader's table (events and
+  saved state are keyed by the index, which a loaded mod behind it holds),
+  marks it removed (`Mods_Removed`: not in the list and not in the counts;
+  what was staged for it, its On, load order and settings, is dropped, so it
+  is no "Unsaved changes"; a profile that names it is loaded without it, and
+  a profile saved after writes it as off, `mod.<id>=0`) and broken (nothing
+  can apply it). The slot stays until the next launch (it counts toward the
+  game's 256 mods until then). Importing a mod with that `id` later takes the slot again.
+- **The saved settings**: `mod.<id>` (on or off) is set off, so a mod
+  imported later with that id starts off like any new one, and the load order
+  and the mod's own settings are kept: an updated version imported after
+  Remove comes back with the player's choices. (There is no call to delete a
+  named setting; the leftover keys do nothing.)
+- **A folder that cannot be renamed** keeps the mod in the list ("Could not
+  delete <folder>: try Remove again. It stays in the list.").
+- **While the question is up** the left Remove button steps aside: the
+  answer is Apply, which reads Remove, and Cancel.
+- **A copy that replaced a mod of the game's** (same id as a shipped one): once removed, the game's own mod is back at the next launch, off.
+
+- **Testing**: `pc_mod_import` checks `Mods_ImportRemoveInstalled` (names
+  that leave the folder, `..`, hidden folders, links, files, a trailing
+  slash, the hidden rename and the sweep of what it leaves); `pc_mods_window`
+  removes imported mods through the panel (the question, Cancel, the list
+  and the count, what was staged for the mod and a profile that names it,
+  an updated version imported again, a mod that is on, the phone's two
+  pages, no button without the picker). `MEMORIES_TRACE=window` lists the button as `remove`.
+
 **HD pack...** (Android; `HdPack_SetNet` in `src/pc/mods/hd_pack.h`, which
 only `sdl.c` under `SDL_PLATFORM_ANDROID` calls, so no desktop has the
 button) is in the top bar, left of Save (the footer is Import's and the

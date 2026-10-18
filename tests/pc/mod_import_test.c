@@ -473,6 +473,13 @@ int main(void)
         snprintf(slashed, sizeof(slashed), "%s/", mods);
         CHECK(!Mods_ImportRemoveInstalled(slashed, path, why, sizeof(why)));
         CHECK(!exists("mods/slash"));
+        /* and so is a doubled separator (a MEMORIES_MODS_DIR ending in one) */
+        make("mods/double");
+        snprintf(path, sizeof(path), "%s//double", mods);
+        CHECK(!Mods_ImportRemoveInstalled(slashed, path, why, sizeof(why)));
+        CHECK(!exists("mods/double"));
+        snprintf(path, sizeof(path), "%s//", mods);
+        CHECK(Mods_ImportRemoveInstalled(mods, path, why, sizeof(why)) && exists("mods/kept"));
         /* refused, and nothing touched */
         make("mods/kept/inner");
         snprintf(path, sizeof(path), "%s", mods);

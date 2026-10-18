@@ -840,8 +840,8 @@ static const char *apply_label(void)
 /* With a finger: the fields and the list, the details (side by side or the
  * page shown), and the footer: the message (or the counts) beside Close and
  * Apply, up to four lines in the footer's band (layout_touch raises it). */
-/* Where the footer's buttons start: the files slot when it has a button,
- * else Close. */
+/* Where the footer's buttons start: Remove when it is shown, else the
+ * files slot when it has a button, else Close. */
 static int footer_left(const Layout *l) { return l->remove.w ? l->remove.x : l->folder.w ? l->folder.x : l->close.x; }
 static void draw_touch(MenuCanvas *c, const Layout *l)
 {
@@ -1347,7 +1347,7 @@ static void remove_confirm(void)
         return;
     }
     if (Mods_ImportRemoveInstalled(folder, Mods_Directory(mod), why, sizeof(why))) {
-        put(status, sizeof(status), "%s It stays in the list: try Remove again.", why);
+        put(status, sizeof(status), "%s It stays in the list.", why);
         fprintf(stderr, "memories-pc: remove: %s\n", why);
         return;
     }

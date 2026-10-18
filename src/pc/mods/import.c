@@ -928,6 +928,8 @@ int Mods_ImportRemoveInstalled(const char *mods, const char *directory, char *wh
     if (!length || strncmp(directory, base, length) || (directory[length] != '/' && directory[length] != '\\'))
         goto outside;
     folder = directory + length + 1;
+    while (*folder == '/' || *folder == '\\') /* "<mods>//<name>" from a MEMORIES_MODS_DIR ending in a separator */
+        folder++;
     if (!*folder || *folder == '.' || strpbrk(folder, "/\\:"))
         goto outside;
     /* lstat: a link is not the mod's folder, and is never followed. */
@@ -946,14 +948,14 @@ int Mods_ImportRemoveInstalled(const char *mods, const char *directory, char *wh
     /* Renamed first, in one step, to a hidden folder the mod scan skips and
      * Mods_ImportCleanup sweeps (".import-*"): the mod is gone at once, and
      * what an interrupted or failed delete leaves is no half mod in the list
-     * but a hidden folder the next panel opening finishes off. */
+     * but a hidden folder the next start (or import) finishes off. */
     if (snprintf(inner, sizeof(inner), "%s/.import-removing-%s", base, folder) >= (int)sizeof(inner)) {
         snprintf(why, why_size, "The name of %s is too long to remove.", folder);
         return -1;
     }
     Mods_ImportRemoveTree(inner); /* what an earlier remove of that name left */
     if (rename(directory, inner)) {
-        snprintf(why, why_size, "Could not delete %s.", folder);
+        snprintf(why, why_size, "Could not delete %s: try Remove again.", folder);
         return -1;
     }
     Mods_ImportRemoveTree(inner);

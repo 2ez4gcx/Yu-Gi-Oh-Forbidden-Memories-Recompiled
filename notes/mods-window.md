@@ -165,8 +165,8 @@ deletes.
   exists only on Android). The folder is renamed in one step to
   `mods/.import-removing-<name>` (hidden: the mod scan skips it) and then
   deleted, so a delete that fails or is cut short leaves no half mod in the
-  list but a hidden folder that `Mods_ImportCleanup` finishes off when the
-  panel opens again. The mods that came with the game (origin "shipped") are
+  list but a hidden folder that `Mods_ImportCleanup` finishes off at the
+  next start (or the next import). The mods that came with the game (origin "shipped") are
   refused: "<name> came with the game, so it cannot be
   removed."
 - **A mod in use stays**: if anything was loaded from the mod since the game
@@ -194,7 +194,7 @@ deletes.
   Remove comes back with the player's choices. (There is no call to delete a
   named setting; the leftover keys do nothing.)
 - **A folder that cannot be renamed** keeps the mod in the list ("Could not
-  delete <folder>. It stays in the list: try Remove again.").
+  delete <folder>: try Remove again. It stays in the list.").
 - **While the question is up** the left Remove button steps aside: the
   answer is Apply, which reads Remove, and Cancel.
 - **A copy that replaced a mod of the game's** (same id as a shipped one): once removed, the game's own mod is back at the next launch, off.

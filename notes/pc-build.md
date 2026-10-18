@@ -3918,20 +3918,71 @@ adb install -r tmp/pc/android-x86/memories-x86.apk
 
 **The disc image.** On the first run the game finds no image and shows its
 welcome box; "Choose disc image..." opens the system's document picker
-(SDL's file dialog: the Storage Access Framework), so the image can be
-anywhere the phone reaches (Downloads, an SD card, a cloud drive), with no
-adb and no root. Any document is offered (the system knows no type for a
-`.bin`); the chosen one is checked where it is (`SLUS_014.11` on a raw
-image, as `game_files.c` checks) before anything is copied, and a file that
-is not the disc gets the desktop's "Unable to use this ROM" and the welcome
-box again. A good image is copied (about 25 s for 494 MB on the emulator)
-into the app's external files folder, `game/rpg-yfm.bin` under
+(the Storage Access Framework), so the image can be anywhere the phone
+reaches (Downloads, an SD card, a cloud drive), with no adb and no root.
+Any document is offered (the system knows no type for a `.bin`); the chosen
+one is checked where it is (`SLUS_014.11` on a raw image, as `game_files.c`
+checks) before anything is copied, and a file that is not the disc gets the
+desktop's "Unable to use this ROM" and the welcome box again. A good image
+is copied into the app's external files folder, `game/rpg-yfm.bin` under
 `/sdcard/Android/data/org.yfmredecomp.game/files/`, since the right to read
 a picked document does not outlast the app, and is remembered as on the
-desktop. Only raw `.bin` images: `game_files.c` reads nothing else (no
-`.cue`, `.iso` or `.chd`). The Android TV images have no document picker
-(the intent resolves to a stub that returns at once, and the welcome box
-comes back): there the image has to be put in place by other means.
+desktop. A box shows the check and then the copy, "Copying the disc image
+into the game's folder: N of 493 MB" over a bar (`DiscPicker.progress`,
+every 8 MB), where the screen used to stay black and silent for the whole
+copy. Only raw `.bin` images: `game_files.c` reads nothing else (no `.cue`,
+`.iso` or `.chd`). The Android TV images have no document picker (the
+intent resolves to a stub that returns at once, and the welcome box comes
+back): there the image has to be put in place by other means.
+
+The picker is our own activity, `DiscPicker.java`
+(`org.yfmredecomp.game.DiscPicker`), not SDL's file dialog. SDL's keeps what
+it waits for in statics of the game's process (`SDLActivity.mFileDialogState`
+and the native callback): when the system ended that process while the
+picker was in front, which a phone short of memory does (the game's process
+is then a background one, `oom_score_adj` 700 on the emulator), the
+player's choice came back to a new process that did not wait for it, and
+was dropped without a word: the welcome again, as if nothing had been
+chosen. `DiscPicker` runs in a task of its own (SDLActivity is
+`singleInstance`; its own `taskAffinity`, so that starting it afresh with
+`FLAG_ACTIVITY_CLEAR_TASK` clears only its task; kept out of the recent
+apps), asks for the document with `ACTION_OPEN_DOCUMENT`, takes a lasting
+read right (`takePersistableUriPermission`) and writes the answer to
+`disc-pick.txt` in the internal files folder before it ends: "chosen",
+"cancelled" or "failed" and the pick's id (the Intent's `id` extra), then
+the URI or the reason. The system keeps an activity's pending result across
+the end of its process and gives it to the activity it makes again, so the
+answer is written either way. `DiscPicker` ended without an answer (its
+task closed, a free-form window shut, a newer picker clearing it) answers
+"cancelled" from `onDestroy`: where the game's activity never left the
+screen (a free-form window, split screen), nothing else would tell the game
+the picker is gone, and it waited on a black screen.
+`Platform_SelectDisc` waits for the answer to its own pick (an answer under
+another id, from a picker a newer one cleared, is dropped) while the game's
+activity is away (SDL's event pump holds the thread while it is in the
+background), and reads an answer that is there when it starts: one the last
+process did not live to read, taken up at once, without the welcome, if it
+is at most 15 minutes old (an older one is a choice made long ago, not
+taken unasked). The game's activity back in front without an answer (the
+player came back from the recent apps or the launcher instead) is the
+picker given up, and the welcome comes again; SDL gives
+`SDL_EVENT_DID_ENTER_BACKGROUND`/`FOREGROUND` to an event watch only
+(`SDL_AddEventWatch`), never to the queue, so a loop that polls for them
+never sees them. Backing out of the picker is not an error; a picker that
+gave back no document says so in a box (a plain sentence; the exception
+goes to the log), and every answer is in the log (`disc picker: result
+...` from the activity, `no disc image chosen`, `the picker gave no
+document`, `an answer to an earlier pick`).
+The copy goes through `game/rpg-yfm.bin.tmp`, removed at the start and
+again before the copy if a copy cut short left one (it no longer counts
+against the free-space check), and is renamed only when it is whole: the
+document's length when its provider gives one, else at least the length the
+image's own volume descriptor gives (its sectors times 2352). The lasting
+read right is given back after the copy, whichever way it went; one a copy
+cut short left (the process ended during it) goes at the next start, where
+every lasting read right but that of the answer being taken up is given
+back (`DiscPicker.releaseAll`), and a start that finds the copy in place
+drops a leftover answer and gives back them all.
 
 The game's message boxes on Android (this welcome, the error boxes of
 `Platform_ShowError` and the start-up report's) are the system's own alert,
@@ -4383,11 +4434,12 @@ untouched: with a mouse every path is the old one, pixel for pixel.
   (`-gpu host`), 40-80 ms with SwiftShader; the game clock keeps time and
   presents drop frames.
 - **Portrait after the file picker (API 35 x86_64 emulator; system side,
-  not fixed):** the picker (DocumentsUI, `SDL_ShowOpenFileDialog`: the
-  first run's disc, and the mod import where it exists) opens in the
-  game's task (`dumpsys activity activities`: both in the same task) and
-  follows the device, so on a device held upright it is portrait, and
-  closing it rotates the display back to landscape in a shell transition
+  not fixed):** the picker (DocumentsUI) follows the device, whether it
+  is the mod import's (`SDL_ShowOpenFileDialog`, in the game's task:
+  `dumpsys activity activities` shows both in the same task) or the first
+  run's disc (in `DiscPicker`'s own task, `A=...game.disc`, above the
+  game's). On a device held upright it is portrait, and closing it
+  rotates the display back to landscape in a shell transition
   (likely played by SystemUI's WindowManagerShell). In one emulator boot
   that had a SystemUI ANR, two returns left the display in portrait:
   `dumpsys window` had `DisplayRotation mRotation=1` while the display's

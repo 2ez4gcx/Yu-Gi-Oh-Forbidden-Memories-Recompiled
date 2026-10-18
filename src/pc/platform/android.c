@@ -10,9 +10,12 @@
  *
  * - The player's folder is the app's external files folder
  *   (/sdcard/Android/data/<package>/files): the disc image goes in its
- *   game/ folder (game_files.c), where the first run's file picker copies
- *   the one the player chooses (Platform_SelectDisc, below); adb can put it
- *   there too.
+ *   game/ folder (game_files.c), where the first run copies the one the
+ *   player chooses (Platform_SelectDisc, below), showing the copy in a box;
+ *   adb can put it there too. The picker is our own activity
+ *   (DiscPicker.java), which writes the answer to a file in the internal
+ *   files folder, so a choice made while the system ended this process is
+ *   taken up by the next one instead of being lost.
  * - stdout and stderr, where the port reports, go nowhere in an app: they
  *   are forwarded to the system log (adb logcat -s memories).
  * - No crash monitor process: it re-executes the program, and an app
@@ -66,6 +69,7 @@
 #include <sys/syscall.h>
 #include <sys/system_properties.h>
 #include <sys/utsname.h>
+#include <time.h>
 #include <unistd.h>
 #include <jni.h>
 #include "pc/guest/state.h"
@@ -177,6 +181,7 @@ int Android_DensityChanged(void)
 
 /* --- the disc image, through the system's file picker ----------------- */
 
+/* SDL's file dialog: the Mods panel's .zip (below). */
 typedef struct Picked {
     SDL_AtomicInt done;
     char uri[2048];
@@ -191,57 +196,186 @@ static void SDLCALL picked(void *userdata, const char *const *files, int filter)
     else if (files[0] && strlen(files[0]) < sizeof(pick->uri)) {
         snprintf(pick->uri, sizeof(pick->uri), "%s", files[0]);
         pick->result = 1;
+    } else if (files[0]) {
+        fprintf(stderr, "memories-pc: the picker's answer is %u characters long: taken as no choice\n",
+                (unsigned)strlen(files[0]));
     }
     SDL_SetAtomicInt(&pick->done, 1); /* on the Java thread: published last */
 }
 
+static int java_failed(JNIEnv *env);
+static int java_ok(JNIEnv *env, const void *value);
+static int start_app_activity(const char *name, int pid, const char *id, int flags);
+
+#define DISC_TITLE "Yu-Gi-Oh! Forbidden Memories"
+
 /* The chosen document, open: 1 when it holds the game's executable, as
  * game_files.c checks an image (SLUS_014.11 on a raw ISO 9660 image), before
- * anything is copied. */
-static int is_the_disc(FILE *file)
+ * anything is copied. *bytes is then the image's length by its volume
+ * descriptor: the sectors it says the disc has, 2352 bytes each. */
+static int is_the_disc(FILE *file, Sint64 *bytes)
 {
     unsigned char sector[2048];
     unsigned lba, size;
-    return GameFiles_FindFile(file, "SLUS_014.11", &lba, &size) && size > 2048 && size < (4u << 20) &&
-           GameFiles_ReadSector(file, lba, sector) && !memcmp(sector, "PS-X EXE", 8);
+    if (!GameFiles_ReadSector(file, 16, sector)) return 0;
+    *bytes = (Sint64)(sector[80] | (unsigned)sector[81] << 8 | (unsigned)sector[82] << 16 |
+                      (unsigned)sector[83] << 24) * 2352;
+    return *bytes > 0 && GameFiles_FindFile(file, "SLUS_014.11", &lba, &size) && size > 2048 &&
+           size < (4u << 20) && GameFiles_ReadSector(file, lba, sector) && !memcmp(sector, "PS-X EXE", 8);
 }
 
-/* Copies the open document to `to` (through to.tmp): 1 when it was. */
-static int copy_disc(FILE *from, Sint64 size, const char *to, char *why, size_t why_size)
+/* DiscPicker.java, through JNI: the picker started, the copy's box shown
+ * or taken away, the document's lasting read right given back (one, or all
+ * but one). */
+enum { DISC_START, DISC_PROGRESS, DISC_CLOSE, DISC_RELEASE, DISC_RELEASE_ALL };
+typedef struct {
+    int what;
+    const char *text; /* DISC_START: the pick's id; DISC_PROGRESS: the box's
+                       * line; DISC_RELEASE: the URI; DISC_RELEASE_ALL: the
+                       * URI kept ("" for none) */
+    int done, total;  /* DISC_PROGRESS: MB; total 0 for a moving bar */
+    int ok;
+} DiscCall;
+
+static void disc_java(void *argument)
 {
-    char temporary[1100];
+    DiscCall *call = argument;
+    JNIEnv *env;
+    jobject activity;
+    jclass activity_class = NULL, loader_class = NULL, found = NULL;
+    jmethodID get_loader = NULL, load = NULL, method = NULL;
+    jobject loader = NULL;
+    jstring name = NULL, title = NULL, text = NULL;
+    int ready;
+    if (call->what == DISC_START) {
+        /* a task of its own, any earlier one of it cleared:
+         * FLAG_ACTIVITY_NEW_TASK | FLAG_ACTIVITY_CLEAR_TASK */
+        call->ok = start_app_activity("org.yfmredecomp.game.DiscPicker", 0, call->text, 0x10000000 | 0x00008000);
+        return;
+    }
+    env = (JNIEnv *)SDL_GetAndroidJNIEnv();
+    activity = env ? (jobject)SDL_GetAndroidActivity() : NULL;
+    if (!activity) return;
+    if ((*env)->PushLocalFrame(env, 16) < 0) {
+        java_failed(env);
+        (*env)->DeleteLocalRef(env, activity);
+        return;
+    }
+    /* DiscPicker is the app's: through the activity's class loader, as
+     * MessageBox (java_box). */
+#define CHECKED(value) java_ok(env, (const void *)(value))
+    ready = CHECKED(activity_class = (*env)->GetObjectClass(env, activity)) &&
+            CHECKED(get_loader = (*env)->GetMethodID(env, activity_class, "getClassLoader",
+                                                     "()Ljava/lang/ClassLoader;")) &&
+            CHECKED(loader = (*env)->CallObjectMethod(env, activity, get_loader)) &&
+            CHECKED(loader_class = (*env)->GetObjectClass(env, loader)) &&
+            CHECKED(load = (*env)->GetMethodID(env, loader_class, "loadClass", "(Ljava/lang/String;)Ljava/lang/Class;")) &&
+            CHECKED(name = (*env)->NewStringUTF(env, "org.yfmredecomp.game.DiscPicker")) &&
+            CHECKED(found = (jclass)(*env)->CallObjectMethod(env, loader, load, name));
+    if (ready && call->what == DISC_PROGRESS) {
+        if (CHECKED(method = (*env)->GetStaticMethodID(env, found, "progress",
+                                                       "(Landroid/app/Activity;Ljava/lang/String;Ljava/lang/String;II)V")) &&
+            CHECKED(title = (*env)->NewStringUTF(env, DISC_TITLE)) &&
+            CHECKED(text = (*env)->NewStringUTF(env, call->text))) {
+            (*env)->CallStaticVoidMethod(env, found, method, activity, title, text, (jint)call->done, (jint)call->total);
+            call->ok = !java_failed(env);
+        }
+    } else if (ready && call->what == DISC_CLOSE) {
+        if (CHECKED(method = (*env)->GetStaticMethodID(env, found, "close", "(Landroid/app/Activity;)V"))) {
+            (*env)->CallStaticVoidMethod(env, found, method, activity);
+            call->ok = !java_failed(env);
+        }
+    } else if (ready && (call->what == DISC_RELEASE || call->what == DISC_RELEASE_ALL)) {
+        if (CHECKED(method = (*env)->GetStaticMethodID(env, found,
+                                                       call->what == DISC_RELEASE ? "release" : "releaseAll",
+                                                       "(Landroid/content/Context;Ljava/lang/String;)V")) &&
+            CHECKED(text = (*env)->NewStringUTF(env, call->text))) {
+            (*env)->CallStaticVoidMethod(env, found, method, activity, text);
+            call->ok = !java_failed(env);
+        }
+    }
+#undef CHECKED
+    (*env)->PopLocalFrame(env, NULL);
+    (*env)->DeleteLocalRef(env, activity);
+}
+
+static int disc_call(int what, const char *text, int done, int total)
+{
+    DiscCall call;
+    call.what = what;
+    call.text = text ? text : "";
+    call.done = done;
+    call.total = total;
+    call.ok = 0;
+    Memories_OnHostStack(disc_java, &call); /* JNI: never from the game stack */
+    return call.ok;
+}
+
+/* Copies the open document to `to` (through to.tmp): 1 when it was. `size`
+ * is the document's length as its provider tells it (0 or less: not told),
+ * `image` the image's length by its own volume descriptor (is_the_disc).
+ * The box shows how far the copy is. */
+static int copy_disc(FILE *from, Sint64 size, Sint64 image, const char *to, char *why, size_t why_size)
+{
+    char temporary[1100], line[160];
     static unsigned char buffer[1 << 20];
     struct statvfs space;
     char folder[1024], *slash;
     FILE *out;
-    Sint64 done = 0;
-    int ok;
+    Sint64 done = 0, need = size > 0 ? size : image;
+    int ok, complete;
     snprintf(folder, sizeof(folder), "%s", to);
     if ((slash = strrchr(folder, '/')) != NULL) *slash = '\0';
-    if (!statvfs(folder, &space) && (Sint64)space.f_bavail * (Sint64)space.f_frsize < size + (16 << 20)) {
+    snprintf(temporary, sizeof(temporary), "%s.tmp", to);
+    /* A copy cut short before (the app closed, or ended by the system)
+     * leaves its file: not counted against the free space, nor kept. */
+    if (!remove(temporary)) fprintf(stderr, "memories-pc: removed %s, left by a copy that did not finish\n", temporary);
+    if (!statvfs(folder, &space) && (Sint64)space.f_bavail * (Sint64)space.f_frsize < need + (16 << 20)) {
         snprintf(why, why_size, "There is not enough free space for the disc image: it needs %lld MB, and %lld MB "
-                 "are free.", (long long)(size >> 20), (long long)((Sint64)space.f_bavail * space.f_frsize >> 20));
+                 "are free.", (long long)(need >> 20), (long long)((Sint64)space.f_bavail * space.f_frsize >> 20));
         return 0;
     }
-    snprintf(temporary, sizeof(temporary), "%s.tmp", to);
+    /* is_the_disc read it out of order: back to its start, which a document
+     * that cannot seek refuses (rewind would not say). */
+    if (fseek(from, 0, SEEK_SET)) {
+        snprintf(why, why_size, "The file you chose could not be read from its start again (%s). "
+                 "Copy it to the phone's Download folder and choose it there.", strerror(errno));
+        return 0;
+    }
     if (!(out = fopen(temporary, "wb"))) {
         snprintf(why, why_size, "Could not write the disc image to %s: %s", folder, strerror(errno));
         return 0;
     }
-    rewind(from);
+    snprintf(line, sizeof(line), "Copying the disc image into the game's folder: 0 of %lld MB",
+             (long long)(need >> 20));
+    disc_call(DISC_PROGRESS, line, 0, (int)(need >> 20));
     for (;;) {
         size_t got = fread(buffer, 1, sizeof(buffer), from);
         if (!got) break;
         if (fwrite(buffer, 1, got, out) != got) break;
         done += (Sint64)got;
+        if (!(done & ((8 << 20) - 1))) {
+            snprintf(line, sizeof(line), "Copying the disc image into the game's folder: %lld of %lld MB",
+                     (long long)(done >> 20), (long long)(need >> 20));
+            disc_call(DISC_PROGRESS, line, (int)(done >> 20), (int)(need >> 20));
+        }
         if (!(done & ((64 << 20) - 1))) fprintf(stderr, "memories-pc: copying the disc image: %lld of %lld MB\n",
-                                                 (long long)(done >> 20), (long long)(size >> 20));
+                                                 (long long)(done >> 20), (long long)(need >> 20));
     }
-    ok = !ferror(from) && !ferror(out) && (size <= 0 || done == size);
+    /* All of it: the provider's length when it told one, else at least what
+     * the image's own descriptor says it holds. */
+    complete = size > 0 ? done == size : done >= image;
+    ok = !ferror(from) && !ferror(out) && complete;
     if (fclose(out)) ok = 0;
     if (!ok || rename(temporary, to)) {
-        snprintf(why, why_size, "Could not copy the disc image into %s (%s).", folder,
-                 ok ? strerror(errno) : "a read or a write failed");
+        if (ok)
+            snprintf(why, why_size, "Could not copy the disc image into %s (%s).", folder, strerror(errno));
+        else if (!complete && !ferror(from) && !ferror(out))
+            snprintf(why, why_size, "Could not copy the disc image into %s: the file you chose ended after %lld of "
+                     "%lld MB.", folder, (long long)(done >> 20), (long long)(need >> 20));
+        else
+            snprintf(why, why_size, "Could not copy the disc image into %s (a read or a write failed after %lld MB).",
+                     folder, (long long)(done >> 20));
         remove(temporary);
         return 0;
     }
@@ -249,20 +383,204 @@ static int copy_disc(FILE *from, Sint64 size, const char *to, char *why, size_t 
     return 1;
 }
 
-/* First run (game_files.h): the picker offers the documents the system can
- * reach (Downloads, SD cards, cloud drives); the chosen image is checked
- * where it is and then copied into the app's game/ folder, since the right
- * to read a picked document does not outlast the app. A file that is not
- * the disc says so and the picker comes back, as on the desktop. */
-int Platform_SelectDisc(char *path, size_t size, char *why, size_t why_size)
+/* DiscPicker's answer (DiscPicker.RECORD), in the internal files folder. */
+enum { PICK_NONE, PICK_CHOSEN, PICK_CANCELLED, PICK_FAILED, PICK_QUIT };
+
+static int pick_record(char *path, size_t size)
+{
+    const char *internal = SDL_GetAndroidInternalStoragePath();
+    return internal && *internal && snprintf(path, size, "%s/disc-pick.txt", internal) < (int)size;
+}
+
+/* How old an answer left by an earlier process may be and still be taken up
+ * at the start: one older than this is a choice made long ago (the copy it
+ * was for was never made, or the image came another way), not taken unasked. */
+#define PICK_FRESH_SECONDS (15 * 60)
+
+/* The answer, taken (read, then removed): PICK_NONE while there is none,
+ * else what it was, with the URI or the reason in *text (to free). Its first
+ * line is what it was and the pick's id (DiscPicker's "id" extra): with
+ * `expected`, an answer to another pick (a picker that a newer one cleared)
+ * is dropped as none; without (the start), an answer of any pick is taken
+ * if it is fresh (PICK_FRESH_SECONDS). */
+static int take_pick(const char *record, const char *expected, char **text)
+{
+    enum { MOST = 1 << 16 }; /* a document's URI is far shorter */
+    struct stat seen;
+    FILE *file;
+    char *data, *line, *id;
+    size_t length;
+    long long age = 0;
+    int what = PICK_FAILED;
+    *text = NULL;
+    if (!expected && !stat(record, &seen)) age = (long long)time(NULL) - (long long)seen.st_mtime;
+    if (!(file = fopen(record, "rb"))) return PICK_NONE;
+    data = malloc(MOST + 1);
+    length = data ? fread(data, 1, MOST, file) : 0;
+    fclose(file);
+    remove(record);
+    if (!data) return PICK_FAILED;
+    data[length] = '\0';
+    if ((line = strchr(data, '\n')) != NULL) *line++ = '\0';
+    else line = data + length;
+    line[strcspn(line, "\r\n")] = '\0';
+    if ((id = strchr(data, ' ')) != NULL) *id++ = '\0';
+    else id = data + strlen(data);
+    if (expected && strcmp(id, expected)) {
+        fprintf(stderr, "memories-pc: an answer to an earlier pick (%s), not this one's (%s): dropped\n", id, expected);
+        free(data);
+        return PICK_NONE;
+    }
+    if (age > PICK_FRESH_SECONDS) {
+        fprintf(stderr, "memories-pc: the picker's answer from before this start is %lld minutes old: dropped\n",
+                age / 60);
+        free(data);
+        return PICK_NONE;
+    }
+    if (length == MOST) snprintf(data, MOST, "The chosen file's address is too long (more than 64 KB).");
+    else {
+        if (!strcmp(data, "chosen") && *line) what = PICK_CHOSEN;
+        else if (!strcmp(data, "cancelled")) what = PICK_CANCELLED;
+        memmove(data, line, strlen(line) + 1);
+    }
+    *text = data;
+    return what;
+}
+
+/* The events so far, gone through: 1 when the app is asked to quit. */
+static int drain_events(void)
+{
+    SDL_Event event;
+    int quit = 0;
+    while (SDL_PollEvent(&event))
+        if (event.type == SDL_EVENT_QUIT) quit = 1;
+    return quit;
+}
+
+/* The game's activity going to the background and coming back, and the
+ * app's end: SDL does not queue these, it gives them to event watchers only,
+ * on the thread that pumps the events (this one). */
+typedef struct {
+    SDL_AtomicInt away, back, quit;
+} PickWatch;
+
+static bool SDLCALL pick_watch(void *userdata, SDL_Event *event)
+{
+    PickWatch *watch = userdata;
+    if (event->type == SDL_EVENT_DID_ENTER_BACKGROUND) {
+        SDL_SetAtomicInt(&watch->away, 1);
+        SDL_SetAtomicInt(&watch->back, 0);
+    } else if (event->type == SDL_EVENT_DID_ENTER_FOREGROUND && SDL_GetAtomicInt(&watch->away)) {
+        SDL_SetAtomicInt(&watch->back, 1);
+    } else if (event->type == SDL_EVENT_TERMINATING || event->type == SDL_EVENT_QUIT) {
+        SDL_SetAtomicInt(&watch->quit, 1);
+    }
+    return true;
+}
+
+/* Waits for the picker's answer. SDL's event pump holds this thread while
+ * the game's activity is in the background, so this goes on once it is in
+ * front again: then the answer is there, since DiscPicker writes it before
+ * it ends. The game's activity back in front without one (the player came
+ * back to it from the recent apps or the launcher, not through the picker)
+ * is the picker given up: PICK_NONE, the welcome again; so is a picker
+ * whose task went away without a choice where the game's activity never
+ * left the screen (a free-form window, split screen), which DiscPicker
+ * answers "cancelled" as it ends. Only the answer to the pick `id` counts. */
+static int wait_pick(const char *record, const char *id, char **text)
+{
+    PickWatch watch;
+    Uint64 back_at = 0;
+    int what = PICK_NONE;
+    SDL_SetAtomicInt(&watch.away, 0);
+    SDL_SetAtomicInt(&watch.back, 0);
+    SDL_SetAtomicInt(&watch.quit, 0);
+    if (!SDL_AddEventWatch(pick_watch, &watch))
+        fprintf(stderr, "memories-pc: the picker's wait cannot see the app come back (%s)\n", SDL_GetError());
+    for (;;) {
+        SDL_Event event;
+        while (SDL_PollEvent(&event))
+            if (event.type == SDL_EVENT_QUIT) SDL_SetAtomicInt(&watch.quit, 1);
+        if (SDL_GetAtomicInt(&watch.quit)) {
+            what = PICK_QUIT;
+            break;
+        }
+        if ((what = take_pick(record, id, text)) != PICK_NONE) break;
+        if (!SDL_GetAtomicInt(&watch.back)) back_at = 0;
+        else if (!back_at) back_at = SDL_GetTicks();
+        else if (SDL_GetTicks() - back_at > 2000) break; /* PICK_NONE */
+        SDL_Delay(20);
+    }
+    SDL_RemoveEventWatch(pick_watch, &watch);
+    return what;
+}
+
+/* The chosen document checked and copied into game/rpg-yfm.bin (`target`):
+ * 1 when it was; 0 when not, the reason shown in a box. */
+static int take_disc(const char *uri, char *target, size_t target_size, char *why, size_t why_size)
+{
+    SDL_IOStream *stream;
+    FILE *file;
+    Sint64 image = 0;
+    char said[600];
+    fprintf(stderr, "memories-pc: chosen: %s\n", uri);
+    disc_call(DISC_PROGRESS, "Checking the file you chose...", 0, 0);
+    stream = SDL_IOFromFile(uri, "rb");
+    snprintf(said, sizeof(said), "%s", stream ? "" : SDL_GetError());
+    file = stream ? SDL_GetPointerProperty(SDL_GetIOProperties(stream), SDL_PROP_IOSTREAM_STDIO_FILE_POINTER, NULL)
+                  : NULL;
+    if (!file || !is_the_disc(file, &image)) {
+        if (!stream) {
+            fprintf(stderr, "memories-pc: the chosen document could not be opened: %s\n", said);
+            snprintf(why, why_size, "That file could not be opened.\n\nChoose it again, or copy it to the phone's "
+                     "Download folder first and choose it there.\n\n(%s)", said);
+        } else {
+            snprintf(why, why_size, "That file could not be read as a Forbidden Memories (USA, SLUS-01411) disc.\n\n"
+                     "Choose the raw .bin file from your .bin/.cue pair, rather than the .cue file.");
+            SDL_CloseIO(stream);
+        }
+        disc_call(DISC_CLOSE, NULL, 0, 0);
+        disc_call(DISC_RELEASE, uri, 0, 0);
+        Platform_ShowError("Unable to use this ROM", why);
+        return 0;
+    }
+    Paths_WriteBegin();
+    if (Paths_User(target, target_size, "game/rpg-yfm.bin")) {
+        char folder[1100], reason[1300];
+        snprintf(folder, sizeof(folder), "%s/game", Paths_UserDir());
+        Paths_WriteError(reason, sizeof(reason), folder); /* mkdir's reason (Paths_MakeDirs) */
+        snprintf(why, why_size, "The game could not use its storage folder, so the disc image cannot be copied.\n\n"
+                 "Try again, or close the game and open it again.\n\n%s", reason);
+        SDL_CloseIO(stream);
+        disc_call(DISC_CLOSE, NULL, 0, 0);
+        disc_call(DISC_RELEASE, uri, 0, 0);
+        Platform_ShowError(DISC_TITLE, why);
+        return 0;
+    }
+    if (!copy_disc(file, SDL_GetIOSize(stream), image, target, why, why_size)) {
+        SDL_CloseIO(stream);
+        disc_call(DISC_CLOSE, NULL, 0, 0);
+        disc_call(DISC_RELEASE, uri, 0, 0);
+        Platform_ShowError("Unable to use this ROM", why);
+        return 0;
+    }
+    SDL_CloseIO(stream);
+    disc_call(DISC_CLOSE, NULL, 0, 0);
+    disc_call(DISC_RELEASE, uri, 0, 0); /* the copy is the game's own now */
+    return 1;
+}
+
+/* The welcome and the picker, again until a disc image is copied
+ * (`target`, 1), the player quits (0) or setup cannot go on (-1, the reason
+ * in `why`). `what` and `text` (taken, freed here) are an answer to take up
+ * before the first welcome: PICK_CHOSEN and its URI, else PICK_NONE. */
+static int select_disc(int what, char *text, const char *record, char *target, size_t target_size, char *why,
+                       size_t why_size)
 {
     static const SDL_MessageBoxButtonData buttons[] = {
         {SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT, 0, "Quit"},
         {SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT, 1, "Choose disc image..."}
     };
-    /* Any document: the system knows no type for a .bin, and the image is
-     * checked by what it holds. */
-    static const SDL_DialogFileFilter filters[] = {{"PlayStation disc image (.bin)", "*"}};
     const SDL_MessageBoxData welcome = {
         SDL_MESSAGEBOX_INFORMATION, NULL, "Welcome to Forbidden Memories Recompiled",
         "Choose your copy of Yu-Gi-Oh! Forbidden Memories to begin.\n\n"
@@ -270,74 +588,112 @@ int Platform_SelectDisc(char *path, size_t size, char *why, size_t why_size)
         "The game copies it into its own folder (about 500 MB), so you can remove the file you chose afterwards.",
         2, buttons, NULL
     };
-    char target[1024];
+    unsigned picks = 0;
+    for (;; what = PICK_NONE, text = NULL) {
+        if (what == PICK_NONE) {
+            char id[64];
+            int button = 0;
+            if (!Android_ShowMessageBox(&welcome, &button)) {
+                snprintf(why, why_size, "Could not open ROM setup: %s", SDL_GetError());
+                return -1;
+            }
+            if (button != 1 || drain_events()) return 0;
+            /* Each pick has its own id, so that only its answer counts: a
+             * picker started earlier and cleared by this one says
+             * "cancelled" as it ends, under its own. */
+            snprintf(id, sizeof(id), "%d-%u-%llu", (int)getpid(), ++picks, (unsigned long long)SDL_GetTicksNS());
+            remove(record);
+            if (!disc_call(DISC_START, id, 0, 0)) {
+                snprintf(why, why_size, "Could not open the file picker.");
+                return -1;
+            }
+            what = wait_pick(record, id, &text);
+        }
+        if (what == PICK_QUIT) return 0;
+        if (what == PICK_NONE) {
+            fprintf(stderr, "memories-pc: back in the game without an answer from the picker: the welcome again\n");
+        } else if (what == PICK_CANCELLED) { /* backed out of the picker, or its task closed */
+            fprintf(stderr, "memories-pc: no disc image chosen (%s)\n", text ? text : "");
+        } else if (what == PICK_FAILED) {
+            fprintf(stderr, "memories-pc: the picker gave no document: %s\n", text ? text : "");
+            snprintf(why, why_size, "The file picker gave back no file.\n\n%s", text ? text : "");
+            Platform_ShowError("Unable to use this ROM", why);
+        } else if (take_disc(text, target, target_size, why, why_size)) {
+            free(text);
+            return 1;
+        }
+        free(text);
+    }
+}
+
+/* A start with the disc image copied already: an answer the picker left
+ * (a picker given up and answered after all, an image put there another
+ * way) and every lasting read right are left over, and go. */
+static void forget_old_pick(const char *folder)
+{
+    char disc[1100], record[1024];
+    struct stat seen;
+    if (snprintf(disc, sizeof(disc), "%s/game/rpg-yfm.bin", folder) >= (int)sizeof(disc) || stat(disc, &seen)) return;
+    if (pick_record(record, sizeof(record)) && !remove(record))
+        fprintf(stderr, "memories-pc: the picker's answer left from before dropped: the disc image is there\n");
+    disc_call(DISC_RELEASE_ALL, "", 0, 0);
+}
+
+/* First run (game_files.h): the picker offers the documents the system can
+ * reach (Downloads, SD cards, cloud drives); the chosen image is checked
+ * where it is and then copied into the app's game/ folder, since the right
+ * to read a picked document does not outlast the app. A file that is not
+ * the disc says so and the picker comes back, as on the desktop.
+ *
+ * The picker is DiscPicker.java's, which writes the answer to a file: an
+ * answer there at the start is one the last process did not live to read
+ * (the system ended it while the picker was in front), taken up at once,
+ * without the welcome. The copy shows its progress in a box. */
+int Platform_SelectDisc(char *path, size_t size, char *why, size_t why_size)
+{
+    char record[1024], target[1024];
     int result = 0;
     if (!SDL_InitSubSystem(SDL_INIT_VIDEO)) {
         snprintf(why, why_size, "Could not open ROM setup: %s", SDL_GetError());
         return -1;
     }
-    for (;;) {
-        Picked pick;
-        int button = 0;
-        SDL_IOStream *stream;
-        FILE *file;
-        memset(&pick, 0, sizeof(pick));
-        if (!Android_ShowMessageBox(&welcome, &button)) {
-            snprintf(why, why_size, "Could not open ROM setup: %s", SDL_GetError());
-            result = -1;
-            break;
+    if (!pick_record(record, sizeof(record))) {
+        snprintf(why, why_size, "Could not open ROM setup: Android gave the app no internal folder.");
+        SDL_QuitSubSystem(SDL_INIT_VIDEO);
+        return -1;
+    }
+    /* A copy cut short (the app closed during it, or ended by the system)
+     * leaves its file: its space back at once, whether or not the player
+     * chooses again (copy_disc removes it too). */
+    if (snprintf(target, sizeof(target), "%s/game/rpg-yfm.bin.tmp", Paths_UserDir()) < (int)sizeof(target) &&
+        !remove(target))
+        fprintf(stderr, "memories-pc: removed %s, left by a copy that did not finish\n", target);
+    {
+        /* An answer the last process did not live to read (the system ended
+         * it while the picker was in front): a document is taken up at
+         * once, without the welcome; anything else is dropped. The lasting
+         * read rights of every other document go back (a copy cut short,
+         * a pick never taken up). */
+        char *text = NULL;
+        int what = take_pick(record, NULL, &text);
+        if (what != PICK_NONE)
+            fprintf(stderr, "memories-pc: the picker's answer from before this start: %s\n",
+                    what == PICK_CHOSEN ? "a document" : what == PICK_CANCELLED ? "none chosen" : "it failed");
+        disc_call(DISC_RELEASE_ALL, what == PICK_CHOSEN ? text : "", 0, 0);
+        if (what != PICK_CHOSEN) {
+            free(text);
+            text = NULL;
+            what = PICK_NONE;
         }
-        if (button != 1) {
-            result = 0;
-            break;
-        }
-        SDL_ShowOpenFileDialog(picked, &pick, NULL, filters, 1, NULL, false);
-        while (!SDL_GetAtomicInt(&pick.done)) {
-            SDL_PumpEvents();
-            SDL_Delay(10);
-        }
-        if (pick.result < 0) {
-            snprintf(why, why_size, "Could not open the file picker: %s", SDL_GetError());
-            result = -1;
-            break;
-        }
-        if (!pick.result) continue; /* backed out of the picker: the welcome again */
-        fprintf(stderr, "memories-pc: chosen: %s\n", pick.uri);
-        stream = SDL_IOFromFile(pick.uri, "rb");
-        file = stream ? SDL_GetPointerProperty(SDL_GetIOProperties(stream), SDL_PROP_IOSTREAM_STDIO_FILE_POINTER, NULL)
-                      : NULL;
-        if (!file || !is_the_disc(file)) {
-            snprintf(why, why_size, "That file could not be read as a Forbidden Memories (USA, SLUS-01411) disc.\n\n"
-                     "Choose the raw .bin file from your .bin/.cue pair, rather than the .cue file.");
-            if (stream) SDL_CloseIO(stream);
-            Platform_ShowError("Unable to use this ROM", why);
-            continue;
-        }
-        Paths_WriteBegin();
-        if (Paths_User(target, sizeof(target), "game/rpg-yfm.bin")) {
-            char folder[1100], reason[1300];
-            snprintf(folder, sizeof(folder), "%s/game", Paths_UserDir());
-            Paths_WriteError(reason, sizeof(reason), folder); /* mkdir's reason (Paths_MakeDirs) */
-            snprintf(why, why_size, "The game could not use its storage folder, so the disc image cannot be copied.\n\n"
-                     "Try again, or close the game and open it again.\n\n%s", reason);
-            SDL_CloseIO(stream);
-            Platform_ShowError("Yu-Gi-Oh! Forbidden Memories", why);
-            continue;
-        }
-        if (!copy_disc(file, SDL_GetIOSize(stream), target, why, why_size)) {
-            SDL_CloseIO(stream);
-            Platform_ShowError("Unable to use this ROM", why);
-            continue;
-        }
-        SDL_CloseIO(stream);
+        result = select_disc(what, text, record, target, sizeof(target), why, why_size);
+    }
+    if (result > 0) {
         if (strlen(target) >= size) {
             snprintf(why, why_size, "The ROM path is too long.");
             result = -1;
-            break;
+        } else {
+            snprintf(path, size, "%s", target);
         }
-        snprintf(path, size, "%s", target);
-        result = 1;
-        break;
     }
     SDL_QuitSubSystem(SDL_INIT_VIDEO);
     return result;
@@ -622,16 +978,18 @@ static int java_ok(JNIEnv *env, const void *value)
     return !java_failed(env) && value != NULL;
 }
 
-/* Starts Restart.java's activity (a process of its own) with this process's
- * id: 1 when the system took the request. */
-static int start_restart_activity(void)
+/* Starts the app's activity `name` (Restart.java's, a process of its own,
+ * with this process's id as the "pid" extra; DiscPicker.java's, with the
+ * pick's id as the "id" extra) with the Intent flags `flags`: 1 when the
+ * system took the request. pid 0 and id NULL put no extra. */
+static int start_app_activity(const char *name, int pid, const char *id, int flags)
 {
     JNIEnv *env = (JNIEnv *)SDL_GetAndroidJNIEnv();
     jobject activity = env ? (jobject)SDL_GetAndroidActivity() : NULL;
     jclass intent_class = NULL, activity_class = NULL;
-    jmethodID make = NULL, set_class = NULL, put_int = NULL, add_flags = NULL, start = NULL;
+    jmethodID make = NULL, set_class = NULL, put_int = NULL, put_text = NULL, add_flags = NULL, start = NULL;
     jobject intent = NULL;
-    jstring name = NULL, key = NULL;
+    jstring class_name = NULL, key = NULL, id_key = NULL, id_text = NULL;
     int ok = 0;
     if (!activity) return 0;
     if ((*env)->PushLocalFrame(env, 16) < 0) {
@@ -647,15 +1005,19 @@ static int start_restart_activity(void)
         CHECKED(set_class = (*env)->GetMethodID(env, intent_class, "setClassName",
                                                 "(Landroid/content/Context;Ljava/lang/String;)Landroid/content/Intent;")) &&
         CHECKED(put_int = (*env)->GetMethodID(env, intent_class, "putExtra", "(Ljava/lang/String;I)Landroid/content/Intent;")) &&
+        CHECKED(put_text = (*env)->GetMethodID(env, intent_class, "putExtra",
+                                               "(Ljava/lang/String;Ljava/lang/String;)Landroid/content/Intent;")) &&
         CHECKED(add_flags = (*env)->GetMethodID(env, intent_class, "addFlags", "(I)Landroid/content/Intent;")) &&
         CHECKED(activity_class = (*env)->GetObjectClass(env, activity)) &&
         CHECKED(start = (*env)->GetMethodID(env, activity_class, "startActivity", "(Landroid/content/Intent;)V")) &&
         CHECKED(intent = (*env)->NewObject(env, intent_class, make)) &&
-        CHECKED(name = (*env)->NewStringUTF(env, "org.yfmredecomp.game.Restart")) &&
+        CHECKED(class_name = (*env)->NewStringUTF(env, name)) &&
         CHECKED(key = (*env)->NewStringUTF(env, "pid")) &&
-        CHECKED((*env)->CallObjectMethod(env, intent, set_class, activity, name)) &&
-        CHECKED((*env)->CallObjectMethod(env, intent, put_int, key, (jint)getpid())) &&
-        CHECKED((*env)->CallObjectMethod(env, intent, add_flags, (jint)0x10000000))) { /* FLAG_ACTIVITY_NEW_TASK */
+        CHECKED((*env)->CallObjectMethod(env, intent, set_class, activity, class_name)) &&
+        (pid <= 0 || CHECKED((*env)->CallObjectMethod(env, intent, put_int, key, (jint)pid))) &&
+        (!id || (CHECKED(id_key = (*env)->NewStringUTF(env, "id")) && CHECKED(id_text = (*env)->NewStringUTF(env, id)) &&
+                 CHECKED((*env)->CallObjectMethod(env, intent, put_text, id_key, id_text)))) &&
+        CHECKED((*env)->CallObjectMethod(env, intent, add_flags, (jint)flags))) {
         (*env)->CallVoidMethod(env, activity, start, intent);
         ok = !java_failed(env);
     }
@@ -667,7 +1029,7 @@ static int start_restart_activity(void)
 
 static void restart_on_host(void *result)
 {
-    if (!start_restart_activity()) {
+    if (!start_app_activity("org.yfmredecomp.game.Restart", (int)getpid(), NULL, 0x10000000)) { /* FLAG_ACTIVITY_NEW_TASK */
         fprintf(stderr, "memories-pc: restart: the restart activity did not start; close the app and open it again\n");
         *(int *)result = -1;
         return;
@@ -1498,6 +1860,7 @@ int Memories_AndroidMain(int argc, char **argv)
         fprintf(stderr, "memories-pc: environment.txt names the user folder: %s\n", named);
     }
     unpack_program();
+    if (files) forget_old_pick(files);
 #ifndef MEMORIES_TRANSLATED
     check_load_bias();
 #endif

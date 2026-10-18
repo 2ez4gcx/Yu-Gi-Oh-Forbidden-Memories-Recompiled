@@ -224,9 +224,11 @@ static const SoftGpuRecorder recorder = {record_gp0, record_load, record_move, r
 /* What the replays cost the GPU beyond the primitives, summed over 120 of
  * them for MEMORIES_TRACE=frames: multisample resolves, other blits and
  * copies, quads drawn to copy pictures in, and draw calls, with the pixels
- * each touched. */
+ * each touched; and what goes up from the CPU: VRAM whole after each
+ * replay (upload_vram) and the texture pack's two maps whenever they
+ * changed (sync_pack), in bytes. */
 static struct {
-    unsigned resolves, blits, copies, quads, draws;
+    unsigned resolves, blits, copies, quads, draws, vram_uploads, map_uploads;
     double resolve_px, blit_px, copy_px, quad_px;
 } stats;
 static int scale;                 /* of the picture in the framebuffer, 0 before the first resync */
@@ -1963,6 +1965,7 @@ static void sync_pack(void)
     glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, SOFT_GPU_WIDTH, SOFT_GPU_HEIGHT, GL_RED_INTEGER, GL_UNSIGNED_INT,
                     place_map);
     gl_ActiveTexture(GL_TEXTURE0);
+    stats.map_uploads++;
 }
 
 /* An image side as the texture has it: the driver's largest at most. */
@@ -2416,6 +2419,7 @@ static void upload_vram(void)
     glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, SOFT_GPU_WIDTH, SOFT_GPU_HEIGHT, GL_RED_INTEGER, GL_UNSIGNED_SHORT,
                     SoftGpu_Vram());
     glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+    stats.vram_uploads++;
 }
 
 /* The state words, then VRAM whole into its texture and the picture. At a
@@ -2635,6 +2639,10 @@ int GlPicture_Replay(void)
                 scale, samples, stats.resolves / 120.0, stats.resolve_px / 120e6, stats.blits / 120.0,
                 stats.blit_px / 120e6, stats.copies / 120.0, stats.copy_px / 120e6, stats.quads / 120.0,
                 stats.quad_px / 120e6, stats.draws / 120.0);
+            /* VRAM is 1024 x 512 16-bit words; the maps 16 and 32 bits a word. */
+            LOG(LOG_FRAMES, "OpenGL picture uploads per replay: VRAM %.2f MB, texture pack maps %.2f MB (%u in 120)",
+                stats.vram_uploads * (SOFT_GPU_WIDTH * SOFT_GPU_HEIGHT * 2.0) / 120e6,
+                stats.map_uploads * (SOFT_GPU_WIDTH * SOFT_GPU_HEIGHT * 6.0) / 120e6, stats.map_uploads);
             memset(&stats, 0, sizeof(stats));
             replays = total_us = 0;
         }

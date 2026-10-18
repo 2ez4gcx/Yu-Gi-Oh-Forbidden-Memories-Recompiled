@@ -456,6 +456,29 @@ wider or taller than the driver's largest texture (`GL_MAX_TEXTURE_SIZE`,
 16384 or 32768 on most) is averaged down to that size, with a line on the
 console, rather than drawn black.
 
+A pack's PNG is read when the game first uploads the words it covers, or
+first draws them through its palette, and is given to them before the next
+frame, as it always was. The reading itself happens on three threads, side
+by side, and the main thread waits only for what that frame asked for; when
+an image is given to the first entry of some words (the head), the other
+entries of the same words (their other palettes) are read ahead, before the
+game draws them, since a screen typically draws its sheets through those
+palettes later, all at once. Entries naming the same PNG with the same
+size and crop share one read. A read ahead is not used until the game asks
+for it, so nothing drawn changes, only when the frame has to wait. What is
+read ahead and not yet used is kept up to 192 MB (48 MB in a 32-bit build);
+`MEMORIES_PACK_READ_AHEAD=<megabytes>` sets that, 0 reads nothing ahead.
+Every image the game has used stays in memory while the pack is applied:
+4 MB for a 1024x1024 PNG. With the Forbidden Memories HD pack at Internal 4x
+(the mod-3d-monsters replay, Windows), entering the Build Deck held one frame
+213 ms and a duel's first frame 120 ms when the PNGs were read one after
+another on the main thread (413-523 ms on a Snapdragon 888 phone); read
+this way the longest wait is 22 ms, for the Build Deck's own sheets, which
+come up the frame they are wanted, and every wait of the replay adds up
+to 124 ms instead of 609. A sheet drawn through many palettes is the
+costly case: each palette is its own PNG of the whole sheet, decoded and
+kept whole.
+
 In the scaled picture (Internal 2x and up) a pixel's alpha is how much it
 covers: below 8 it is transparent, and anything less than opaque is mixed
 over what lies beneath (after the game's own blending), so letters and

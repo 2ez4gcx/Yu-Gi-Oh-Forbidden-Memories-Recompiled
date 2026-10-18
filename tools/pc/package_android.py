@@ -15,7 +15,9 @@ which are never printed or put on a command line), else a debug key kept
 under tmp/, never in the repository; either way the signer's certificate
 (DN, SHA-256) is printed and checked with apksigner verify. The activity is SDL's own SDLActivity: it loads libSDL3.so
 and libmain.so and calls SDL_main (src/pc/platform/android_loader.c), which
-loads libgame.so at its link address. The build's id, commit and symbol
+loads libgame.so: the arm64 app's translated game wherever the system puts
+it, a fixed game (--android-memory fixed, android-x86) at its link address.
+The build's id, commit and symbol
 table go in assets/build/, and the shipped mods and language packs under
 assets/build/files/ with their list in build/files.txt
 (src/pc/platform/android.c unpacks them).
@@ -453,7 +455,9 @@ if __name__ == "__main__":
     with open(os.path.join(build, "buildid")) as handle:
         build_id = handle.read().strip()
     assets = {"build/buildid": os.path.join(build, "buildid"), "build/commit": os.path.join(build, "commit"),
-              f"build/symbols/{build_id}.txt": os.path.join(build, "symbols", f"{build_id}.txt"),
-              f"build/symbols/{build_id}.vars.txt": os.path.join(build, "symbols", f"{build_id}.vars.txt")}
+              f"build/symbols/{build_id}.txt": os.path.join(build, "symbols", f"{build_id}.txt")}
+    variables = os.path.join(build, "symbols", f"{build_id}.vars.txt")
+    if os.path.exists(variables):   # the control channel's names; the translated game has none
+        assets[f"build/symbols/{build_id}.vars.txt"] = variables
     assets.update(program_files(build, ("mods", "languages")))
     package(build, sys.argv[2], os.path.join(build, "libmain.so"), os.path.join(build, "libgame.so"), assets)

@@ -4,6 +4,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef MEMORIES_TRANSLATED
+#include "pc/guest/translated_state_symbols.h"
+#endif
 
 typedef struct RuntimeSymbol {
     uintptr_t address, size;
@@ -12,14 +15,16 @@ typedef struct RuntimeSymbol {
     int read_only;   /* a variable: a constant of the build, in a read-only page */
 } RuntimeSymbol;
 
-/* One "address size name [pinned|ro]" line of a table. 1 with the entry, 0 at
- * the end of the file, -1 for a line to skip: a name too long for the entry
- * (%71s used to cut it and read the rest as the next line) or a line that does
- * not fit the buffer, whose rest is dropped. */
-static int read_entry(FILE *file, RuntimeSymbol *symbol)
+/* One "address size name [pinned|ro]" line of a table, or, once its
+ * "# memories-symbols 2" header set *version2, a row of the translated game's
+ * table (tools/pc/translated_symbols.py). 1 with the entry, 0 at the end of
+ * the file, -1 for a line to skip: a comment, a section's start, a name too
+ * long for the entry (%71s used to cut it and read the rest as the next line)
+ * or a line that does not fit the buffer, whose rest is dropped. */
+static int read_entry(FILE *file, RuntimeSymbol *symbol, int *version2)
 {
-    char line[512], name[256], flag[16];
-    unsigned address, size;
+    char line[1100], name[256], flag[16], kind;
+    unsigned long long address, size;
     int fields;
     if (!fgets(line, sizeof(line), file)) return 0;
     if (!strchr(line, '\n') && !feof(file)) {
@@ -27,11 +32,21 @@ static int read_entry(FILE *file, RuntimeSymbol *symbol)
         while ((c = fgetc(file)) != EOF && c != '\n') {}
         return -1;
     }
+    if (line[0] == '#') {
+        if (!strncmp(line, "# memories-symbols 2 ", 21)) *version2 = 1;
+        return -1;
+    }
     flag[0] = '\0';
-    fields = sscanf(line, "%x %x %255s %15s", &address, &size, name, flag);
+    if (*version2) {
+        if (sscanf(line, "%llx %llx %c %*s %*s %*s %255s", &address, &size, &kind, name) != 4) return -1;
+        if (kind == 'S' || kind == 'X') return -1;   /* a section's start, not a symbol */
+        fields = 3;
+    } else {
+        fields = sscanf(line, "%llx %llx %255s %15s", &address, &size, name, flag);
+    }
     if (fields < 3 || strlen(name) >= sizeof(symbol->name)) return -1;
-    symbol->address = address;
-    symbol->size = size;
+    symbol->address = (uintptr_t)address;
+    symbol->size = (uintptr_t)size;
     symbol->pinned = fields == 4 && !strcmp(flag, "pinned");
     symbol->read_only = fields == 4 && !strcmp(flag, "ro");
     strcpy(symbol->name, name);
@@ -51,13 +66,14 @@ static void load_variables(const char *table)
     char path[660];
     FILE *file;
     size_t length = strlen(table), room = 0;
+    int version2 = 0;
     if (length < 4 || length + 6 >= sizeof(path)) return;
     snprintf(path, sizeof(path), "%.*s.vars.txt", (int)(length - 4), table);
     file = fopen(path, "r");
     if (!file) return;
     for (;;) {
         RuntimeSymbol symbol;
-        int read = read_entry(file, &symbol);
+        int read = read_entry(file, &symbol, &version2);
         if (!read) break;
         if (read < 0) continue;
         if (variable_count == room) {
@@ -97,15 +113,24 @@ int Symbols_Load(void)
     char path[640];
     FILE *file;
     size_t room = 0;
+    uintptr_t base = 0;
+    int version2 = 0;
     if (Memories_SymbolTablePath(path, sizeof(path))) return -1;
+#ifdef MEMORIES_TRANSLATED
+    /* The translated game's table holds offsets into its image
+     * (state_translated.c): add where it is loaded. */
+    base = Memories_NativeImageBase();
+    if (!base) return -1;
+#endif
     load_variables(path);
     file = fopen(path, "r");
     if (!file) return -1;
     for (;;) {
         RuntimeSymbol symbol;
-        int read = read_entry(file, &symbol);
+        int read = read_entry(file, &symbol, &version2);
         if (!read) break;
         if (read < 0) continue;
+        symbol.address += base;
         if (symbol_count == room) {
             RuntimeSymbol *grown;
             room = room ? room * 2 : 2048;

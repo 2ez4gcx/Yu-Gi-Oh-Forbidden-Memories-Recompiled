@@ -133,9 +133,11 @@ static void layout_touch(Layout *l)
     }
     /* Remove, where Import is (an app cannot open its mods folder to delete
      * one by hand): beside the selected mod's details, so on a phone it is
-     * on their page, where Import is not; else left of Import. */
+     * on their page, where Import is not; else left of Import. While its
+     * question is up (pending 5) the answer is the Apply button, which reads
+     * Remove, so this one steps aside rather than showing a second, dead one. */
     l->remove = none();
-    if (import_pick && selected >= 0 && (!compact || page == 1)) {
+    if (import_pick && selected >= 0 && pending != 5 && (!compact || page == 1)) {
         int w = max(90 * unit, width_text("Remove") + 24 * unit), edge = l->folder.w ? l->folder.x : l->close.x;
         l->remove = rect(edge - g - w, footer, w, t);
     }
@@ -869,7 +871,7 @@ static void draw_touch(MenuCanvas *c, const Layout *l)
     if (l->folder.w)
         button(c, l->folder, import_step == 2 ? "Importing..." : "Import mod...", 0);
     if (l->remove.w)
-        button(c, l->remove, "Remove", pending == 5);
+        button(c, l->remove, "Remove", 0);
     button(c, l->close, pending ? "Cancel" : "Close", 0);
     button(c, l->apply, apply_label(), changed() || pending);
 }
@@ -1314,9 +1316,10 @@ static void remove_start(void)
         return;
     }
     if (Mods_InUse(selected)) {
-        put(status, sizeof(status), Mods_Active(selected) || wanted[selected]
+        put(status, sizeof(status), Mods_Active(selected)
             ? "%s is on, so the game is using its files. Turn it off, apply, restart the game, then remove it."
-            : "%s was used since the game started, so the game still holds its files. Restart the game, then remove it.",
+            : "%s was tried since the game started, so the game may still hold its files. Turn it off, apply, "
+              "restart the game, then remove it.",
             name);
         return;
     }
@@ -1352,6 +1355,7 @@ static void remove_confirm(void)
         put(status, sizeof(status), "%s was removed, but it leaves the list after a restart.", name);
         return;
     }
+    adopt(mod); /* what was staged for it (a rank, a setting, On) goes with it: no "Unsaved changes" for a mod that is gone */
     wanted[mod] = 0;
     if (Settings_Save() < 0)
         fprintf(stderr, "memories-pc: the settings could not be saved after a remove\n");
@@ -2031,8 +2035,10 @@ int ModsWindow_Event(const MenuEvent *e)
                 if (Mods_ProfileRead(profile, wanted)) {
                     for (int i = 0; i < Mods_Count(); i++) {
                         char key[256];
-                        if (Mods_Removed(i))
-                            wanted[i] = 0; /* a profile cannot bring a removed mod back */
+                        if (Mods_Removed(i)) { /* a profile cannot bring a removed mod back, or stage its settings */
+                            wanted[i] = 0;
+                            continue;
+                        }
                         snprintf(key, sizeof(key), "mod.%s.order", Mods_Id(i));
                         ranks[i] = Mods_ProfileValue(profile, key, num(Mods_Manifest(i), "priority", 0));
                         for (int j = 0; j < counts[i]; j++) {

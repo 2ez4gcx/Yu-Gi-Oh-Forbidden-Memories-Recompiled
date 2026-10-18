@@ -440,7 +440,7 @@ int main(void)
      * in the mods folder goes, with what is in it; nothing else does. */
     reset();
     {
-        char why[200], path[2048], slashed[1100];
+        char why[200], path[2048], slashed[1200];
         make("mods/gone/deep/er");
         file_write("mods/gone/mod.json", "{}");
         file_write("mods/gone/deep/er/x.txt", "x");
@@ -450,7 +450,22 @@ int main(void)
         snprintf(path, sizeof(path), "%s/gone", mods);
         CHECK(!Mods_ImportRemoveInstalled(mods, path, why, sizeof(why)));
         CHECK(!exists("mods/gone") && exists("mods/kept") && exists("mods"));
+        /* The folder leaves the mods folder in one rename, to a hidden folder
+         * that is then deleted; one an earlier remove left under that name
+         * is no obstacle, and what is left of any is swept by the cleanup. */
+        make("mods/again/deep");
+        file_write("mods/again/deep/f.txt", "x");
+        make("mods/.import-removing-again/old");
+        snprintf(path, sizeof(path), "%s/again", mods);
+        CHECK(!Mods_ImportRemoveInstalled(mods, path, why, sizeof(why)));
+        CHECK(!exists("mods/again") && !exists("mods/.import-removing-again"));
+        make("mods/.import-removing-left/deep");
+        file_write("mods/.import-removing-left/deep/f.txt", "x");
+        make("mods/kept2");
+        Mods_ImportCleanup(mods);
+        CHECK(!exists("mods/.import-removing-left") && exists("mods/kept2") && exists("mods/kept"));
         /* already gone: nothing to do */
+        snprintf(path, sizeof(path), "%s/gone", mods);
         CHECK(!Mods_ImportRemoveInstalled(mods, path, why, sizeof(why)));
         /* a trailing slash on the mods folder is the same folder */
         make("mods/slash");

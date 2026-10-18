@@ -287,8 +287,19 @@ static void test_remove(void)
     draw(1600, 900);
     assert(strstr(drawn, "Remove Remove me? Its folder is deleted from the mods folder, with everything in it."));
     assert(strstr(drawn, "Cancel") && strstr(drawn, " Remove\n"));
+    /* The answer is the Apply button, which reads Remove: no second, dead one. */
+    assert(!ModsWindow_Locate(MODS_UI_REMOVE, &x, &y));
     tap_widget(MODS_UI_CLOSE); /* Cancel */
     assert(!Mods_Removed(mod) && folder_has("mods/rmnew/deep/file.txt"));
+    assert(ModsWindow_Locate(MODS_UI_REMOVE, &x, &y)); /* and it is back */
+    /* What is staged for the mod (its On, its load order) is unsaved changes... */
+    tap_widget(MODS_UI_ORDER + 1);
+    tap_widget(MODS_UI_TOGGLE);
+    assert(ModsWindow_Locate(MODS_UI_CLOSE, &x, &y) && click(x, y) == 0);
+    draw(1600, 900);
+    assert(strstr(drawn, "Discard your unsaved mod changes?"));
+    input(MENU_EVENT_KEY_DOWN, 0, 0, MENU_KEY_ESCAPE, NULL);
+    /* ... until the mod is removed: then they go with it. */
     /* Yes: the folder is gone, the mod leaves the list, another is shown. */
     tap_widget(MODS_UI_REMOVE);
     tap_widget(MODS_UI_APPLY);
@@ -302,6 +313,25 @@ static void test_remove(void)
     tap_widget(MODS_UI_CLOSE); /* Cancel clears the message */
     draw(1600, 900);
     assert(installed_count() == Mods_Count() - 1);
+    assert(!strstr(drawn, "Unsaved"));
+    /* Nothing staged is left behind: Close does not ask to discard. */
+    assert(ModsWindow_Locate(MODS_UI_CLOSE, &x, &y) && click(x, y) == 1);
+    /* A profile that names it (on, with a load order) leaves it alone. */
+    {
+        char path[1024];
+        FILE *f;
+        assert(Mods_ProfileSave("Default"));
+        assert(!Paths_User(path, sizeof(path), "mod-profiles/Default.txt"));
+        f = fopen(path, "a");
+        assert(f);
+        fputs("mod.rmnew=1\nmod.rmnew.order=7\n", f);
+        fclose(f);
+        tap_widget(MODS_UI_LOAD);
+        draw(1600, 900);
+        assert(strstr(drawn, "Profile loaded for review."));
+        assert(ModsWindow_Locate(MODS_UI_CLOSE, &x, &y) && click(x, y) == 1);
+        assert(!Mods_Enabled(mod) && Mods_Removed(mod));
+    }
     /* Back again, as a new import of the same id (an updated version). */
     said = import_zip(good, 2);
     assert(strstr(said, "Imported Remove me.") && find("rmnew") == mod && !Mods_Removed(mod));
@@ -322,7 +352,7 @@ static void test_remove(void)
     assert(Mods_InUse(other));
     tap_widget(MODS_UI_REMOVE);
     draw(1600, 900);
-    assert(strstr(drawn, "Live one was used since the game started") && folder_has("mods/rmlive/mod.json"));
+    assert(strstr(drawn, "Live one was tried since the game started") && folder_has("mods/rmlive/mod.json"));
     /* On a phone's two pages: Remove is on the details page, and ends on the list. */
     ModsWindow_Resize(700, 500);
     ModsWindow_Init();

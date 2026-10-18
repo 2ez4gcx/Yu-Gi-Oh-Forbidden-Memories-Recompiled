@@ -75,7 +75,12 @@ int Mods_ImportRemoveTree(const char *path);
  * the Android Mods panel's Remove. It must be a folder of its own right in
  * `mods`: <mods>/<name> with one plain name (no separator, no ":", no
  * leading "."), a real folder and not a link; anything else is refused and
- * nothing is touched. 0 when it is gone (it was already), else -1 with the
- * reason in `why`. */
+ * nothing is touched. The folder is renamed to ".import-removing-<name>"
+ * (hidden, which the mod scan skips) and then deleted; what that leaves
+ * after a failure or an interruption is swept by Mods_ImportCleanup, as the
+ * panel's opening does. 0 when it is gone (it was already), else -1 with the
+ * reason in `why`. Links are told by lstat where there is one; on Windows
+ * (which has none here, and where nothing but the tests runs this: the
+ * button exists only on Android) stat follows a junction. */
 int Mods_ImportRemoveInstalled(const char *mods, const char *directory, char *why, size_t why_size);
 #endif

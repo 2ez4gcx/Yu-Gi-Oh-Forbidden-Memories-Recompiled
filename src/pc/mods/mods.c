@@ -82,6 +82,7 @@ typedef struct {
     int initialized;
     int data_prepared;
     int broken;                  /* it failed to load; it cannot be applied */
+    int removed;                 /* its folder was deleted while the game runs (Mods_Forget) */
     int *runtime_options;
     unsigned sequence;
     unsigned code_hash;
@@ -1927,6 +1928,27 @@ int Mods_Discover(const char *directory, int *later)
     say("%s: found in %s", mods[index].id, directory);
     return index;
 }
+
+int Mods_Forget(int index)
+{
+    char key[256];
+    if (!at(index) || !untouched(&mods[index])) return -1;
+    /* Off, in the settings too: a mod with this id imported later starts
+     * off, as any new one does. Its order and option values stay, so an
+     * updated version comes back with the player's choices. The slot stays
+     * (events and state are keyed by index); the list leaves it out. */
+    if (setting_key(key, sizeof(key), mods[index].id, NULL)) Settings_SetNamed(key, 0);
+    mods[index].enabled = 0;
+    mods[index].failed = 0;
+    mods[index].broken = 1;
+    mods[index].removed = 1;
+    mods[index].status[0] = '\0';
+    mods[index].warnings[0] = '\0';
+    Mods_OverlapsForget();
+    say("%s: removed", mods[index].id);
+    return 0;
+}
+int Mods_Removed(int index) { return at(index) && mods[index].removed; }
 
 void Mods_Load(void)
 {

@@ -30,6 +30,7 @@ enum {
     MODS_UI_DEFAULTS, MODS_UI_CLOSE, MODS_UI_APPLY, MODS_UI_FOLDER, MODS_UI_ROW_SELECTED, MODS_UI_ROW_FIRST,
     MODS_UI_CHECK_SELECTED, MODS_UI_CHECK_FIRST, /* a row's [x], which switches its mod on or off */
     MODS_UI_HD,         /* HD pack... (where the platform can download it, hd_pack.h) */
+    MODS_UI_REMOVE,     /* Remove, beside Import mod... (the selected mod's folder goes) */
     MODS_UI_TAB = 20,   /* + 0 About, 1 Settings, 2 Compatibility */
     MODS_UI_ORDER = 30, /* + 0 -, 1 + */
     MODS_UI_OPTION = 100
@@ -43,7 +44,9 @@ int ModsWindow_Locate(int id, int *x, int *y);
  * chosen file to `path` (1; 0 with why), a .zip the window imports and
  * then removes. Without them (NULL, the default: every desktop) the panel
  * has no Import button and nothing else changes. Setting them clears what
- * an import cut short left in the mods folder. */
+ * an import cut short left in the mods folder. They also give the panel a
+ * Remove button: an app cannot open its mods folder to delete a mod by hand,
+ * so it deletes the selected mod's folder itself, after a question. */
 void ModsWindow_SetImport(int (*pick)(char *why, size_t why_size), int (*picked)(char *why, size_t why_size),
                           int (*fetch)(char *path, size_t size, char *why, size_t why_size));
 /* Once per pump while the panel shows: an import's next step. 1 when the

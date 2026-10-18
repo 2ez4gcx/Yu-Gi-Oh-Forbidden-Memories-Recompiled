@@ -150,6 +150,15 @@ int Mods_Discover(const char *directory, int *later);
 /* Whether a mod is (or was, this launch) in place: its code, data, or
  * pictures are the files read then, so they must not change under it. */
 int Mods_InUse(int mod);
+/* A mod whose folder the Android Mods panel's Remove deleted (import.h,
+ * Mods_ImportRemoveInstalled), while the game runs. Only a mod nothing was
+ * loaded from this launch (not Mods_InUse) can go: -1 for any other. Its
+ * slot stays in the list, so no other mod's index moves (events and saved
+ * state are keyed by it), but it is off for good, cannot be applied, and
+ * Mods_Removed says so: the panel leaves it out. A mod imported later with
+ * its id takes the slot again (Mods_Discover). */
+int Mods_Forget(int mod);
+int Mods_Removed(int mod);
 /* The mods' list or a manifest changed: the next Mods_Overlaps works its
  * lines out again. */
 void Mods_OverlapsForget(void);

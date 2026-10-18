@@ -71,4 +71,11 @@ void Mods_ImportCleanup(const char *mods);
  * Windows, where only the tests run it, a junction is followed). 0 when it
  * is gone. */
 int Mods_ImportRemoveTree(const char *path);
+/* Removes the mod folder `directory` (a mod's Mods_Directory) of `mods`,
+ * the Android Mods panel's Remove. It must be a folder of its own right in
+ * `mods`: <mods>/<name> with one plain name (no separator, no ":", no
+ * leading "."), a real folder and not a link; anything else is refused and
+ * nothing is touched. 0 when it is gone (it was already), else -1 with the
+ * reason in `why`. */
+int Mods_ImportRemoveInstalled(const char *mods, const char *directory, char *why, size_t why_size);
 #endif

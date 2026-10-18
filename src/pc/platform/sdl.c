@@ -603,8 +603,19 @@ static void phase_end(int phase, uint64_t started)
 
 static void phases_shown(void)
 {
+    static int counting; /* the channel was on at the last frame */
     unsigned images, image_us, image_max;
-    if (!Log_Enabled(LOG_FRAMES) || ++phases.frames < 120) return;
+    if (!Log_Enabled(LOG_FRAMES)) {
+        counting = 0;
+        return;
+    }
+    if (!counting) { /* turned on just now: count from here, not from the launch */
+        counting = 1;
+        memset(&phases, 0, sizeof(phases));
+        TexturePack_ReadStats(&images, &image_us, &image_max);
+        return;
+    }
+    if (++phases.frames < 120) return;
     TexturePack_ReadStats(&images, &image_us, &image_max);
     LOG(LOG_FRAMES, "present phases per shown frame: events %u us, copy %u us, swap %u us (max %u, %u, %u); "
         "texture pack: %u images read in %u us (longest %u us)",

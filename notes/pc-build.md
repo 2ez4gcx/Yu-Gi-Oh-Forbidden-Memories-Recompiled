@@ -3949,26 +3949,40 @@ chosen. `DiscPicker` runs in a task of its own (SDLActivity is
 apps), asks for the document with `ACTION_OPEN_DOCUMENT`, takes a lasting
 read right (`takePersistableUriPermission`) and writes the answer to
 `disc-pick.txt` in the internal files folder before it ends: "chosen",
-"cancelled" or "failed", then the URI or the reason. The system keeps an
-activity's pending result across the end of its process and gives it to the
-activity it makes again, so the answer is written either way.
-`Platform_SelectDisc` waits for the file while the game's activity is away
-(SDL's event pump holds the thread while it is in the background), and
-reads an answer that is there when it starts: one the last process did not
-live to read, taken up at once, without the welcome. The game's activity
-back in front without an answer (the player came back from the recent apps
-or the launcher instead) is the picker given up, and the welcome comes
-again; SDL gives `SDL_EVENT_DID_ENTER_BACKGROUND`/`FOREGROUND` to an event
-watch only (`SDL_AddEventWatch`), never to the queue, so a loop that polls
-for them never sees them. Back in the picker is no error; a picker that gave back no document
-says so in a box, and every answer is in the log (`disc picker: result ...`
-from the activity, `no disc image chosen`, `the picker gave no document`).
-The copy goes through `game/rpg-yfm.bin.tmp`, removed first if a copy cut
-short left one (it no longer counts against the free-space check), and is
-renamed only when it is whole: the document's length when its provider
-gives one, else at least the length the image's own volume descriptor
-gives (its sectors times 2352). The lasting read right is given back after
-the copy, whichever way it went.
+"cancelled" or "failed" and the pick's id (the Intent's `id` extra), then
+the URI or the reason. The system keeps an activity's pending result across
+the end of its process and gives it to the activity it makes again, so the
+answer is written either way. `DiscPicker` ended without an answer (its
+task closed, a free-form window shut, a newer picker clearing it) answers
+"cancelled" from `onDestroy`: where the game's activity never left the
+screen (a free-form window, split screen), nothing else would tell the game
+the picker is gone, and it waited on a black screen.
+`Platform_SelectDisc` waits for the answer to its own pick (an answer under
+another id, from a picker a newer one cleared, is dropped) while the game's
+activity is away (SDL's event pump holds the thread while it is in the
+background), and reads an answer that is there when it starts: one the last
+process did not live to read, taken up at once, without the welcome, if it
+is at most 15 minutes old (an older one is a choice made long ago, not
+taken unasked). The game's activity back in front without an answer (the
+player came back from the recent apps or the launcher instead) is the
+picker given up, and the welcome comes again; SDL gives
+`SDL_EVENT_DID_ENTER_BACKGROUND`/`FOREGROUND` to an event watch only
+(`SDL_AddEventWatch`), never to the queue, so a loop that polls for them
+never sees them. Backing out of the picker is not an error; a picker that
+gave back no document says so in a box (a plain sentence; the exception
+goes to the log), and every answer is in the log (`disc picker: result
+...` from the activity, `no disc image chosen`, `the picker gave no
+document`, `an answer to an earlier pick`).
+The copy goes through `game/rpg-yfm.bin.tmp`, removed at the start and
+again before the copy if a copy cut short left one (it no longer counts
+against the free-space check), and is renamed only when it is whole: the
+document's length when its provider gives one, else at least the length the
+image's own volume descriptor gives (its sectors times 2352). The lasting
+read right is given back after the copy, whichever way it went; one a copy
+cut short left (the process ended during it) goes at the next start, where
+every lasting read right but that of the answer being taken up is given
+back (`DiscPicker.releaseAll`), and a start that finds the copy in place
+drops a leftover answer and gives back them all.
 
 The game's message boxes on Android (this welcome, the error boxes of
 `Platform_ShowError` and the start-up report's) are the system's own alert,
@@ -4424,7 +4438,8 @@ untouched: with a mouse every path is the old one, pixel for pixel.
   is the mod import's (`SDL_ShowOpenFileDialog`, in the game's task:
   `dumpsys activity activities` shows both in the same task) or the first
   run's disc (in `DiscPicker`'s own task, `A=...game.disc`, above the
-  game's). On a device held upright it is portrait, and closing it rotates the display back to landscape in a shell transition
+  game's). On a device held upright it is portrait, and closing it
+  rotates the display back to landscape in a shell transition
   (likely played by SystemUI's WindowManagerShell). In one emulator boot
   that had a SystemUI ANR, two returns left the display in portrait:
   `dumpsys window` had `DisplayRotation mRotation=1` while the display's

@@ -3,8 +3,10 @@ package org.yfmredecomp.game;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.ActivityNotFoundException;
+import android.content.ContentResolver;
 import android.content.Context;
 import android.content.Intent;
+import android.content.UriPermission;
 import android.net.Uri;
 import android.os.Bundle;
 import android.util.Log;
@@ -33,11 +35,17 @@ import java.nio.charset.StandardCharsets;
  * written whichever process receives it; the game reads the file while it
  * waits, or at its next start when the process was ended in between.
  *
- * <p>The record is two lines: "chosen", "cancelled" or "failed", then the
- * document's URI or the reason. The read right is taken as a lasting one
+ * <p>The record is two lines: "chosen", "cancelled" or "failed" and the
+ * pick's id (the Intent's "id" extra, so that the game takes only the
+ * answer to the pick it waits for), then the document's URI or the reason.
+ * Ended without an answer (its task closed, a free-form window shut, a
+ * newer picker clearing this one), it answers "cancelled": where the game's
+ * activity never left the screen, nothing else would tell the game the
+ * picker is gone. The read right is taken as a lasting one
  * (takePersistableUriPermission), since the process that copies the image
  * may not be the one the result was given to; the game gives it back after
- * the copy ({@link #release}).
+ * the copy ({@link #release}), and any left over at its next start
+ * ({@link #releaseAll}).
  *
  * <p>The static methods are called by android.c through JNI, on the game's
  * own thread, never the main one.
@@ -50,6 +58,7 @@ public class DiscPicker extends Activity {
     private static final String ASKED = "asked";
 
     private boolean asked;
+    private boolean answered;
 
     @Override
     protected void onCreate(Bundle state) {
@@ -69,9 +78,11 @@ public class DiscPicker extends Activity {
             startActivityForResult(intent, PICK);
             asked = true;
         } catch (ActivityNotFoundException e) {
-            answer("failed", "This device has no document picker (" + e.getMessage() + ").");
+            Log.e(TAG, "memories-pc: disc picker: no document picker: " + e);
+            answer("failed", "This device has no app to choose a file with.");
         } catch (RuntimeException e) {
-            answer("failed", "The document picker could not be opened (" + e + ").");
+            Log.e(TAG, "memories-pc: disc picker: the document picker could not be opened: " + e);
+            answer("failed", "The file picker could not be opened.");
         }
     }
 
@@ -84,9 +95,9 @@ public class DiscPicker extends Activity {
     @Override
     protected void onActivityResult(int request, int result, Intent data) {
         super.onActivityResult(request, result, data);
-        // A picker left earlier and cleared by a new one (the game starts
-        // this activity with FLAG_ACTIVITY_CLEAR_TASK): its cancel is not an
-        // answer to the new pick.
+        // A picker cleared by a new one (the game starts this activity with
+        // FLAG_ACTIVITY_CLEAR_TASK) or closed with its task: onDestroy says
+        // so, under this pick's id.
         if (request != PICK || isFinishing())
             return;
         Uri uri = data != null ? data.getData() : null;
@@ -113,19 +124,46 @@ public class DiscPicker extends Activity {
         answer("chosen", uri.toString());
     }
 
-    /** Writes the record (through a temporary file, renamed) and ends. */
+    @Override
+    protected void onDestroy() {
+        // Ended for good with no answer written: the picker's task closed,
+        // its window shut, or a newer picker cleared it. Not when the system
+        // only takes the activity down to make it again (a configuration
+        // change; or its process ended, where onDestroy does not run): its
+        // answer still comes then.
+        if (!answered && isFinishing() && !isChangingConfigurations()) {
+            Log.i(TAG, "memories-pc: disc picker: closed without a choice");
+            write("cancelled", "the picker closed without a choice");
+        }
+        super.onDestroy();
+    }
+
+    /** Writes the record and ends. */
     private void answer(String what, String text) {
+        write(what, text);
+        finish();
+    }
+
+    /**
+     * Writes the record through a temporary file, renamed only once whole:
+     * one that could not be written is removed, and no record is left.
+     */
+    private void write(String what, String text) {
+        String id = getIntent() != null ? getIntent().getStringExtra("id") : null;
         File record = new File(getFilesDir(), RECORD);
         File temporary = new File(getFilesDir(), RECORD + ".tmp");
+        answered = true;
         try (FileOutputStream out = new FileOutputStream(temporary)) {
-            out.write((what + "\n" + text + "\n").getBytes(StandardCharsets.UTF_8));
+            out.write((what + " " + (id != null ? id : "") + "\n" + text + "\n").getBytes(StandardCharsets.UTF_8));
             out.getFD().sync();
         } catch (IOException e) {
             Log.e(TAG, "memories-pc: disc picker: could not write " + temporary + ": " + e);
+            if (!temporary.delete() && temporary.exists())
+                Log.e(TAG, "memories-pc: disc picker: could not remove " + temporary);
+            return;
         }
         if (!temporary.renameTo(record))
             Log.e(TAG, "memories-pc: disc picker: could not write " + record);
-        finish();
     }
 
     /** Gives back the lasting read right {@link #onActivityResult} took. */
@@ -135,6 +173,31 @@ public class DiscPicker extends Activity {
                     Intent.FLAG_GRANT_READ_URI_PERMISSION);
         } catch (RuntimeException e) {
             // none was taken
+        }
+    }
+
+    /**
+     * Gives back every lasting read right the app holds but `keep`'s (""
+     * for none): the game takes them for the disc image only, so one left
+     * over is from a copy cut short or a pick never taken up.
+     */
+    public static void releaseAll(Context context, String keep) {
+        try {
+            ContentResolver resolver = context.getContentResolver();
+            for (UriPermission held : resolver.getPersistedUriPermissions()) {
+                if (held.getUri().toString().equals(keep))
+                    continue;
+                int flags = (held.isReadPermission() ? Intent.FLAG_GRANT_READ_URI_PERMISSION : 0)
+                        | (held.isWritePermission() ? Intent.FLAG_GRANT_WRITE_URI_PERMISSION : 0);
+                try {
+                    resolver.releasePersistableUriPermission(held.getUri(), flags);
+                    Log.i(TAG, "memories-pc: disc picker: a lasting read right left over given back");
+                } catch (RuntimeException e) {
+                    Log.i(TAG, "memories-pc: disc picker: a lasting read right could not be given back (" + e + ")");
+                }
+            }
+        } catch (RuntimeException e) {
+            Log.i(TAG, "memories-pc: disc picker: the lasting read rights could not be listed (" + e + ")");
         }
     }
 

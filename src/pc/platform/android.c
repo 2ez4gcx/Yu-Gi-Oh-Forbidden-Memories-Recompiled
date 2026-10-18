@@ -69,6 +69,7 @@
 #include <sys/syscall.h>
 #include <sys/system_properties.h>
 #include <sys/utsname.h>
+#include <time.h>
 #include <unistd.h>
 #include <jni.h>
 #include "pc/guest/state.h"
@@ -204,7 +205,7 @@ static void SDLCALL picked(void *userdata, const char *const *files, int filter)
 
 static int java_failed(JNIEnv *env);
 static int java_ok(JNIEnv *env, const void *value);
-static int start_app_activity(const char *name, int pid, int flags);
+static int start_app_activity(const char *name, int pid, const char *id, int flags);
 
 #define DISC_TITLE "Yu-Gi-Oh! Forbidden Memories"
 
@@ -224,11 +225,14 @@ static int is_the_disc(FILE *file, Sint64 *bytes)
 }
 
 /* DiscPicker.java, through JNI: the picker started, the copy's box shown
- * or taken away, the document's lasting read right given back. */
-enum { DISC_START, DISC_PROGRESS, DISC_CLOSE, DISC_RELEASE };
+ * or taken away, the document's lasting read right given back (one, or all
+ * but one). */
+enum { DISC_START, DISC_PROGRESS, DISC_CLOSE, DISC_RELEASE, DISC_RELEASE_ALL };
 typedef struct {
     int what;
-    const char *text; /* DISC_PROGRESS: the box's line; DISC_RELEASE: the URI */
+    const char *text; /* DISC_START: the pick's id; DISC_PROGRESS: the box's
+                       * line; DISC_RELEASE: the URI; DISC_RELEASE_ALL: the
+                       * URI kept ("" for none) */
     int done, total;  /* DISC_PROGRESS: MB; total 0 for a moving bar */
     int ok;
 } DiscCall;
@@ -246,7 +250,7 @@ static void disc_java(void *argument)
     if (call->what == DISC_START) {
         /* a task of its own, any earlier one of it cleared:
          * FLAG_ACTIVITY_NEW_TASK | FLAG_ACTIVITY_CLEAR_TASK */
-        call->ok = start_app_activity("org.yfmredecomp.game.DiscPicker", 0, 0x10000000 | 0x00008000);
+        call->ok = start_app_activity("org.yfmredecomp.game.DiscPicker", 0, call->text, 0x10000000 | 0x00008000);
         return;
     }
     env = (JNIEnv *)SDL_GetAndroidJNIEnv();
@@ -281,8 +285,9 @@ static void disc_java(void *argument)
             (*env)->CallStaticVoidMethod(env, found, method, activity);
             call->ok = !java_failed(env);
         }
-    } else if (ready && call->what == DISC_RELEASE) {
-        if (CHECKED(method = (*env)->GetStaticMethodID(env, found, "release",
+    } else if (ready && (call->what == DISC_RELEASE || call->what == DISC_RELEASE_ALL)) {
+        if (CHECKED(method = (*env)->GetStaticMethodID(env, found,
+                                                       call->what == DISC_RELEASE ? "release" : "releaseAll",
                                                        "(Landroid/content/Context;Ljava/lang/String;)V")) &&
             CHECKED(text = (*env)->NewStringUTF(env, call->text))) {
             (*env)->CallStaticVoidMethod(env, found, method, activity, text);
@@ -387,17 +392,29 @@ static int pick_record(char *path, size_t size)
     return internal && *internal && snprintf(path, size, "%s/disc-pick.txt", internal) < (int)size;
 }
 
+/* How old an answer left by an earlier process may be and still be taken up
+ * at the start: one older than this is a choice made long ago (the copy it
+ * was for was never made, or the image came another way), not taken unasked. */
+#define PICK_FRESH_SECONDS (15 * 60)
+
 /* The answer, taken (read, then removed): PICK_NONE while there is none,
- * else what it was, with the URI or the reason in *text (to free). */
-static int take_pick(const char *record, char **text)
+ * else what it was, with the URI or the reason in *text (to free). Its first
+ * line is what it was and the pick's id (DiscPicker's "id" extra): with
+ * `expected`, an answer to another pick (a picker that a newer one cleared)
+ * is dropped as none; without (the start), an answer of any pick is taken
+ * if it is fresh (PICK_FRESH_SECONDS). */
+static int take_pick(const char *record, const char *expected, char **text)
 {
     enum { MOST = 1 << 16 }; /* a document's URI is far shorter */
-    FILE *file = fopen(record, "rb");
-    char *data, *line;
+    struct stat seen;
+    FILE *file;
+    char *data, *line, *id;
     size_t length;
+    long long age = 0;
     int what = PICK_FAILED;
     *text = NULL;
-    if (!file) return PICK_NONE;
+    if (!expected && !stat(record, &seen)) age = (long long)time(NULL) - (long long)seen.st_mtime;
+    if (!(file = fopen(record, "rb"))) return PICK_NONE;
     data = malloc(MOST + 1);
     length = data ? fread(data, 1, MOST, file) : 0;
     fclose(file);
@@ -407,6 +424,19 @@ static int take_pick(const char *record, char **text)
     if ((line = strchr(data, '\n')) != NULL) *line++ = '\0';
     else line = data + length;
     line[strcspn(line, "\r\n")] = '\0';
+    if ((id = strchr(data, ' ')) != NULL) *id++ = '\0';
+    else id = data + strlen(data);
+    if (expected && strcmp(id, expected)) {
+        fprintf(stderr, "memories-pc: an answer to an earlier pick (%s), not this one's (%s): dropped\n", id, expected);
+        free(data);
+        return PICK_NONE;
+    }
+    if (age > PICK_FRESH_SECONDS) {
+        fprintf(stderr, "memories-pc: the picker's answer from before this start is %lld minutes old: dropped\n",
+                age / 60);
+        free(data);
+        return PICK_NONE;
+    }
     if (length == MOST) snprintf(data, MOST, "The chosen file's address is too long (more than 64 KB).");
     else {
         if (!strcmp(data, "chosen") && *line) what = PICK_CHOSEN;
@@ -453,8 +483,11 @@ static bool SDLCALL pick_watch(void *userdata, SDL_Event *event)
  * front again: then the answer is there, since DiscPicker writes it before
  * it ends. The game's activity back in front without one (the player came
  * back to it from the recent apps or the launcher, not through the picker)
- * is the picker given up: PICK_NONE, the welcome again. */
-static int wait_pick(const char *record, char **text)
+ * is the picker given up: PICK_NONE, the welcome again; so is a picker
+ * whose task went away without a choice where the game's activity never
+ * left the screen (a free-form window, split screen), which DiscPicker
+ * answers "cancelled" as it ends. Only the answer to the pick `id` counts. */
+static int wait_pick(const char *record, const char *id, char **text)
 {
     PickWatch watch;
     Uint64 back_at = 0;
@@ -472,7 +505,7 @@ static int wait_pick(const char *record, char **text)
             what = PICK_QUIT;
             break;
         }
-        if ((what = take_pick(record, text)) != PICK_NONE) break;
+        if ((what = take_pick(record, id, text)) != PICK_NONE) break;
         if (!SDL_GetAtomicInt(&watch.back)) back_at = 0;
         else if (!back_at) back_at = SDL_GetTicks();
         else if (SDL_GetTicks() - back_at > 2000) break; /* PICK_NONE */
@@ -537,17 +570,12 @@ static int take_disc(const char *uri, char *target, size_t target_size, char *wh
     return 1;
 }
 
-/* First run (game_files.h): the picker offers the documents the system can
- * reach (Downloads, SD cards, cloud drives); the chosen image is checked
- * where it is and then copied into the app's game/ folder, since the right
- * to read a picked document does not outlast the app. A file that is not
- * the disc says so and the picker comes back, as on the desktop.
- *
- * The picker is DiscPicker.java's, which writes the answer to a file: an
- * answer there at the start is one the last process did not live to read
- * (the system ended it while the picker was in front), taken up at once,
- * without the welcome. The copy shows its progress in a box. */
-int Platform_SelectDisc(char *path, size_t size, char *why, size_t why_size)
+/* The welcome and the picker, again until a disc image is copied
+ * (`target`, 1), the player quits (0) or setup cannot go on (-1, the reason
+ * in `why`). `what` and `text` (taken, freed here) are an answer to take up
+ * before the first welcome: PICK_CHOSEN and its URI, else PICK_NONE. */
+static int select_disc(int what, char *text, const char *record, char *target, size_t target_size, char *why,
+                       size_t why_size)
 {
     static const SDL_MessageBoxButtonData buttons[] = {
         {SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT, 0, "Quit"},
@@ -560,6 +588,69 @@ int Platform_SelectDisc(char *path, size_t size, char *why, size_t why_size)
         "The game copies it into its own folder (about 500 MB), so you can remove the file you chose afterwards.",
         2, buttons, NULL
     };
+    unsigned picks = 0;
+    for (;; what = PICK_NONE, text = NULL) {
+        if (what == PICK_NONE) {
+            char id[64];
+            int button = 0;
+            if (!Android_ShowMessageBox(&welcome, &button)) {
+                snprintf(why, why_size, "Could not open ROM setup: %s", SDL_GetError());
+                return -1;
+            }
+            if (button != 1 || drain_events()) return 0;
+            /* Each pick has its own id, so that only its answer counts: a
+             * picker started earlier and cleared by this one says
+             * "cancelled" as it ends, under its own. */
+            snprintf(id, sizeof(id), "%d-%u-%llu", (int)getpid(), ++picks, (unsigned long long)SDL_GetTicksNS());
+            remove(record);
+            if (!disc_call(DISC_START, id, 0, 0)) {
+                snprintf(why, why_size, "Could not open the file picker.");
+                return -1;
+            }
+            what = wait_pick(record, id, &text);
+        }
+        if (what == PICK_QUIT) return 0;
+        if (what == PICK_NONE) {
+            fprintf(stderr, "memories-pc: back in the game without an answer from the picker: the welcome again\n");
+        } else if (what == PICK_CANCELLED) { /* backed out of the picker, or its task closed */
+            fprintf(stderr, "memories-pc: no disc image chosen (%s)\n", text ? text : "");
+        } else if (what == PICK_FAILED) {
+            fprintf(stderr, "memories-pc: the picker gave no document: %s\n", text ? text : "");
+            snprintf(why, why_size, "The file picker gave back no file.\n\n%s", text ? text : "");
+            Platform_ShowError("Unable to use this ROM", why);
+        } else if (take_disc(text, target, target_size, why, why_size)) {
+            free(text);
+            return 1;
+        }
+        free(text);
+    }
+}
+
+/* A start with the disc image copied already: an answer the picker left
+ * (a picker given up and answered after all, an image put there another
+ * way) and every lasting read right are left over, and go. */
+static void forget_old_pick(const char *folder)
+{
+    char disc[1100], record[1024];
+    struct stat seen;
+    if (snprintf(disc, sizeof(disc), "%s/game/rpg-yfm.bin", folder) >= (int)sizeof(disc) || stat(disc, &seen)) return;
+    if (pick_record(record, sizeof(record)) && !remove(record))
+        fprintf(stderr, "memories-pc: the picker's answer left from before dropped: the disc image is there\n");
+    disc_call(DISC_RELEASE_ALL, "", 0, 0);
+}
+
+/* First run (game_files.h): the picker offers the documents the system can
+ * reach (Downloads, SD cards, cloud drives); the chosen image is checked
+ * where it is and then copied into the app's game/ folder, since the right
+ * to read a picked document does not outlast the app. A file that is not
+ * the disc says so and the picker comes back, as on the desktop.
+ *
+ * The picker is DiscPicker.java's, which writes the answer to a file: an
+ * answer there at the start is one the last process did not live to read
+ * (the system ended it while the picker was in front), taken up at once,
+ * without the welcome. The copy shows its progress in a box. */
+int Platform_SelectDisc(char *path, size_t size, char *why, size_t why_size)
+{
     char record[1024], target[1024];
     int result = 0;
     if (!SDL_InitSubSystem(SDL_INIT_VIDEO)) {
@@ -577,73 +668,32 @@ int Platform_SelectDisc(char *path, size_t size, char *why, size_t why_size)
     if (snprintf(target, sizeof(target), "%s/game/rpg-yfm.bin.tmp", Paths_UserDir()) < (int)sizeof(target) &&
         !remove(target))
         fprintf(stderr, "memories-pc: removed %s, left by a copy that did not finish\n", target);
-    for (;;) {
+    {
+        /* An answer the last process did not live to read (the system ended
+         * it while the picker was in front): a document is taken up at
+         * once, without the welcome; anything else is dropped. The lasting
+         * read rights of every other document go back (a copy cut short,
+         * a pick never taken up). */
         char *text = NULL;
-        int button = 0, what = take_pick(record, &text);
+        int what = take_pick(record, NULL, &text);
         if (what != PICK_NONE)
             fprintf(stderr, "memories-pc: the picker's answer from before this start: %s\n",
                     what == PICK_CHOSEN ? "a document" : what == PICK_CANCELLED ? "none chosen" : "it failed");
-        if (what == PICK_NONE || what == PICK_CANCELLED) {
+        disc_call(DISC_RELEASE_ALL, what == PICK_CHOSEN ? text : "", 0, 0);
+        if (what != PICK_CHOSEN) {
             free(text);
             text = NULL;
-            if (!Android_ShowMessageBox(&welcome, &button)) {
-                snprintf(why, why_size, "Could not open ROM setup: %s", SDL_GetError());
-                result = -1;
-                break;
-            }
-            if (button != 1 || drain_events()) {
-                result = 0;
-                break;
-            }
-            /* An answer that came while the welcome was up (a picker given
-             * up earlier and answered after all): a document is taken,
-             * anything else dropped, so that only this pick's answer is
-             * waited for. */
-            what = take_pick(record, &text);
-            if (what != PICK_CHOSEN) {
-                free(text);
-                text = NULL;
-                if (!disc_call(DISC_START, NULL, 0, 0)) {
-                    snprintf(why, why_size, "Could not open the file picker.");
-                    result = -1;
-                    break;
-                }
-                what = wait_pick(record, &text);
-            }
+            what = PICK_NONE;
         }
-        if (what == PICK_QUIT) {
-            result = 0;
-            break;
-        }
-        if (what == PICK_NONE) {
-            fprintf(stderr, "memories-pc: back in the game without an answer from the picker: the welcome again\n");
-            continue;
-        }
-        if (what == PICK_CANCELLED) { /* backed out of the picker: the welcome again */
-            fprintf(stderr, "memories-pc: no disc image chosen (%s)\n", text ? text : "");
-            free(text);
-            continue;
-        }
-        if (what == PICK_FAILED) {
-            fprintf(stderr, "memories-pc: the picker gave no document: %s\n", text ? text : "");
-            snprintf(why, why_size, "The file picker gave back no file.\n\n%s", text ? text : "");
-            free(text);
-            Platform_ShowError("Unable to use this ROM", why);
-            continue;
-        }
-        if (!take_disc(text, target, sizeof(target), why, why_size)) {
-            free(text);
-            continue;
-        }
-        free(text);
+        result = select_disc(what, text, record, target, sizeof(target), why, why_size);
+    }
+    if (result > 0) {
         if (strlen(target) >= size) {
             snprintf(why, why_size, "The ROM path is too long.");
             result = -1;
-            break;
+        } else {
+            snprintf(path, size, "%s", target);
         }
-        snprintf(path, size, "%s", target);
-        result = 1;
-        break;
     }
     SDL_QuitSubSystem(SDL_INIT_VIDEO);
     return result;
@@ -929,16 +979,17 @@ static int java_ok(JNIEnv *env, const void *value)
 }
 
 /* Starts the app's activity `name` (Restart.java's, a process of its own,
- * with this process's id as `pid`; DiscPicker.java's, with no pid) with the
- * Intent flags `flags`: 1 when the system took the request. */
-static int start_app_activity(const char *name, int pid, int flags)
+ * with this process's id as the "pid" extra; DiscPicker.java's, with the
+ * pick's id as the "id" extra) with the Intent flags `flags`: 1 when the
+ * system took the request. pid 0 and id NULL put no extra. */
+static int start_app_activity(const char *name, int pid, const char *id, int flags)
 {
     JNIEnv *env = (JNIEnv *)SDL_GetAndroidJNIEnv();
     jobject activity = env ? (jobject)SDL_GetAndroidActivity() : NULL;
     jclass intent_class = NULL, activity_class = NULL;
-    jmethodID make = NULL, set_class = NULL, put_int = NULL, add_flags = NULL, start = NULL;
+    jmethodID make = NULL, set_class = NULL, put_int = NULL, put_text = NULL, add_flags = NULL, start = NULL;
     jobject intent = NULL;
-    jstring class_name = NULL, key = NULL;
+    jstring class_name = NULL, key = NULL, id_key = NULL, id_text = NULL;
     int ok = 0;
     if (!activity) return 0;
     if ((*env)->PushLocalFrame(env, 16) < 0) {
@@ -954,6 +1005,8 @@ static int start_app_activity(const char *name, int pid, int flags)
         CHECKED(set_class = (*env)->GetMethodID(env, intent_class, "setClassName",
                                                 "(Landroid/content/Context;Ljava/lang/String;)Landroid/content/Intent;")) &&
         CHECKED(put_int = (*env)->GetMethodID(env, intent_class, "putExtra", "(Ljava/lang/String;I)Landroid/content/Intent;")) &&
+        CHECKED(put_text = (*env)->GetMethodID(env, intent_class, "putExtra",
+                                               "(Ljava/lang/String;Ljava/lang/String;)Landroid/content/Intent;")) &&
         CHECKED(add_flags = (*env)->GetMethodID(env, intent_class, "addFlags", "(I)Landroid/content/Intent;")) &&
         CHECKED(activity_class = (*env)->GetObjectClass(env, activity)) &&
         CHECKED(start = (*env)->GetMethodID(env, activity_class, "startActivity", "(Landroid/content/Intent;)V")) &&
@@ -962,6 +1015,8 @@ static int start_app_activity(const char *name, int pid, int flags)
         CHECKED(key = (*env)->NewStringUTF(env, "pid")) &&
         CHECKED((*env)->CallObjectMethod(env, intent, set_class, activity, class_name)) &&
         (pid <= 0 || CHECKED((*env)->CallObjectMethod(env, intent, put_int, key, (jint)pid))) &&
+        (!id || (CHECKED(id_key = (*env)->NewStringUTF(env, "id")) && CHECKED(id_text = (*env)->NewStringUTF(env, id)) &&
+                 CHECKED((*env)->CallObjectMethod(env, intent, put_text, id_key, id_text)))) &&
         CHECKED((*env)->CallObjectMethod(env, intent, add_flags, (jint)flags))) {
         (*env)->CallVoidMethod(env, activity, start, intent);
         ok = !java_failed(env);
@@ -974,7 +1029,7 @@ static int start_app_activity(const char *name, int pid, int flags)
 
 static void restart_on_host(void *result)
 {
-    if (!start_app_activity("org.yfmredecomp.game.Restart", (int)getpid(), 0x10000000)) { /* FLAG_ACTIVITY_NEW_TASK */
+    if (!start_app_activity("org.yfmredecomp.game.Restart", (int)getpid(), NULL, 0x10000000)) { /* FLAG_ACTIVITY_NEW_TASK */
         fprintf(stderr, "memories-pc: restart: the restart activity did not start; close the app and open it again\n");
         *(int *)result = -1;
         return;
@@ -1805,6 +1860,7 @@ int Memories_AndroidMain(int argc, char **argv)
         fprintf(stderr, "memories-pc: environment.txt names the user folder: %s\n", named);
     }
     unpack_program();
+    if (files) forget_old_pick(files);
 #ifndef MEMORIES_TRANSLATED
     check_load_bias();
 #endif

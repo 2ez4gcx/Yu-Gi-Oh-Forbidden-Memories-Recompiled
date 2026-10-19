@@ -466,8 +466,9 @@ game draws them, since a screen typically draws its sheets through those
 palettes later, all at once. Entries naming the same PNG with the same
 size and crop share one read. A read ahead is not used until the game asks
 for it, so nothing drawn changes, only when the frame has to wait. What is
-read ahead and not yet used is kept up to 192 MB (48 MB in a 32-bit build);
-`MEMORIES_PACK_READ_AHEAD=<megabytes>` sets that, 0 reads nothing ahead.
+read ahead and not yet used is kept up to 192 MB (96 MB on Android, 48 MB in
+a 32-bit build); `MEMORIES_PACK_READ_AHEAD=<megabytes>` sets that, 0 reads
+nothing ahead.
 Every image the game has used stays in memory while the pack is applied:
 4 MB for a 1024x1024 PNG. With the Forbidden Memories HD pack at Internal 4x
 (the mod-3d-monsters replay, Windows), entering the Build Deck held one frame

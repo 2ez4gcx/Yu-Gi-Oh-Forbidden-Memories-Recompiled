@@ -2066,8 +2066,9 @@ int TexturePack_LoadAssetFolder(const char *directory, unsigned rank, int (*part
  *    for them: the game draws them only later, the Build Deck's icons 6 s
  *    after the sheet came up, a duel field's bands 10 frames. A read ahead
  *    is no entry's until the game asks for it, so it changes nothing drawn;
- *    those no entry has yet are kept up to decode_ahead_limit (192 MB, 48
- *    in a 32-bit game; MEMORIES_PACK_READ_AHEAD), the oldest dropped first;
+ *    those no entry has yet are kept up to decode_ahead_limit (192 MB, 96
+ *    on Android, 48 in a 32-bit game; MEMORIES_PACK_READ_AHEAD), the oldest
+ *    dropped first;
  *  - entries of one PNG and one geometry (the card frames' are named by ten
  *    entries, one per screen) share its image and texels, read once.
  * Uploads and primitives (paint, prepare) only set `wanted`, as before: they
@@ -2156,7 +2157,8 @@ static void decode_finish(Decode *decode)
             Decode *at, *next;
             for (at = decodes; at && decode_ahead_bytes + decode->bytes > decode_ahead_limit; at = next) {
                 next = at->next;
-                if (!at->ahead) continue;
+                /* Not one this Service has asked for and is about to take. */
+                if (!at->ahead || at->now) continue;
                 decode_unlink(at);
                 decode_free(at);
             }
@@ -2210,19 +2212,31 @@ static void *decode_thread(void *unused)
 static void decode_start(void)
 {
     const char *named;
+    sigset_t all, previous;
     int i;
     if (decode_threads_tried) return;
     decode_threads_tried = 1;
     named = getenv("MEMORIES_PACK_READ_AHEAD");
-    /* A 32-bit game has 2-4 GB to hold every image it has read. */
+    /* A 32-bit game has 2-4 GB to hold every image it has read; a phone
+     * holds the pack's images beside them and is the app the system ends
+     * first when it is in the background (96: the Build Deck's 34 sheets
+     * are partly read again, 34 ms instead of 22 on Windows). */
+#ifdef __ANDROID__
+    decode_ahead_limit = sizeof(void *) > 4 ? (size_t)96 << 20 : (size_t)48 << 20;
+#else
     decode_ahead_limit = sizeof(void *) > 4 ? (size_t)192 << 20 : (size_t)48 << 20;
+#endif
     if (named && *named) decode_ahead_limit = (size_t)strtoul(named, NULL, 10) << 20;
+    /* The timer signal is the game's interrupt and must stay on the main thread. */
+    sigfillset(&all);
+    pthread_sigmask(SIG_BLOCK, &all, &previous);
     for (i = 0; i < DECODE_THREADS; i++) {
         pthread_t thread;
         if (pthread_create(&thread, NULL, decode_thread, NULL)) break;
         pthread_detach(thread);
         decode_threads++;
     }
+    pthread_sigmask(SIG_SETMASK, &previous, NULL);
     if (decode_threads < DECODE_THREADS)
         fprintf(stderr, "memories-pc: texture pack: %d of %d read-ahead threads started\n", decode_threads,
                 DECODE_THREADS);
@@ -2445,7 +2459,10 @@ void TexturePack_Service(void)
 
 void TexturePack_Unload(void)
 {
-    if (!entries) return;
+    if (!entries) {
+        decode_drop_unused(); /* reads ahead a failed load left (install) */
+        return;
+    }
     TextureDump_Paint = NULL;
     TextureDump_Prepare = NULL;
     TextureDump_Sample = NULL;

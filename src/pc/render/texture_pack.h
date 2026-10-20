@@ -39,11 +39,18 @@ void TexturePack_Unload(void);
 /* Once a frame, on the main thread: reads what uploads asked for (an
  * upload can come from the interrupt tick, where reading is not safe). */
 void TexturePack_Service(void);
-/* The images it read since the last call (PNGs decoded on the main thread,
- * the frame they are read in waiting for them), the microseconds that took
- * in all, and the longest one service took; then counts again from 0. For
- * MEMORIES_TRACE=frames (sdl.c). */
+/* The images it gave since the last call (PNGs the frame they are given in
+ * waits for), the microseconds that took in all, and the longest one
+ * service took; then counts again from 0. For MEMORIES_TRACE=frames (sdl.c). */
 void TexturePack_ReadStats(unsigned *images, unsigned *us, unsigned *max_us);
+/* The pack's images are read on other threads (texture_pack.c, Decode),
+ * and still given before the next frame to what asked for them. How many
+ * Services gave an image read for them then, read ahead, or already read
+ * for another entry of the same PNG; and the threads started (0 until a
+ * pack's image is first wanted). */
+void TexturePack_DecodeStats(unsigned *now, unsigned *ahead, unsigned *shared, int *threads);
+/* Until no read is waiting or under way (tests). */
+void TexturePack_DecodeSettle(void);
 
 /* An image the port makes instead of reading it from the disc: a mod
  * card's art (cards.c), whose bytes art.c makes from the mod's PNG at the

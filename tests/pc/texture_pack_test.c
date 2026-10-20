@@ -505,6 +505,76 @@ static void shared_word(void)
     disc_ready = 0;
 }
 
+/* The pack's images are read on other threads (texture_pack.c, Decode) and
+ * still given by the Service after the upload or the draw that wanted them:
+ * a sheet's head (a, through palette 1536) and another block naming the
+ * same PNG with the same geometry (c) share one read; the head's other
+ * reading (b, palette 1568) is read ahead, so the Service that gives it has
+ * nothing left to read; and packs unloaded while a read ahead is under way
+ * leave nothing behind when loaded again. */
+static void read_ahead(void)
+{
+    static const char manifest[] =
+        "[{\"file\":\"a.png\",\"archive\":\"WA_MRG.MRG\",\"offset\":0,\"words\":2,\"rows\":1,"
+        "\"bpp\":4,\"stride\":64,\"clut_offset\":1536,\"clut_entries\":16,\"crop_left\":0,\"width\":6},"
+        "{\"file\":\"b.png\",\"archive\":\"WA_MRG.MRG\",\"offset\":0,\"words\":2,\"rows\":1,"
+        "\"bpp\":4,\"stride\":64,\"clut_offset\":1568,\"clut_entries\":16,\"crop_left\":0,\"width\":6},"
+        "{\"file\":\"a.png\",\"archive\":\"WA_MRG.MRG\",\"offset\":64,\"words\":2,\"rows\":1,"
+        "\"bpp\":4,\"stride\":64,\"clut_offset\":1536,\"clut_entries\":16,\"crop_left\":0,\"width\":6}]";
+    unsigned char red[6 * 4], green[6 * 4];
+    unsigned now, ahead, shared, now0, ahead0, shared0;
+    char path[1024];
+    uint32_t rgb;
+    int i, threads, round;
+    for (i = 0; i < 6; i++) {
+        red[i * 4] = 255, red[i * 4 + 1] = 0, red[i * 4 + 2] = 0, red[i * 4 + 3] = 255;
+        green[i * 4] = 0, green[i * 4 + 1] = 255, green[i * 4 + 2] = 0, green[i * 4 + 3] = 255;
+    }
+    make_dir("ahead");
+    write_png("ahead/a.png", red, 6, 1);
+    write_png("ahead/b.png", green, 6, 1);
+    write_text("ahead/manifest.json", manifest);
+    memset(disc, 0, sizeof(disc));
+    for (i = 0; i < 2048; i++) disc[2048 + i] = (unsigned char)(0x11 * (i % 15 + 1));
+    for (i = 0; i < 32; i++) {          /* two palettes whose every entry shows */
+        disc[2048 + 1536 + i * 2] = (unsigned char)(i * 2 + 1);
+        disc[2048 + 1536 + i * 2 + 1] = 0x10;
+    }
+    disc_ready = 1;
+    TextureDump_SetDiscFiles(disc_file);
+    snprintf(path, sizeof(path), "%s/ahead", root);
+    for (round = 0; round < 2; round++) {
+        assert(TexturePack_Load(path, 1, NULL, NULL, NULL, 0) == 3);
+        TexturePack_Service();
+        TexturePack_DecodeStats(&now0, &ahead0, &shared0, &threads);
+        TextureDump_Delivered(disc + 2048, 2048, 1, 0);
+        SoftGpu_Load(0, 0, 64, 16, (const uint16_t *)(disc + 2048));
+        TexturePack_Service();
+        /* Both heads have their image now, read once between them. */
+        assert(*TextureDump_Cell(0, 0, 0) && *TextureDump_Cell(32, 0, 0));
+        TexturePack_DecodeStats(&now, &ahead, &shared, &threads);
+        assert(threads > 0);
+        assert(now == now0 + 1 && shared == shared0 + 1 && ahead == ahead0);
+        if (!round) {
+            TexturePack_Unload();   /* b may be under way: its thread drops it */
+            continue;
+        }
+        TexturePack_DecodeSettle();
+        /* b is drawn through its palette: nothing yet, as before, the next
+         * Service gives what was read ahead. */
+        assert(TextureDump_Prepare(0, 0, 0, 16, 12, 0, 0) == 0);
+        TexturePack_Service();
+        TexturePack_DecodeStats(&now, &ahead, &shared, &threads);
+        assert(now == now0 + 1 && ahead == ahead0 + 1 && shared == shared0 + 1);
+        assert(TextureDump_Prepare(0, 0, 0, 16, 12, 0, 0) == 2);
+        assert(TextureDump_Sample(0, 0, 0, 1 << 16, 0, &rgb) == 1 && rgb == 0x00ff00);
+        assert(TextureDump_Prepare(0, 0, 0, 0, 12, 0, 0) == 1);
+        assert(TextureDump_Sample(0, 0, 0, 1 << 16, 0, &rgb) == 1 && rgb == 0xff0000);
+    }
+    TexturePack_Unload();
+    disc_ready = 0;
+}
+
 /* A wide replacement and one replacement per row describe the same 4x4
  * upload. A later-loaded pack replaces every covered row, regardless of
  * whether its entry is wide or one-row specific. */
@@ -740,7 +810,12 @@ static void bank_sprites(void)
 int main(void)
 {
     char path[1024], problems[256];
+    unsigned now, ahead, shared, made_now, made_ahead, made_shared;
+    int threads;
     assert(scratch_dir(root, sizeof(root), "memories-texture-pack"));
+    /* No pack image wanted yet: no thread to read one. */
+    TexturePack_DecodeStats(&now, &ahead, &shared, &threads);
+    assert(threads == 0);
     make_dir("pack");
     write_text("pack/a.png", "\x89PNG\r\n\x1a\n");
     write_text("pack/manifest.json",
@@ -767,13 +842,18 @@ int main(void)
     named_assets();
     named_folder();
     shared_word();
+    read_ahead();
     rank_preference();
     large_rank_preference();
     duplicate_settings();
     bank_sprites();
     field_thumbnail(0);
     field_thumbnail(1);
+    /* A made image is read where it is wanted, by none of the threads. */
+    TexturePack_DecodeStats(&made_now, &made_ahead, &made_shared, &threads);
     made_image();
+    TexturePack_DecodeStats(&now, &ahead, &shared, &threads);
+    assert(now == made_now && ahead == made_ahead && shared == made_shared);
     stp_palette();
     puts("texture pack tests passed");
     return 0;

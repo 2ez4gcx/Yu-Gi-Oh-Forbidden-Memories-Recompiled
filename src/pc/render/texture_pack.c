@@ -7,6 +7,7 @@
 #include "pc/compat/signal.h"
 #include "pc/sdk/disc.h"
 #include <png.h>
+#include <pthread.h>
 #include <time.h>
 #include <unistd.h>
 #include <stdio.h>
@@ -36,7 +37,9 @@ typedef struct Entry {
     int made;      /* the port made the words (TexturePack_AddMade): the image is this rectangle of the PNG */
     int see_through; /* a made image that keeps the PNG's alpha (TexturePack_AddMadeSeeThrough) */
     int source_x, source_y, source_w, source_h;
+    struct Decode *decode; /* the read whose image and texels these are (admit); NULL: its own */
 } Entry;
+static void entry_release(Entry *entry);
 
 /* Named replacements use the extractor's layouts, compiled into the game. */
 typedef struct AssetSpec {
@@ -545,43 +548,93 @@ static int lookup_first(uint32_t offset, int low)
     return first;
 }
 
-/* The PNG, as the texture's own grid of 15-bit colors: each texel takes
- * the average of the image pixels that fall on it (a pack image is any
- * size), alpha below half is the transparent color. */
-static int load_pixels(Entry *entry)
+/* The PNG at `path` as RGBA, or 0 with `problem` saying why, as the line
+ * the texture pack prints for it. Touches nothing else, so a read-ahead
+ * thread can do it (decode_read). */
+static int read_png(const char *path, unsigned char **rgba, unsigned *width, unsigned *height, char *problem,
+                    size_t size)
 {
     png_image image;
     FILE *file;
-    unsigned char *rgba;
-    char path[1200];
-    int width = entry->words * per_word(entry->bpp), height = entry->rows, x, y;
-    unsigned image_width, image_height;
-    if (entry->pixels || entry->failed) return entry->pixels != NULL;
-    entry->wanted = 0;
-    snprintf(path, sizeof(path), "%s", entry->file);
     memset(&image, 0, sizeof(image));
     image.version = PNG_IMAGE_VERSION;
+    *rgba = NULL;
     file = fopen(path, "rb");
     if (!file || !png_image_begin_read_from_stdio(&image, file)) {
-        fprintf(stderr, "memories-pc: texture pack: %s cannot be read: %s\n", path, image.message);
+        snprintf(problem, size, "memories-pc: texture pack: %s cannot be read: %s\n", path, image.message);
         if (file) fclose(file);
-        entry->failed = 1;
         return 0;
     }
     image.format = PNG_FORMAT_RGBA;
-    rgba = malloc(PNG_IMAGE_SIZE(image));
-    if (!rgba || !png_image_finish_read(&image, NULL, rgba, 0, NULL)) {
-        fprintf(stderr, "memories-pc: texture pack: %s cannot be read: %s\n", path, rgba ? image.message : "out of memory");
-        free(rgba);
+    *rgba = malloc(PNG_IMAGE_SIZE(image));
+    if (!*rgba || !png_image_finish_read(&image, NULL, *rgba, 0, NULL)) {
+        snprintf(problem, size, "memories-pc: texture pack: %s cannot be read: %s\n", path,
+                 *rgba ? image.message : "out of memory");
+        free(*rgba);
+        *rgba = NULL;
         fclose(file);
         png_image_free(&image);
-        entry->failed = 1;
         return 0;
     }
     fclose(file);
-    image_width = image.width;
-    image_height = image.height;
+    *width = image.width;
+    *height = image.height;
     png_image_free(&image);
+    return 1;
+}
+
+/* The PNG, as the texture's own grid of 15-bit colors (words x rows at
+ * bpp, the crop's columns): each texel takes the average of the image
+ * pixels that fall on it (a pack image is any size), alpha below half is
+ * the transparent color. NULL out of memory. */
+static uint16_t *resample(const unsigned char *rgba, unsigned image_width, unsigned image_height, int words,
+                          int rows, int bpp, int crop_left, int crop_width)
+{
+    int width = words * per_word(bpp), height = rows, x, y;
+    uint16_t *pixels = calloc((size_t)width * height, sizeof(uint16_t));
+    if (!pixels) return NULL;
+    for (y = 0; y < height; y++) {
+        int sy0 = (int)((long long)y * image_height / height), sy1 = (int)((long long)(y + 1) * image_height / height);
+        if (sy1 <= sy0) sy1 = sy0 + 1;
+        for (x = crop_left; x < crop_left + crop_width && x < width; x++) {
+            int px = x - crop_left;
+            int sx0 = (int)((long long)px * image_width / crop_width);
+            int sx1 = (int)((long long)(px + 1) * image_width / crop_width);
+            unsigned long r = 0, g = 0, b = 0, a = 0, n = 0;
+            int sx, sy;
+            if (sx1 <= sx0) sx1 = sx0 + 1;
+            for (sy = sy0; sy < sy1 && sy < (int)image_height; sy++) {
+                for (sx = sx0; sx < sx1 && sx < (int)image_width; sx++) {
+                    const unsigned char *p = rgba + ((size_t)sy * image_width + sx) * 4;
+                    r += p[0]; g += p[1]; b += p[2]; a += p[3]; n++;
+                }
+            }
+            if (n && a / n >= 128) {
+                uint16_t color = (uint16_t)(((r / n) >> 3) | (((g / n) >> 3) << 5) | (((b / n) >> 3) << 10));
+                /* Black stays opaque: 0x8000 alone is transparent. */
+                pixels[y * width + x] = color ? (uint16_t)(color | 0x8000) : TEXTURE_SHADOW_BLACK;
+            } else {
+                pixels[y * width + x] = 0x8000; /* painted transparent: replaced, by nothing */
+            }
+        }
+    }
+    return pixels;
+}
+
+/* The entry's image and texels, read here and now: a made entry's, or a
+ * pack image's when no read-ahead thread could be had (admit). */
+static int load_pixels(Entry *entry)
+{
+    unsigned char *rgba;
+    char problem[1400];
+    unsigned image_width, image_height;
+    if (entry->pixels || entry->failed) return entry->pixels != NULL;
+    entry->wanted = 0;
+    if (!read_png(entry->file, &rgba, &image_width, &image_height, problem, sizeof(problem))) {
+        fputs(problem, stderr);
+        entry->failed = 1;
+        return 0;
+    }
     if (entry->made) {
         /* The part of the mod's picture its card shows, opaque over black
          * as the card's own art is made (art.c); or, for a picture with
@@ -591,7 +644,8 @@ static int load_pixels(Entry *entry)
         if (entry->source_x + entry->source_w <= (int)image_width && entry->source_y + entry->source_h <= (int)image_height)
             cut = malloc((size_t)entry->source_w * entry->source_h * 4);
         if (!cut) {
-            fprintf(stderr, "memories-pc: texture pack: %s changed since the card was made, or out of memory\n", path);
+            fprintf(stderr, "memories-pc: texture pack: %s changed since the card was made, or out of memory\n",
+                    entry->file);
             free(rgba);
             entry->failed = 1;
             return 0;
@@ -615,37 +669,13 @@ static int load_pixels(Entry *entry)
         image_width = (unsigned)entry->source_w;
         image_height = (unsigned)entry->source_h;
     }
-    entry->pixels = calloc((size_t)width * height, sizeof(uint16_t));
+    entry->pixels = resample(rgba, image_width, image_height, entry->words, entry->rows, entry->bpp,
+                             entry->crop_left, entry->crop_width);
     if (!entry->pixels) {
-        fprintf(stderr, "memories-pc: texture pack: %s: out of memory\n", path);
+        fprintf(stderr, "memories-pc: texture pack: %s: out of memory\n", entry->file);
         free(rgba);
         entry->failed = 1;
         return 0;
-    }
-    for (y = 0; y < height; y++) {
-        int sy0 = (int)((long long)y * image_height / height), sy1 = (int)((long long)(y + 1) * image_height / height);
-        if (sy1 <= sy0) sy1 = sy0 + 1;
-        for (x = entry->crop_left; x < entry->crop_left + entry->crop_width && x < width; x++) {
-            int px = x - entry->crop_left;
-            int sx0 = (int)((long long)px * image_width / entry->crop_width);
-            int sx1 = (int)((long long)(px + 1) * image_width / entry->crop_width);
-            unsigned long r = 0, g = 0, b = 0, a = 0, n = 0;
-            int sx, sy;
-            if (sx1 <= sx0) sx1 = sx0 + 1;
-            for (sy = sy0; sy < sy1 && sy < (int)image_height; sy++) {
-                for (sx = sx0; sx < sx1 && sx < (int)image_width; sx++) {
-                    const unsigned char *p = rgba + ((size_t)sy * image_width + sx) * 4;
-                    r += p[0]; g += p[1]; b += p[2]; a += p[3]; n++;
-                }
-            }
-            if (n && a / n >= 128) {
-                uint16_t color = (uint16_t)(((r / n) >> 3) | (((g / n) >> 3) << 5) | (((b / n) >> 3) << 10));
-                /* Black stays opaque: 0x8000 alone is transparent. */
-                entry->pixels[y * width + x] = color ? (uint16_t)(color | 0x8000) : TEXTURE_SHADOW_BLACK;
-            } else {
-                entry->pixels[y * width + x] = 0x8000; /* painted transparent: replaced, by nothing */
-            }
-        }
     }
     entry->image = rgba;
     entry->image_width = (int)image_width;
@@ -988,8 +1018,7 @@ static int resolve(void)
         if (base < 0) {
             free(entry->file);
             free(entry->row_offsets);
-            free(entry->pixels);
-            free(entry->image);
+            entry_release(entry);
             continue;
         }
         entry->offset += (uint32_t)base;
@@ -1214,8 +1243,7 @@ static void free_entries(void)
     for (i = 0; i < entry_count; i++) {
         free(entries[i].file);
         free(entries[i].row_offsets);
-        free(entries[i].pixels);
-        free(entries[i].image);
+        entry_release(&entries[i]);
     }
     free(entries);
     entries = NULL;
@@ -2031,6 +2059,366 @@ void TexturePack_ReadStats(unsigned *images, unsigned *us, unsigned *max_us)
     read_images = read_us = read_max_us = 0;
 }
 
+/* Pack images read on other threads. A PNG of the pack can take 10-25 ms
+ * to decode (a 1024x1024 sheet; Windows, 18 October 2026), and a screen
+ * asks for twenty at once: the Build Deck's sheet is read through one
+ * palette per icon, each its own PNG of the whole sheet, so entering it
+ * held one frame 213-340 ms here and 413-523 ms on a phone (SD888); with
+ * what follows, 22 ms here (the mod-3d-monsters replay with the HD pack at
+ * Internal 4x: the longest Service, all reads 124 ms instead of 609).
+ *
+ * What is drawn stays what it was: TexturePack_Service gives an upload or a
+ * primitive the image it asked for before the next frame, as before, and
+ * waits for it if need be (a replay with a pack checks the frames the
+ * software GPU drew from those images, x64-data-mods). The wait is shorter:
+ *  - the images one Service wants are read side by side, on DECODE_THREADS
+ *    threads and on the main thread, which takes a waiting one itself
+ *    (reads ahead leave one thread to these);
+ *  - when a sheet's head is first given its image, the other readings of
+ *    the same words (its other palettes) are read ahead, while nothing waits
+ *    for them: the game draws them only later, the Build Deck's icons 6 s
+ *    after the sheet came up, a duel field's bands 10 frames. A read ahead
+ *    is no entry's until the game asks for it, so it changes nothing drawn;
+ *    those no entry has yet are kept up to decode_ahead_limit (192 MB, 96
+ *    on Android, 48 in a 32-bit game; MEMORIES_PACK_READ_AHEAD), the oldest
+ *    dropped first;
+ *  - entries of one PNG and one geometry (the card frames' are named by ten
+ *    entries, one per screen) share its image and texels, read once.
+ * Uploads and primitives (paint, prepare) only set `wanted`, as before: they
+ * can run from the interrupt tick, where no lock may be taken. Made images
+ * (TexturePack_AddMade) are still read where they are wanted (load_pixels).
+ * No thread exists until a pack's image is first wanted. */
+#define DECODE_THREADS 3
+enum { DECODE_QUEUED, DECODE_RUNNING, DECODE_DONE };
+typedef struct Decode {
+    struct Decode *next;
+    char *file;
+    int words, rows, bpp, crop_left, crop_width; /* what `pixels` is resampled to */
+    int state;
+    int now;     /* a Service waits for it; else it is read ahead */
+    int ahead;   /* done ahead and no entry's yet: counted in decode_ahead_bytes */
+    int users;   /* the entries whose image it is */
+    int discard; /* let go while being read: the thread frees it */
+    unsigned char *image; /* NULL once done: the read failed, `problem` says why */
+    unsigned image_width, image_height;
+    uint16_t *pixels;
+    size_t bytes;
+    char problem[1400];
+} Decode;
+static pthread_mutex_t decode_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t decode_work = PTHREAD_COND_INITIALIZER, decode_done = PTHREAD_COND_INITIALIZER;
+static Decode *decodes; /* oldest first: reads ahead are taken in the order asked */
+static int decode_threads, decode_threads_tried, decode_ahead_running;
+static size_t decode_ahead_bytes, decode_ahead_limit;
+static unsigned decode_now_count, decode_ahead_count, decode_shared_count;
+
+static void decode_free(Decode *decode)
+{
+    free(decode->file);
+    free(decode->image);
+    free(decode->pixels);
+    free(decode);
+}
+
+static void decode_unlink(Decode *decode)
+{
+    Decode **at = &decodes;
+    while (*at && *at != decode) at = &(*at)->next;
+    if (*at) *at = decode->next;
+    if (decode->ahead) decode_ahead_bytes -= decode->bytes;
+}
+
+/* The read itself, with the lock let go: a job's file and geometry stay as
+ * they are while it runs. */
+static void decode_read(Decode *decode)
+{
+    unsigned char *rgba;
+    unsigned width, height;
+    if (!read_png(decode->file, &rgba, &width, &height, decode->problem, sizeof(decode->problem))) return;
+    decode->pixels = resample(rgba, width, height, decode->words, decode->rows, decode->bpp, decode->crop_left,
+                              decode->crop_width);
+    if (!decode->pixels) {
+        snprintf(decode->problem, sizeof(decode->problem), "memories-pc: texture pack: %s: out of memory\n",
+                 decode->file);
+        free(rgba);
+        return;
+    }
+    decode->image = rgba;
+    decode->image_width = width;
+    decode->image_height = height;
+    decode->bytes = (size_t)width * height * 4 +
+                    (size_t)decode->words * per_word(decode->bpp) * decode->rows * sizeof(uint16_t);
+}
+
+/* With the lock held, after decode_read. A read ahead that fails, or that
+ * would pass the limit alone, is dropped (the game reads it again if it
+ * ever asks); so are older ones, to make room for it. */
+static void decode_finish(Decode *decode)
+{
+    decode->state = DECODE_DONE;
+    if (decode->discard) {
+        decode_unlink(decode);
+        decode_free(decode);
+    } else if (!decode->now && !decode->users) {
+        if (!decode->image || decode->bytes > decode_ahead_limit) {
+            decode_unlink(decode);
+            decode_free(decode);
+        } else {
+            /* Room made by letting the oldest go: what a screen draws soon
+             * came up last (the Build Deck's sheet, read at boot, would
+             * otherwise keep a duel's out). */
+            Decode *at, *next;
+            for (at = decodes; at && decode_ahead_bytes + decode->bytes > decode_ahead_limit; at = next) {
+                next = at->next;
+                /* Not one this Service has asked for and is about to take. */
+                if (!at->ahead || at->now) continue;
+                decode_unlink(at);
+                decode_free(at);
+            }
+            decode->ahead = 1;
+            decode_ahead_bytes += decode->bytes;
+        }
+    }
+    pthread_cond_broadcast(&decode_done);
+}
+
+/* A job not started, those a Service waits for first. Reads ahead keep one
+ * thread free, for what the next Service wants. */
+static Decode *decode_next(int only_now)
+{
+    Decode *at, *ahead = NULL;
+    for (at = decodes; at; at = at->next) {
+        if (at->state != DECODE_QUEUED) continue;
+        if (at->now) return at;
+        if (!ahead) ahead = at;
+    }
+    return only_now || decode_ahead_running >= DECODE_THREADS - 1 ? NULL : ahead;
+}
+
+static void *decode_thread(void *unused)
+{
+    (void)unused;
+    pthread_mutex_lock(&decode_lock);
+    for (;;) {
+        Decode *job = decode_next(0);
+        int ahead;
+        if (!job) {
+            pthread_cond_wait(&decode_work, &decode_lock);
+            continue;
+        }
+        job->state = DECODE_RUNNING;
+        ahead = !job->now;
+        decode_ahead_running += ahead;
+        pthread_mutex_unlock(&decode_lock);
+        decode_read(job);
+        pthread_mutex_lock(&decode_lock);
+        decode_ahead_running -= ahead;
+        decode_finish(job);
+        if (ahead) pthread_cond_signal(&decode_work); /* another may read ahead now */
+    }
+    return NULL;
+}
+
+/* The threads, the first time a pack's image is wanted. MEMORIES_PACK_READ_AHEAD
+ * (megabytes, 0 none) sets how much may be read ahead; read here, on the
+ * main thread. None started: the main thread reads all a Service wants. */
+static void decode_start(void)
+{
+    const char *named;
+    sigset_t all, previous;
+    int i;
+    if (decode_threads_tried) return;
+    decode_threads_tried = 1;
+    named = getenv("MEMORIES_PACK_READ_AHEAD");
+    /* A 32-bit game has 2-4 GB to hold every image it has read; a phone
+     * holds the pack's images beside them and is the app the system ends
+     * first when it is in the background (96: the Build Deck's 34 sheets
+     * are partly read again, 34 ms instead of 22 on Windows). */
+#ifdef __ANDROID__
+    decode_ahead_limit = sizeof(void *) > 4 ? (size_t)96 << 20 : (size_t)48 << 20;
+#else
+    decode_ahead_limit = sizeof(void *) > 4 ? (size_t)192 << 20 : (size_t)48 << 20;
+#endif
+    if (named && *named) { /* clamped: 4096 would wrap to 0 on a 32-bit game, -1 to no cap */
+        unsigned long megabytes = strtoul(named, NULL, 10);
+        size_t most = sizeof(void *) > 4 ? (size_t)65536 : (size_t)1024;
+        decode_ahead_limit = (megabytes > most ? most : (size_t)megabytes) << 20;
+    }
+    /* The timer signal is the game's interrupt and must stay on the main thread. */
+    sigfillset(&all);
+    pthread_sigmask(SIG_BLOCK, &all, &previous);
+    for (i = 0; i < DECODE_THREADS; i++) {
+        pthread_t thread;
+        if (pthread_create(&thread, NULL, decode_thread, NULL)) break;
+        pthread_detach(thread);
+        decode_threads++;
+    }
+    pthread_sigmask(SIG_SETMASK, &previous, NULL);
+    if (decode_threads < DECODE_THREADS)
+        fprintf(stderr, "memories-pc: texture pack: %d of %d read-ahead threads started\n", decode_threads,
+                DECODE_THREADS);
+}
+
+static int decode_same(const Decode *decode, const Entry *entry)
+{
+    return !decode->discard && decode->words == entry->words && decode->rows == entry->rows &&
+           decode->bpp == entry->bpp && decode->crop_left == entry->crop_left &&
+           decode->crop_width == entry->crop_width && !strcmp(decode->file, entry->file);
+}
+
+/* With the lock held: the read of the entry's PNG, asked for now if it is
+ * not yet; `now` when a Service waits for it. NULL out of memory. */
+static Decode *decode_ask(const Entry *entry, int now)
+{
+    Decode *decode, **end = &decodes;
+    for (decode = decodes; decode; decode = decode->next) {
+        if (decode_same(decode, entry)) {
+            decode->now |= now;
+            if (now && decode->state == DECODE_QUEUED) pthread_cond_signal(&decode_work);
+            return decode;
+        }
+        end = &decode->next;
+    }
+    if (!now && (!decode_threads || !decode_ahead_limit)) return NULL;
+    if (!(decode = calloc(1, sizeof(*decode))) || !(decode->file = strdup(entry->file))) {
+        free(decode);
+        return NULL;
+    }
+    decode->words = entry->words;
+    decode->rows = entry->rows;
+    decode->bpp = entry->bpp;
+    decode->crop_left = entry->crop_left;
+    decode->crop_width = entry->crop_width;
+    decode->state = DECODE_QUEUED;
+    decode->now = now;
+    *end = decode;
+    pthread_cond_signal(&decode_work);
+    return decode;
+}
+
+/* The entry's image, from its read, waited for (and done here when no
+ * thread has started it). 1 it has its image, 0 it failed. */
+static int admit(Entry *entry)
+{
+    Decode *decode;
+    if (entry->pixels || entry->failed) return entry->pixels != NULL;
+    pthread_mutex_lock(&decode_lock);
+    decode = decode_ask(entry, 1);
+    if (!decode) {
+        pthread_mutex_unlock(&decode_lock);
+        return load_pixels(entry);
+    }
+    while (decode->state != DECODE_DONE) {
+        /* Any read a Service waits for that no thread has taken, this one first. */
+        Decode *job = decode->state == DECODE_QUEUED ? decode : decode_next(1);
+        if (!job) {
+            pthread_cond_wait(&decode_done, &decode_lock);
+            continue;
+        }
+        job->state = DECODE_RUNNING;
+        pthread_mutex_unlock(&decode_lock);
+        decode_read(job);
+        pthread_mutex_lock(&decode_lock);
+        decode_finish(job);
+    }
+    entry->wanted = 0;
+    if (!decode->image) {
+        fputs(decode->problem, stderr);
+        entry->failed = 1;
+        if (!decode->users) {
+            decode_unlink(decode);
+            decode_free(decode);
+        }
+        pthread_mutex_unlock(&decode_lock);
+        return 0;
+    }
+    if (decode->users) decode_shared_count++;
+    else if (decode->ahead) decode_ahead_count++;
+    else decode_now_count++;
+    if (decode->ahead) {
+        decode->ahead = 0;
+        decode_ahead_bytes -= decode->bytes;
+    }
+    decode->users++;
+    entry->decode = decode;
+    entry->image = decode->image;
+    entry->image_width = (int)decode->image_width;
+    entry->image_height = (int)decode->image_height;
+    entry->pixels = decode->pixels;
+    pthread_mutex_unlock(&decode_lock);
+    return 1;
+}
+
+/* The entry's image and texels let go: its own, or its share of a read. */
+static void entry_release(Entry *entry)
+{
+    if (entry->decode) {
+        pthread_mutex_lock(&decode_lock);
+        if (!--entry->decode->users) {
+            decode_unlink(entry->decode);
+            decode_free(entry->decode);
+        }
+        pthread_mutex_unlock(&decode_lock);
+    } else {
+        free(entry->pixels);
+        free(entry->image);
+    }
+    entry->decode = NULL;
+    entry->pixels = NULL;
+    entry->image = NULL;
+}
+
+/* The reads no entry has, when the packs go: those ahead and those still
+ * waiting; one being read is freed by its thread. */
+static void decode_drop_unused(void)
+{
+    Decode *at, *next;
+    pthread_mutex_lock(&decode_lock);
+    for (at = decodes; at; at = next) {
+        next = at->next;
+        if (at->users) continue;
+        if (at->state == DECODE_RUNNING) {
+            at->discard = 1;
+            at->now = 0;
+            continue;
+        }
+        decode_unlink(at);
+        decode_free(at);
+    }
+    /* Until those under way are done: a thread holding a PNG open after the
+     * unload would keep Windows from removing or replacing the mod's file. */
+    for (at = decodes; at;) {
+        if (at->discard) {
+            pthread_cond_wait(&decode_done, &decode_lock);
+            at = decodes;
+        } else at = at->next;
+    }
+    pthread_mutex_unlock(&decode_lock);
+}
+
+void TexturePack_DecodeStats(unsigned *now, unsigned *ahead, unsigned *shared, int *threads)
+{
+    pthread_mutex_lock(&decode_lock);
+    *now = decode_now_count;
+    *ahead = decode_ahead_count;
+    *shared = decode_shared_count;
+    *threads = decode_threads;
+    pthread_mutex_unlock(&decode_lock);
+}
+
+void TexturePack_DecodeSettle(void)
+{
+    Decode *at;
+    pthread_mutex_lock(&decode_lock);
+    for (at = decodes; at;) {
+        if ((at->state == DECODE_QUEUED && decode_threads) || at->state == DECODE_RUNNING) {
+            pthread_cond_wait(&decode_done, &decode_lock);
+            at = decodes;
+        } else at = at->next;
+    }
+    pthread_mutex_unlock(&decode_lock);
+}
+
 /* Between frames, on the main thread with the clock held: the disc's
  * directory and the images an upload asked for, then the words they cover. */
 void TexturePack_Service(void)
@@ -2053,18 +2441,37 @@ void TexturePack_Service(void)
         everywhere = 1;
     }
     if (wanted_images && resolved) {
-        /* The PNGs are read here, on the main thread between two frames:
-         * the frame they are read in waits for them (TexturePack_ReadStats). */
+        /* The PNGs asked for are given here, between two frames, read on the
+         * threads beside the main one: the frame waits for them
+         * (TexturePack_ReadStats counts the entries given an image). */
         struct timespec t0, t1;
         unsigned loaded = 0;
         wanted_images = 0;
         clock_gettime(CLOCK_MONOTONIC, &t0);
+        /* All asked for first, so that the threads read them side by side. */
+        for (i = 0; i < entry_count; i++) {
+            if (!entries[i].wanted || entries[i].made || entries[i].pixels || entries[i].failed) continue;
+            decode_start();
+            pthread_mutex_lock(&decode_lock);
+            decode_ask(&entries[i], 1);
+            pthread_mutex_unlock(&decode_lock);
+        }
         /* Another reading of words already painted (prepare) is sampled
          * from its image alone: only the uploads that waited are painted. */
         for (i = 0; i < entry_count; i++) {
-            if (entries[i].wanted && load_pixels(&entries[i])) {
-                painted = 1;
-                loaded++;
+            if (!entries[i].wanted) continue;
+            if (!(entries[i].made ? load_pixels(&entries[i]) : admit(&entries[i]))) continue;
+            painted = 1;
+            loaded++;
+            /* A head with its image: its other palettes, read ahead. */
+            if (!entries[i].made && head_of(i) == i) {
+                int j;
+                pthread_mutex_lock(&decode_lock);
+                for (j = i + 1; j < entry_count && sibling(&entries[i], &entries[j]); j++) {
+                    if (!entries[j].made && !entries[j].pixels && !entries[j].failed && !entries[j].wanted)
+                        decode_ask(&entries[j], 0);
+                }
+                pthread_mutex_unlock(&decode_lock);
             }
         }
         if (loaded) {
@@ -2092,7 +2499,10 @@ void TexturePack_Service(void)
 
 void TexturePack_Unload(void)
 {
-    if (!entries) return;
+    if (!entries) {
+        decode_drop_unused(); /* reads ahead a failed load left (install) */
+        return;
+    }
     TextureDump_Paint = NULL;
     TextureDump_Prepare = NULL;
     TextureDump_Sample = NULL;
@@ -2105,6 +2515,7 @@ void TexturePack_Unload(void)
     }
     if (entry_of) memset(entry_of, 0, (size_t)SOFT_GPU_WIDTH * SOFT_GPU_HEIGHT * sizeof(*entry_of));
     free_entries();
+    decode_drop_unused();
     resolved = 0;
     wanted_resolve = wanted_images = wanted_rediscover = 0;
     waiting_count = 0;

@@ -1336,6 +1336,23 @@ rate, VBlank rate and sequencer rate, and the spread of the time between
 two `VSync(0)` returns (`frame interval`); every 600 VBlanks how late they
 came against when they were due (`VBlank lateness`).
 
+Where a frame's time goes, from the same channel (Debug > Trace > Frames
+turns it on while the game runs; on Android the lines go to `adb logcat -s
+memories`), every 120 frames: `game ... present ...` (libetc.c: the game's
+code with the software GPU, which rasterizes every primitive into the
+console's VRAM at 1x whatever the internal resolution, against
+`Memories_PresentDisplay`); `draws:` (the software GPU's share of the
+game's time, per `DrawOTag`); `OpenGL picture: ... per replay` (the CPU
+side of the OpenGL picture's replay) with what it costs the GPU and what
+goes up to it (`uploads per replay`: VRAM whole after each replay, the
+texture pack's two maps whenever they changed); and `present phases`
+(sdl.c: the events and menu, the picture's copy into the window's texture,
+and the swap, which waits while the GPU is behind or, with vsync, for the
+display; and the texture pack's PNGs read on the main thread, which the
+frame they are read in waits for). A long swap is the GPU (the internal
+resolution, anti-aliasing, widescreen); a long game is the CPU, which the
+internal resolution does not change.
+
 **Software OpenGL on Wayland.** The 32-bit build on an NVIDIA Wayland
 desktop gets Mesa's `llvmpipe` through EGL (there is no 32-bit NVIDIA EGL
 Wayland path), and a software renderer takes 6 ms and more to present a

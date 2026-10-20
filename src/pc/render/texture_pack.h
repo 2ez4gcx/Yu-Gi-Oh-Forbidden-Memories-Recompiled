@@ -39,6 +39,10 @@ void TexturePack_Unload(void);
 /* Once a frame, on the main thread: reads what uploads asked for (an
  * upload can come from the interrupt tick, where reading is not safe). */
 void TexturePack_Service(void);
+/* The images it gave since the last call (PNGs the frame they are given in
+ * waits for), the microseconds that took in all, and the longest one
+ * service took; then counts again from 0. For MEMORIES_TRACE=frames (sdl.c). */
+void TexturePack_ReadStats(unsigned *images, unsigned *us, unsigned *max_us);
 /* The pack's images are read on other threads (texture_pack.c, Decode),
  * and still given before the next frame to what asked for them. How many
  * Services gave an image read for them then, read ahead, or already read

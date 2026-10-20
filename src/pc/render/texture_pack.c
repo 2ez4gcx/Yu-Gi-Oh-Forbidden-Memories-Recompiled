@@ -8,6 +8,7 @@
 #include "pc/sdk/disc.h"
 #include <png.h>
 #include <pthread.h>
+#include <time.h>
 #include <unistd.h>
 #include <stdio.h>
 #include <limits.h>
@@ -2046,6 +2047,18 @@ int TexturePack_LoadAssetFolder(const char *directory, unsigned rank, int (*part
     return result;
 }
 
+/* Images TexturePack_Service read since the last TexturePack_ReadStats, and
+ * the time they took, in all and in the longest service. Main thread only. */
+static unsigned read_images, read_us, read_max_us;
+
+void TexturePack_ReadStats(unsigned *images, unsigned *us, unsigned *max_us)
+{
+    *images = read_images;
+    *us = read_us;
+    *max_us = read_max_us;
+    read_images = read_us = read_max_us = 0;
+}
+
 /* Pack images read on other threads. A PNG of the pack can take 10-25 ms
  * to decode (a 1024x1024 sheet; Windows, 18 October 2026), and a screen
  * asks for twenty at once: the Build Deck's sheet is read through one
@@ -2428,7 +2441,13 @@ void TexturePack_Service(void)
         everywhere = 1;
     }
     if (wanted_images && resolved) {
+        /* The PNGs asked for are given here, between two frames, read on the
+         * threads beside the main one: the frame waits for them
+         * (TexturePack_ReadStats counts the entries given an image). */
+        struct timespec t0, t1;
+        unsigned loaded = 0;
         wanted_images = 0;
+        clock_gettime(CLOCK_MONOTONIC, &t0);
         /* All asked for first, so that the threads read them side by side. */
         for (i = 0; i < entry_count; i++) {
             if (!entries[i].wanted || entries[i].made || entries[i].pixels || entries[i].failed) continue;
@@ -2443,6 +2462,7 @@ void TexturePack_Service(void)
             if (!entries[i].wanted) continue;
             if (!(entries[i].made ? load_pixels(&entries[i]) : admit(&entries[i]))) continue;
             painted = 1;
+            loaded++;
             /* A head with its image: its other palettes, read ahead. */
             if (!entries[i].made && head_of(i) == i) {
                 int j;
@@ -2453,6 +2473,14 @@ void TexturePack_Service(void)
                 }
                 pthread_mutex_unlock(&decode_lock);
             }
+        }
+        if (loaded) {
+            unsigned us;
+            clock_gettime(CLOCK_MONOTONIC, &t1);
+            us = (unsigned)((t1.tv_sec - t0.tv_sec) * 1000000 + (t1.tv_nsec - t0.tv_nsec) / 1000);
+            read_images += loaded;
+            read_us += us;
+            if (us > read_max_us) read_max_us = us;
         }
     }
     if (everywhere || (painted && waiting_count > WAITING_AREAS)) {

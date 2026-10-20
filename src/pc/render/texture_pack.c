@@ -2226,7 +2226,11 @@ static void decode_start(void)
 #else
     decode_ahead_limit = sizeof(void *) > 4 ? (size_t)192 << 20 : (size_t)48 << 20;
 #endif
-    if (named && *named) decode_ahead_limit = (size_t)strtoul(named, NULL, 10) << 20;
+    if (named && *named) { /* clamped: 4096 would wrap to 0 on a 32-bit game, -1 to no cap */
+        unsigned long megabytes = strtoul(named, NULL, 10);
+        size_t most = sizeof(void *) > 4 ? (size_t)65536 : (size_t)1024;
+        decode_ahead_limit = (megabytes > most ? most : (size_t)megabytes) << 20;
+    }
     /* The timer signal is the game's interrupt and must stay on the main thread. */
     sigfillset(&all);
     pthread_sigmask(SIG_BLOCK, &all, &previous);
@@ -2367,6 +2371,14 @@ static void decode_drop_unused(void)
         }
         decode_unlink(at);
         decode_free(at);
+    }
+    /* Until those under way are done: a thread holding a PNG open after the
+     * unload would keep Windows from removing or replacing the mod's file. */
+    for (at = decodes; at;) {
+        if (at->discard) {
+            pthread_cond_wait(&decode_done, &decode_lock);
+            at = decodes;
+        } else at = at->next;
     }
     pthread_mutex_unlock(&decode_lock);
 }

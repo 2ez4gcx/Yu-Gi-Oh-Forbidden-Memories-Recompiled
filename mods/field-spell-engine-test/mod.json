@@ -18,7 +18,7 @@
         "image": "fields/normal.png"
       },
       {
-        "name": "Toon",
+        "name": "Toon World",
         "image": "fields/toon.png",
         "mirror": false
       }
@@ -33,7 +33,7 @@
         {
           "when": "summon",
           "do": "change_field",
-          "field": "Toon"
+          "field": "Toon World"
         }
       ]
     },

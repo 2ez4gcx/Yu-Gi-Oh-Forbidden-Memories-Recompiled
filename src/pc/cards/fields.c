@@ -35,26 +35,36 @@ static const struct { int target_y, source_y, rows, palette; } floor_parts[] = {
     {104, 150, 52, 0x7F40}, {156, 202, 52, 0x7F60}
 };
 
-static void register_picture(int field, const char *path, unsigned rank)
+/* 1 when every one of the five floor strips registered; 0 when any one of
+ * them did not (a malformed PNG, a dimension Fields.h's callers never see,
+ * out of memory). The five are slices of one image, so a field's picture
+ * is all of them or none: a mod's declared picture must never be treated
+ * as present (Fields_Picture, Fields_UnmirrorCentre) when it is not really
+ * there to show -- an unmirrored centre strip would otherwise remap the
+ * UVs of whatever retail art is still showing underneath instead. */
+static int register_picture(int field, const char *path, unsigned rank)
 {
     unsigned base;
     unsigned group;
-    int i;
+    int i, ok = 1;
     /* A custom field's rule identity is its field-bank id, not its physical
      * board upload.  It borrows a retail upload only because the original
      * board model exposes six such locations; TexturePack_SelectGroup keeps
      * every custom image in a separate bank so borrowed locations never
      * overwrite each other. */
-    if (field < FIELD_NORMAL || field > FIELDS_MAX || !path) return;
+    if (field < FIELD_NORMAL || field > FIELDS_MAX || !path) return 0;
     group = field > FIELDS_RETAIL ? (unsigned)field : 0;
     if (field > FIELDS_RETAIL) field = 1 + (field - FIELDS_RETAIL - 1) % FIELDS_RETAIL;
     base = (unsigned)(DUEL_TERRAIN_PACKAGE_FIRST_SECTOR + field * DUEL_TERRAIN_PACKAGE_SECTOR_COUNT + 203) * 2048;
     for (i = 0; i < (int)(sizeof(floor_parts) / sizeof(*floor_parts)); i++) {
         const int y = floor_parts[i].target_y, rows = floor_parts[i].rows;
-        TexturePack_AddDiscImageGroup(group, path, "WA_MRG.MRG", base + (unsigned)y * 128, 64, rows, 4,
-                                      base + (unsigned)floor_parts[i].palette, 16, 64, 0, 256,
-                                      0, floor_parts[i].source_y, 256, rows, rank);
+        if (!TexturePack_AddDiscImageGroup(group, path, "WA_MRG.MRG", base + (unsigned)y * 128, 64, rows, 4,
+                                           base + (unsigned)floor_parts[i].palette, 16, 64, 0, 256,
+                                           0, floor_parts[i].source_y, 256, rows, rank)) {
+            ok = 0;
+        }
     }
+    return ok;
 }
 
 static int same_letters(const char *a, const char *b)
@@ -327,7 +337,12 @@ static void add(const char *mod, const char *directory, const JsonValue *manifes
                 } else {
                     fclose(probe);
                     pictures[id] = copy(path);
-                    register_picture(id, pictures[id], rank);
+                    if (pictures[id] && !register_picture(id, pictures[id], rank)) {
+                        Mods_Note(mod, "fields: fields[%d]: \"picture\": %s could not be read as a board image",
+                                  index, picture);
+                        free(pictures[id]);
+                        pictures[id] = NULL;
+                    }
                 }
             }
         }

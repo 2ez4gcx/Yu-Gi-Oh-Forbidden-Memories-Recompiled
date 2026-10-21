@@ -21,6 +21,7 @@ const char *Mods_Id(int mod) { (void)mod; return ""; }
 const char *Mods_Directory(int mod) { (void)mod; return "."; }
 const JsonValue *Mods_Manifest(int mod) { (void)mod; return NULL; }
 int Paths_Contained(const char *path) { return path && path[0] != '/'; }
+static int texture_pack_call, texture_pack_fail_at = -1;    /* the 0-based call to fail, or -1 for none */
 int TexturePack_AddDiscImageGroup(unsigned group, const char *file, const char *archive, unsigned offset, int words,
                                   int rows, int bpp, unsigned clut_offset, int clut_entries, int stride,
                                   int crop_left, int crop_width, int source_x, int source_y, int source_w,
@@ -29,7 +30,7 @@ int TexturePack_AddDiscImageGroup(unsigned group, const char *file, const char *
     (void)group; (void)file; (void)archive; (void)offset; (void)words; (void)rows; (void)bpp; (void)clut_offset;
     (void)clut_entries; (void)stride; (void)crop_left; (void)crop_width; (void)source_x; (void)source_y;
     (void)source_w; (void)source_h; (void)rank;
-    return 1;
+    return texture_pack_call++ != texture_pack_fail_at;
 }
 static unsigned selected_group = ~0u;
 void TexturePack_SelectGroup(unsigned group) { selected_group = group; }
@@ -71,6 +72,36 @@ int main(void)
     Fields_Add("four", Json_Root(fourth));
     assert(Fields_Find("Custom Normal") == -1 && Fields_Name(0)[0] == 'N' && notes == 4);
     Json_Free(fourth);
+
+    /* A picture whose file exists and opens but whose texture-pack
+     * registration fails for even one of its five floor strips (a
+     * malformed PNG, a bad crop, out of memory) must not leave the field
+     * looking like it has a working picture: an unmirrored centre strip
+     * (Fields_UnmirrorCentre) would otherwise remap the UVs of whatever
+     * retail art is still showing there instead of the picture that
+     * never actually loaded. Failing just the centre strip (floor_parts'
+     * third entry) checks exactly that case, not only a total failure. */
+    {
+        FILE *picture = fopen("fields_test_picture.png", "wb");
+        JsonDocument *fifth = Json_Parse(
+            "{\"fields\":{\"fields\":[{\"name\":\"Scorched\",\"image\":\"fields_test_picture.png\",\"mirror\":false}]}}",
+            error, sizeof(error));
+        assert(picture && fifth);
+        fputs("x", picture);
+        fclose(picture);
+
+        texture_pack_call = 0;
+        texture_pack_fail_at = 2;
+        Fields_Add("five", Json_Root(fifth));
+        texture_pack_fail_at = -1;
+        assert(Fields_Find("Scorched") == 8 && !Fields_Picture(8) && notes == 5);
+        Fields_Activate(8);
+        assert(!Fields_UnmirrorCentre());
+        Fields_ResetActive();
+
+        Json_Free(fifth);
+        remove("fields_test_picture.png");
+    }
 
     Json_Free(first);
     Json_Free(second);

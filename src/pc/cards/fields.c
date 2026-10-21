@@ -1,0 +1,298 @@
+/* Named retail and mod-defined duel fields.  The image is deliberately kept
+ * with the field declaration, rather than folded into terrain_bonus: a board
+ * renderer can select it independently of the rules it gives monsters. */
+#include "fields.h"
+#include "pc/mods/json.h"
+#include "pc/mods/mods.h"
+#include "pc/platform/paths.h"
+#include "pc/render/texture_pack.h"
+#include "game/duel_package.h"
+#include <ctype.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+static const char *const retail_names[FIELDS_RETAIL][2] = {
+    {"Forest", NULL}, {"Wasteland", NULL}, {"Mountain", NULL},
+    {"Sogen", "Meadow"}, {"Umi", "Sea"}, {"Yami", "Dark"}
+};
+#define FIELD_NORMAL 0
+#define FIELD_NORMAL_NAME "Normal"
+static char *names[FIELDS_MAX + 1];
+static char *pictures[FIELDS_MAX + 1];
+static unsigned char declared[FIELDS_MAX + 1];
+static unsigned char mirrors[FIELDS_MAX + 1];
+static int active_field = -1;
+static int built;
+
+/* The floor column of a terrain package: the same five cuts board_art.py
+ * writes to a texture-pack manifest, but an author supplies just one image. */
+static const struct { int target_y, source_y, rows, palette; } floor_parts[] = {
+    /* `source_y` is floor_image/set_floor's consecutive image layout;
+     * target_y is the board package's layout, whose centre lives at 208. */
+    {0,   0, 52, 0x7F00}, {52,  52, 52, 0x7F20}, {208, 104, 46, 0x7F80},
+    {104, 150, 52, 0x7F40}, {156, 202, 52, 0x7F60}
+};
+
+static void register_picture(int field, const char *path, unsigned rank)
+{
+    unsigned base;
+    unsigned group;
+    int i;
+    /* A custom field's rule identity is its field-bank id, not its physical
+     * board upload.  It borrows a retail upload only because the original
+     * board model exposes six such locations; TexturePack_SelectGroup keeps
+     * every custom image in a separate bank so borrowed locations never
+     * overwrite each other. */
+    if (field < FIELD_NORMAL || field > FIELDS_MAX || !path) return;
+    group = field > FIELDS_RETAIL ? (unsigned)field : 0;
+    if (field > FIELDS_RETAIL) field = 1 + (field - FIELDS_RETAIL - 1) % FIELDS_RETAIL;
+    base = (unsigned)(DUEL_TERRAIN_PACKAGE_FIRST_SECTOR + field * DUEL_TERRAIN_PACKAGE_SECTOR_COUNT + 203) * 2048;
+    for (i = 0; i < (int)(sizeof(floor_parts) / sizeof(*floor_parts)); i++) {
+        const int y = floor_parts[i].target_y, rows = floor_parts[i].rows;
+        TexturePack_AddDiscImageGroup(group, path, "WA_MRG.MRG", base + (unsigned)y * 128, 64, rows, 4,
+                                      base + (unsigned)floor_parts[i].palette, 16, 64, 0, 256,
+                                      0, floor_parts[i].source_y, 256, rows, rank);
+    }
+}
+
+static int same_letters(const char *a, const char *b)
+{
+    for (;;) {
+        while (*a && !isalnum((unsigned char)*a) && !((unsigned char)*a & 0x80)) a++;
+        while (*b && !isalnum((unsigned char)*b) && !((unsigned char)*b & 0x80)) b++;
+        if (!*a || !*b) return !*a && !*b;
+        if (tolower((unsigned char)*a++) != tolower((unsigned char)*b++)) return 0;
+    }
+}
+
+static char *copy(const char *text)
+{
+    size_t size = strlen(text) + 1;
+    char *out = malloc(size);
+    if (out) memcpy(out, text, size);
+    return out;
+}
+
+static int name_has_letters(const char *name)
+{
+    for (; *name; name++)
+        if (isalnum((unsigned char)*name) || ((unsigned char)*name & 0x80)) return 1;
+    return 0;
+}
+
+static int is_image(const char *path)
+{
+    const char *extension = strrchr(path, '.');
+    return extension && extension[1] && extension[2] && extension[3] && !extension[4] &&
+           extension[0] == '.' && tolower((unsigned char)extension[1]) == 'p' &&
+           tolower((unsigned char)extension[2]) == 'n' && tolower((unsigned char)extension[3]) == 'g';
+}
+
+static int name_taken(const char *name, int except)
+{
+    int id;
+    if (except != FIELD_NORMAL && same_letters(name, FIELD_NORMAL_NAME)) return 1;
+    for (id = 1; id <= FIELDS_RETAIL; id++)
+        if (id != except && (same_letters(name, retail_names[id - 1][0]) ||
+                             (retail_names[id - 1][1] && same_letters(name, retail_names[id - 1][1])) ||
+                             same_letters(name, Fields_Name(id)))) return 1;
+    for (id = FIELDS_RETAIL + 1; id <= FIELDS_MAX; id++)
+        if (id != except && names[id] && same_letters(name, names[id])) return 1;
+    return 0;
+}
+
+void Fields_Clear(void)
+{
+    int id;
+    for (id = 0; id <= FIELDS_MAX; id++) {
+        free(names[id]);
+        free(pictures[id]);
+        names[id] = pictures[id] = NULL;
+        declared[id] = 0;
+        mirrors[id] = 1;
+    }
+    built = 0;
+    active_field = -1;
+    TexturePack_SelectGroup(0);
+}
+
+void Fields_Activate(int field)
+{
+    active_field = field;
+    TexturePack_SelectGroup(field > FIELDS_RETAIL ? (unsigned)field : 0);
+}
+int Fields_Active(void) { return active_field; }
+int Fields_Carrier(int field) { return field <= FIELDS_RETAIL ? field : 1 + (field - FIELDS_RETAIL - 1) % FIELDS_RETAIL; }
+int Fields_UnmirrorCentre(void)
+{
+    return active_field > FIELDS_RETAIL && active_field <= FIELDS_MAX &&
+           pictures[active_field] != NULL && !mirrors[active_field];
+}
+
+/* The stage model's centre-strip quad: the retail driver reads the same
+ * texture row range (208-253) for both the far half (z >= 0) and the near
+ * half (z < 0), U reversed on the near half, which is how it draws one
+ * picture twice, turned round, across the raised strip. A field opting out
+ * of that (Fields_UnmirrorCentre) wants its one picture read once, right
+ * way round, across the whole strip: each half gets its own half of the 46
+ * rows (208-230 far, 231-253 near, continuing from the far half's at the
+ * seam) and the near half's U unreversed. `uv` is each corner's raw u8 u,
+ * u8 v (v in the high byte); `z` is each corner's model-space Z. Left
+ * untouched unless every corner's V lies in that retail centre band. */
+void Fields_UnmirrorQuadUV(unsigned short uv[4], const int z[4])
+{
+    int i, zsum = 0, far;
+    if (!Fields_UnmirrorCentre()) return;
+    for (i = 0; i < 4; i++) {
+        int v = (uv[i] >> 8) & 0xff;
+        if (v < 208 || v >= 254) return;
+        zsum += z[i];
+    }
+    far = zsum >= 0;
+    for (i = 0; i < 4; i++) {
+        unsigned u = uv[i] & 0xff, v = (uv[i] >> 8) & 0xff;
+        if (far) {
+            v = 208 + (v - 208) / 2;
+        } else {
+            u = 255 - u;
+            v = 253 - (v - 208) / 2;
+        }
+        uv[i] = (unsigned short)((v << 8) | u);
+    }
+}
+
+const char *Fields_Name(int field)
+{
+    if (field == FIELD_NORMAL) return FIELD_NORMAL_NAME;
+    if (field >= 1 && field <= FIELDS_RETAIL)
+        return names[field] ? names[field] : retail_names[field - 1][0];
+    return field > FIELDS_RETAIL && field <= FIELDS_MAX && names[field] ? names[field] : "";
+}
+
+/* Whether Fields_Name(field) is a mod's own word rather than the retail
+ * carrier's (FIELD_NORMAL and an undeclared field never are; a replaced
+ * retail field only is when the mod gave it a "name" of its own). */
+int Fields_HasCustomName(int field)
+{
+    if (field > FIELDS_RETAIL) return Fields_Declared(field);
+    return field >= 1 && field <= FIELDS_RETAIL && names[field] != NULL;
+}
+
+const char *Fields_Picture(int field)
+{
+    return field >= FIELD_NORMAL && field <= FIELDS_MAX ? pictures[field] : NULL;
+}
+
+int Fields_Declared(int field)
+{
+    return field >= 1 && field <= FIELDS_MAX && (field <= FIELDS_RETAIL || declared[field]);
+}
+
+int Fields_Find(const char *name)
+{
+    char *end;
+    long id;
+    if (!name || !*name) return -1;
+    id = strtol(name, &end, 10);
+    if (!*end && id >= 1 && id <= FIELDS_MAX && Fields_Declared((int)id)) return (int)id;
+    if (same_letters(name, FIELD_NORMAL_NAME)) return FIELD_NORMAL;
+    for (int i = 1; i <= FIELDS_RETAIL; i++)
+        if (same_letters(name, retail_names[i - 1][0]) ||
+            (retail_names[i - 1][1] && same_letters(name, retail_names[i - 1][1])) || same_letters(name, Fields_Name(i))) return i;
+    for (int i = FIELDS_RETAIL + 1; i <= FIELDS_MAX; i++)
+        if (names[i] && same_letters(name, names[i])) return i;
+    return -1;
+}
+
+int Fields_Value(const JsonValue *value)
+{
+    if (!value) return -1;
+    if (Json_TypeOf(value) == JSON_NUMBER) {
+        long id = Json_Number(value, -1);
+        return id >= 1 && id <= FIELDS_MAX && Fields_Declared((int)id) ? (int)id : -1;
+    }
+    return Json_TypeOf(value) == JSON_STRING ? Fields_Find(Json_String(value, "")) : -1;
+}
+
+static int next_id(void)
+{
+    int id;
+    for (id = FIELDS_RETAIL + 1; id <= FIELDS_MAX; id++) if (!declared[id]) return id;
+    return -1;
+}
+
+static void add(const char *mod, const char *directory, const JsonValue *manifest, unsigned rank)
+{
+    const JsonValue *section = Json_Member(manifest, "fields");
+    const JsonValue *list;
+    int index = 0;
+    if (!section) return;
+    list = Json_Member(section, "fields");
+    if (Json_TypeOf(section) != JSON_OBJECT || Json_TypeOf(list) != JSON_ARRAY) {
+        Mods_Note(mod, "fields: an object with a \"fields\" list of {\"id\", \"name\", \"picture\"}");
+        return;
+    }
+    for (const JsonValue *entry = Json_At(list, 0); entry; entry = Json_Next(entry), index++) {
+        const JsonValue *id_value = Json_Member(entry, "id");
+        const char *replace = Json_String(Json_Member(entry, "replace"), NULL);
+        const char *name = Json_String(Json_Member(entry, "name"), NULL);
+        const char *picture = Json_String(Json_Member(entry, "image"), Json_String(Json_Member(entry, "picture"), NULL));
+        const JsonValue *mirror_value = Json_Member(entry, "mirror");
+        long raw_id = Json_Number(id_value, -1);
+        int id;
+        if (Json_TypeOf(entry) != JSON_OBJECT) {
+            Mods_Note(mod, "fields: fields[%d]: an object with \"name\" and optional \"image\" or \"replace\"", index);
+            continue;
+        }
+        id = replace ? Fields_Find(replace) : id_value && Json_TypeOf(id_value) == JSON_NUMBER ? (int)raw_id : next_id();
+        if (replace && (id < FIELD_NORMAL || id > FIELDS_RETAIL)) {
+            Mods_Note(mod, "fields: fields[%d]: \"replace\" must name a retail field", index);
+        } else if (id < FIELD_NORMAL || id > FIELDS_MAX) {
+            Mods_Note(mod, "fields: fields[%d]: a field id is 1-255", index);
+        } else if ((!name && !replace) || (name && (!*name || !name_has_letters(name)))) {
+            Mods_Note(mod, "fields: fields[%d]: \"name\" is a non-empty string with a letter or number", index);
+        } else if (name && name_taken(name, id)) {
+            Mods_Note(mod, "fields: fields[%d]: \"name\" duplicates another field", index);
+        } else if (mirror_value && Json_TypeOf(mirror_value) != JSON_BOOL) {
+            Mods_Note(mod, "fields: fields[%d]: \"mirror\" must be true or false", index);
+        } else {
+            char *new_name = name ? copy(name) : NULL;
+            if (name && !new_name) continue;
+            if (new_name) { free(names[id]); names[id] = new_name; }
+            declared[id] = 1;
+            mirrors[id] = (unsigned char)Json_Bool(mirror_value, 1);
+            free(pictures[id]);
+            pictures[id] = NULL;
+            if (picture) {
+                char path[1200];
+                FILE *probe;
+                if (!*picture || !is_image(picture) || !directory || !Paths_Contained(picture) ||
+                    snprintf(path, sizeof(path), "%s/%s", directory, picture) >= (int)sizeof(path)) {
+                    Mods_Note(mod, "fields: fields[%d]: \"image\" names a PNG inside the mod", index);
+                } else if (!(probe = fopen(path, "rb"))) {
+                    Mods_Note(mod, "fields: fields[%d]: \"picture\": %s is not there", index, picture);
+                } else {
+                    fclose(probe);
+                    pictures[id] = copy(path);
+                    register_picture(id, pictures[id], rank);
+                }
+            }
+        }
+    }
+}
+
+void Fields_Add(const char *mod, const JsonValue *manifest)
+{
+    add(mod, ".", manifest, 0);
+}
+
+void Fields_Build(void)
+{
+    if (built) return;
+    built = 1;
+    for (int i = 0; i < Mods_LoadedCount(); i++) {
+        int mod = Mods_Loaded(i);
+        if (Mods_Active(mod)) add(Mods_Id(mod), Mods_Directory(mod), Mods_Manifest(mod), (unsigned)i + 1);
+    }
+}

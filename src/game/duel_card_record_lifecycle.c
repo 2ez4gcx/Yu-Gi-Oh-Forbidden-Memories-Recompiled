@@ -25,6 +25,7 @@
 #include "../unmatched.h"
 #ifdef MEMORIES_PC
 #include "pc/cards/cards.h"
+#include "pc/cards/fields.h"
 #include "pc/cards/tables.h"
 #include "pc/cards/monster_effects_duel.h"
 #endif
@@ -116,7 +117,7 @@ s32 Duel_GetTerrainBoost(s32 cardType)
     if (cardType < 0) {
         return 0; /* Cards_Type's answer for no card */
     }
-    if (Tables_TerrainBonus(gDuel_bTerrain[0], cardType, &bonus)) {
+    if (Tables_TerrainBonus(Fields_Active() >= 0 ? Fields_Active() : gDuel_bTerrain[0], cardType, &bonus)) {
         return bonus;
     }
 #endif

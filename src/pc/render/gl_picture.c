@@ -1365,6 +1365,27 @@ static size_t polygon(const uint32_t *words, size_t count)
             flags |= 16;
         }
     }
+    if (!(flags & 16) && quad && textured && hd_hud && !state.bank) {
+        /* The FIELD box's terrain word, when the active field renamed it:
+         * checked and drawn even over a texture pack's own FIELD box, the
+         * same rule HdText_TitleCard keeps for a card's name. */
+        int u0 = v[0].u, v0 = v[0].v, u1 = v[0].u, v1 = v[0].v, atlas_u, atlas_v;
+        for (i = 1; i < 4; i++) {
+            if (v[i].u < u0) u0 = v[i].u;
+            if (v[i].v < v0) v0 = v[i].v;
+            if (v[i].u > u1) u1 = v[i].u;
+            if (v[i].v > v1) v1 = v[i].v;
+        }
+        if (HdText_FieldWord(state.depth, state.page_x, state.page_y, state.clut_x, state.clut_y, u0, v0, u1 - u0,
+                             v1 - v0, scale, &atlas_u, &atlas_v)) {
+            for (i = 0; i < 4; i++) {
+                v[i].u = atlas_u + v[i].u - u0;
+                v[i].v = atlas_v + v[i].v - v0;
+            }
+            state.pack = 0;
+            flags |= 16;
+        }
+    }
     bounds_now[0] = bounds_now[2] = v[0].u;
     bounds_now[1] = bounds_now[3] = v[0].v;
     for (i = 1; i < vertices_n; i++) {
@@ -1482,6 +1503,19 @@ static size_t rectangle(const uint32_t *words, size_t count)
             block(base.x * scale, base.y * scale, w * scale, h * scale, atlas_u + base.u - title_u,
                   atlas_v + base.v - title_v, atlas_u + base.u - title_u + w, atlas_v + base.v - title_v + h, &base,
                   flags | 16);
+            return need;
+        }
+    }
+    if (w && h && textured && hd_hud && !state.bank) {
+        /* The FIELD box's terrain word, when the active field renamed it:
+         * checked and drawn even over a texture pack's own FIELD box, the
+         * same rule HdText_TitleCard keeps for a card's name. */
+        int atlas_u, atlas_v;
+        if (HdText_FieldWord(state.depth, state.page_x, state.page_y, state.clut_x, state.clut_y, base.u, base.v, w,
+                             h, scale, &atlas_u, &atlas_v)) {
+            state.pack = 0;
+            block(base.x * scale, base.y * scale, w * scale, h * scale, atlas_u, atlas_v, atlas_u + w, atlas_v + h,
+                  &base, flags | 16);
             return need;
         }
     }

@@ -35,6 +35,21 @@ int TexturePack_LoadAssets(const char *directory, const struct JsonValue *assets
  * that image, so assets/monster_type/dragon.png is monster_type/dragon. */
 int TexturePack_LoadAssetFolder(const char *directory, unsigned rank, int (*part)(const char *, void *),
                                 void *context, char *problems, size_t size);
+/* A PNG directly associated with a data-defined game image. `archive` and
+ * offsets are relative to the disc archive; source is the rectangle to cut
+ * from the PNG before it is resampled to the addressed texels. */
+int TexturePack_AddDiscImage(const char *file, const char *archive, unsigned offset, int words, int rows, int bpp,
+                             unsigned clut_offset, int clut_entries, int stride, int crop_left, int crop_width,
+                             int source_x, int source_y, int source_w, int source_h, unsigned rank);
+/* As TexturePack_AddDiscImage, but the image belongs to a logical field-bank
+ * entry.  Group zero is always visible; one non-zero group may be selected
+ * in addition.  This lets several custom fields share a retail board upload
+ * without their images overwriting each other. */
+int TexturePack_AddDiscImageGroup(unsigned group, const char *file, const char *archive, unsigned offset, int words,
+                                  int rows, int bpp, unsigned clut_offset, int clut_entries, int stride,
+                                  int crop_left, int crop_width, int source_x, int source_y, int source_w,
+                                  int source_h, unsigned rank);
+void TexturePack_SelectGroup(unsigned group);
 void TexturePack_Unload(void);
 /* Once a frame, on the main thread: reads what uploads asked for (an
  * upload can come from the interrupt tick, where reading is not safe). */

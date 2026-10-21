@@ -1,0 +1,51 @@
+{
+  "id": "field-spell-engine-test",
+  "name": "Field spell engine test",
+  "version": "1.0",
+  "author": "DecompRecomp",
+  "description": "Manual regression test: an added Mountain-copy field spell and Kuriboh's copied retail Mountain effect must both show the bright custom Mountain board.",
+  "enabled": false,
+  "restart": true,
+  "min_api": 19,
+  "fields": {
+    "fields": [
+      {
+        "replace": "Mountain",
+        "image": "fields/mountain.png"
+      },
+      {
+        "replace": "Normal",
+        "image": "fields/normal.png"
+      },
+      {
+        "name": "Toon",
+        "image": "fields/toon.png",
+        "mirror": false
+      }
+    ]
+  },
+  "cards": [
+    {
+      "replace": "Metalzoa",
+      "description": "ENGINE TEST: When summoned face up, this Kuriboh copies retail Mountain. Its board must be identical to Prism Peak's custom Mountain board.",
+      "notes": "Summon face up after enabling this mod. The copied retail field effect must use the texture-pack board art.",
+      "monster_effects": [
+        {
+          "when": "summon",
+          "do": "change_field",
+          "field": "Toon"
+        }
+      ]
+    },
+    {
+      "replace": "Blue-Eyes White Dragon",
+      "monster_effects": [
+        {
+          "when": "summon",
+          "do": "change_field",
+          "field": "Mountain"
+        }
+      ]
+    }
+  ]
+}

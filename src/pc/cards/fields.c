@@ -67,6 +67,28 @@ static int register_picture(int field, const char *path, unsigned rank)
     return ok;
 }
 
+/* Whether every floor strip's crop (floor_parts' source_y/rows, scaled
+ * from the FM Editor's 256x254 board layout to the author's own PNG size
+ * the same way TexturePack_AddDiscImageGroup's load_pixels does) lies
+ * inside the image's real height. register_picture's five calls have no
+ * rollback -- a later one failing does not undo an earlier one's already-
+ * installed entry -- so this is checked first and all five are made only
+ * when every one of them will fit, rather than some succeeding and others
+ * not. The width never needs checking: every strip crops the image's full
+ * width (source_x 0, source_w 256, the same as the 256 the layout scales
+ * from), so it always maps back onto the image's own width exactly. */
+static int picture_fits(const char *path)
+{
+    int width, height, i;
+    if (!TexturePack_ImageSize(path, &width, &height) || width < 1 || height < 1) return 0;
+    for (i = 0; i < (int)(sizeof(floor_parts) / sizeof(*floor_parts)); i++) {
+        long long top = (long long)floor_parts[i].source_y * height / 254;
+        long long bottom = (long long)(floor_parts[i].source_y + floor_parts[i].rows) * height / 254;
+        if (bottom - top <= 0 || bottom > height) return 0;
+    }
+    return 1;
+}
+
 static int same_letters(const char *a, const char *b)
 {
     for (;;) {
@@ -336,12 +358,17 @@ static void add(const char *mod, const char *directory, const JsonValue *manifes
                     Mods_Note(mod, "fields: fields[%d]: \"picture\": %s is not there", index, picture);
                 } else {
                     fclose(probe);
-                    pictures[id] = copy(path);
-                    if (pictures[id] && !register_picture(id, pictures[id], rank)) {
-                        Mods_Note(mod, "fields: fields[%d]: \"picture\": %s could not be read as a board image",
+                    if (!picture_fits(path)) {
+                        Mods_Note(mod, "fields: fields[%d]: \"picture\": %s is not a readable 256x254-proportioned PNG",
                                   index, picture);
-                        free(pictures[id]);
-                        pictures[id] = NULL;
+                    } else {
+                        pictures[id] = copy(path);
+                        if (pictures[id] && !register_picture(id, pictures[id], rank)) {
+                            Mods_Note(mod, "fields: fields[%d]: \"picture\": %s could not be read as a board image",
+                                      index, picture);
+                            free(pictures[id]);
+                            pictures[id] = NULL;
+                        }
                     }
                 }
             }

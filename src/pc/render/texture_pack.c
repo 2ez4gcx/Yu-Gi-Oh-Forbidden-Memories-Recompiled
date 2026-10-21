@@ -699,6 +699,33 @@ static int load_pixels(Entry *entry)
     return 1;
 }
 
+/* A PNG's own pixel size, read without decoding it (png_image_begin_read
+ * alone fills in width/height; load_pixels's png_image_finish_read is what
+ * actually reads the pixels). For a caller that needs several
+ * TexturePack_AddDiscImageGroup crops of one file to succeed or fail
+ * together -- there is no rollback once an entry has installed -- so it can
+ * check every crop against the real dimensions first and add none of them
+ * if one would not fit, rather than leaving the pack with only the crops
+ * that happened to fit. 0 when the file cannot be read as a PNG. */
+int TexturePack_ImageSize(const char *path, int *width, int *height)
+{
+    png_image png = {0};
+    FILE *file;
+    if (!path) return 0;
+    png.version = PNG_IMAGE_VERSION;
+    file = fopen(path, "rb");
+    if (!file) return 0;
+    if (!png_image_begin_read_from_stdio(&png, file)) {
+        fclose(file);
+        return 0;
+    }
+    fclose(file);
+    *width = (int)png.width;
+    *height = (int)png.height;
+    png_image_free(&png);
+    return 1;
+}
+
 int TexturePack_AddDiscImageGroup(unsigned group, const char *file, const char *archive, unsigned offset, int words,
                                   int rows, int bpp, unsigned clut_offset, int clut_entries, int stride,
                                   int crop_left, int crop_width, int source_x, int source_y, int source_w,

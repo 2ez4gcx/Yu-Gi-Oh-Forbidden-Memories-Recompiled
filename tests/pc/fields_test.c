@@ -32,6 +32,15 @@ int TexturePack_AddDiscImageGroup(unsigned group, const char *file, const char *
     (void)source_w; (void)source_h; (void)rank;
     return texture_pack_call++ != texture_pack_fail_at;
 }
+static int image_size_ok = 1, image_size_w = 256, image_size_h = 254;
+int TexturePack_ImageSize(const char *path, int *width, int *height)
+{
+    (void)path;
+    if (!image_size_ok) return 0;
+    *width = image_size_w;
+    *height = image_size_h;
+    return 1;
+}
 static unsigned selected_group = ~0u;
 void TexturePack_SelectGroup(unsigned group) { selected_group = group; }
 
@@ -101,6 +110,32 @@ int main(void)
 
         Json_Free(fifth);
         remove("fields_test_picture.png");
+    }
+
+    /* A picture that cannot even be read as a PNG (picture_fits,
+     * TexturePack_ImageSize) must reject the field before any of its five
+     * floor strips are registered, not after some of them already are:
+     * register_picture's own calls have no rollback once one installs. */
+    {
+        FILE *picture = fopen("fields_test_picture2.png", "wb");
+        JsonDocument *sixth = Json_Parse(
+            "{\"fields\":{\"fields\":[{\"name\":\"Broken\",\"image\":\"fields_test_picture2.png\"}]}}", error,
+            sizeof(error));
+        assert(picture && sixth);
+        fputs("x", picture);
+        fclose(picture);
+
+        image_size_ok = 0;
+        texture_pack_call = 0;
+        Fields_Add("six", Json_Root(sixth));
+        image_size_ok = 1;
+        /* The field itself still declares (its name and rules stand on
+         * their own); only the picture -- rejected before any of its five
+         * strips registered -- is missing. */
+        assert(Fields_Find("Broken") == 9 && !Fields_Picture(9) && texture_pack_call == 0 && notes == 6);
+
+        Json_Free(sixth);
+        remove("fields_test_picture2.png");
     }
 
     Json_Free(first);

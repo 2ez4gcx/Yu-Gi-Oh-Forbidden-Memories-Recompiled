@@ -49,6 +49,11 @@ int TexturePack_AddDiscImageGroup(unsigned group, const char *file, const char *
                                   int rows, int bpp, unsigned clut_offset, int clut_entries, int stride,
                                   int crop_left, int crop_width, int source_x, int source_y, int source_w,
                                   int source_h, unsigned rank);
+/* A PNG's own pixel width and height, without decoding it. 0 when the file
+ * cannot be read as a PNG. For validating every crop several
+ * TexturePack_AddDiscImageGroup calls on one file will need before making
+ * any of them, since a later one failing does not undo an earlier one. */
+int TexturePack_ImageSize(const char *path, int *width, int *height);
 void TexturePack_SelectGroup(unsigned group);
 void TexturePack_Unload(void);
 /* Once a frame, on the main thread: reads what uploads asked for (an

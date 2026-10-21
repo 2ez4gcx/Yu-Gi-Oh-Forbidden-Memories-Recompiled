@@ -24,3 +24,6 @@
 # Tool-generated language caches
 **/__pycache__/
 *.py[cod]
+
+# Local-only test mod, not meant to ship
+/mods/field-spell-engine-test/

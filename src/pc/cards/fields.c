@@ -129,11 +129,14 @@ int Fields_Active(void) { return active_field; }
 /* func_80024DC8 (a new duel's common setup, every entry point) calls this
  * the moment it resets gDuel_bTerrain: the field bank otherwise has no
  * signal that a new duel even started, and active_field would carry a
- * previous duel's field (even its id, were a later mod to reuse it). */
+ * previous duel's field (even its id, were a later mod to reuse it).
+ * Restores the texture group too (Fields_Activate's own counterpart),
+ * since a stale selected group is exactly the same kind of leftover. */
 void Fields_ResetActive(void)
 {
     active_field = -1;
     active_pending = 0;
+    TexturePack_SelectGroup(0);
 }
 /* DuelEffect_ApplyTerrain (func_80024E58.c) calls this every time it
  * commits a new gDuel_bTerrain, retail field card or Fields_Activate's own
@@ -144,14 +147,15 @@ void Fields_ResetActive(void)
  * single-threaded duel, any later commit is a different field's effect
  * resolving, which makes whatever custom field Fields_Activate last
  * remembered stale -- an ordinary retail field spell played after a custom
- * one otherwise leaves the field bank still reporting the custom one. */
+ * one otherwise leaves the field bank still reporting the custom one, and
+ * (Fields_ResetActive) the custom one's texture group still selected. */
 void Fields_Observe(void)
 {
     if (active_pending) {
         active_pending = 0;
         return;
     }
-    active_field = -1;
+    Fields_ResetActive();
 }
 int Fields_Carrier(int field) { return field <= FIELDS_RETAIL ? field : 1 + (field - FIELDS_RETAIL - 1) % FIELDS_RETAIL; }
 int Fields_UnmirrorCentre(void)
@@ -278,9 +282,14 @@ static void add(const char *mod, const char *directory, const JsonValue *manifes
         }
         /* Checked before the cast: a raw_id outside int's own range would
          * truncate to an implementation-defined value, which could by
-         * chance land inside 1-255 and so pass the range check below. */
+         * chance land inside 1-255 and so pass the range check below.
+         * An explicit id starts at 1, not FIELD_NORMAL: Fields_Name and
+         * Fields_Find both treat 0 as Normal unconditionally, so an
+         * explicit "id": 0 would pass every check here and then have no
+         * way to be named or found -- "replace": "Normal" is how Normal's
+         * image and name are meant to be given. */
         id = replace ? Fields_Find(replace)
-            : explicit_id ? (raw_id >= FIELD_NORMAL && raw_id <= FIELDS_MAX ? (int)raw_id : -1) : next_id();
+            : explicit_id ? (raw_id >= 1 && raw_id <= FIELDS_MAX ? (int)raw_id : -1) : next_id();
         if (replace && (id < FIELD_NORMAL || id > FIELDS_RETAIL)) {
             Mods_Note(mod, "fields: fields[%d]: \"replace\" must name a retail field", index);
         } else if (id < FIELD_NORMAL || id > FIELDS_MAX) {

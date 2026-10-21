@@ -31,7 +31,8 @@ int TexturePack_AddDiscImageGroup(unsigned group, const char *file, const char *
     (void)source_w; (void)source_h; (void)rank;
     return 1;
 }
-void TexturePack_SelectGroup(unsigned group) { (void)group; }
+static unsigned selected_group = ~0u;
+void TexturePack_SelectGroup(unsigned group) { selected_group = group; }
 
 int main(void)
 {
@@ -59,33 +60,48 @@ int main(void)
     assert(Fields_Find("Volcano") == 7 && Fields_Find("Lava") == -1 && notes == 3);
     Json_Free(third);
 
+    /* An explicit "id": 0 passes the id range check but can never be
+     * named or found (Fields_Name/Fields_Find both treat 0 as Normal
+     * unconditionally): rejected rather than silently accepted and
+     * left unusable. "replace": "Normal" (the first entry of "first",
+     * above) is the sanctioned way to give Normal its own image/name. */
+    JsonDocument *fourth = Json_Parse("{\"fields\":{\"fields\":[{\"id\":0,\"name\":\"Custom Normal\"}]}}", error,
+                                      sizeof(error));
+    assert(fourth);
+    Fields_Add("four", Json_Root(fourth));
+    assert(Fields_Find("Custom Normal") == -1 && Fields_Name(0)[0] == 'N' && notes == 4);
+    Json_Free(fourth);
+
     Json_Free(first);
     Json_Free(second);
 
     /* change_field's own dispatch: Fields_Activate, then the retail terrain
      * effect it started lands and confirms it with Fields_Observe. The
      * field bank must still report the custom field, not fall back to -1
-     * the moment its own carrier's effect resolves. */
+     * the moment its own carrier's effect resolves, and its texture group
+     * (7, > FIELDS_RETAIL) must stay selected. */
     Fields_Activate(7);
-    assert(Fields_Active() == 7);
+    assert(Fields_Active() == 7 && selected_group == 7);
     Fields_Observe();
-    assert(Fields_Active() == 7);
+    assert(Fields_Active() == 7 && selected_group == 7);
 
     /* An ordinary retail field spell played after that (or anything else
      * that resolves DuelEffect_ApplyTerrain without going through
      * Fields_Activate first) must make the custom field stale rather than
-     * leave the field bank still reporting Volcano. */
+     * leave the field bank still reporting Volcano, and must restore the
+     * retail texture group (0), not leave Volcano's bank selected. */
     Fields_Observe();
-    assert(Fields_Active() == -1);
+    assert(Fields_Active() == -1 && selected_group == 0);
 
     /* A new duel (func_80024DC8's reset) must clear a field left active at
-     * the end of the previous one, even mid-dispatch (active_pending set). */
+     * the end of the previous one, even mid-dispatch (active_pending set),
+     * and its texture group with it. */
     Fields_Activate(7);
-    assert(Fields_Active() == 7);
+    assert(Fields_Active() == 7 && selected_group == 7);
     Fields_ResetActive();
-    assert(Fields_Active() == -1);
+    assert(Fields_Active() == -1 && selected_group == 0);
     Fields_Observe();
-    assert(Fields_Active() == -1);
+    assert(Fields_Active() == -1 && selected_group == 0);
 
     Fields_Clear();
     return 0;

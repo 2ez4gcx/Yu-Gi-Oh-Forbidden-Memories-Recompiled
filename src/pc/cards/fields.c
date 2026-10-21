@@ -36,29 +36,21 @@ static const struct { int target_y, source_y, rows, palette; } floor_parts[] = {
 };
 
 /* 1 when every one of the five floor strips registered; 0 when any one of
- * them did not. The five are slices of one image, so a field's picture is
- * all of them or none: a mod's declared picture must never be treated as
- * present (Fields_Picture, Fields_UnmirrorCentre) when it is not really
- * there to show -- an unmirrored centre strip would otherwise remap the
- * UVs of whatever retail art is still showing underneath instead.
- *
- * add() (below) calls picture_fits first, so every crop these five calls
- * make is already known to lie inside the image's real size: the only way
- * one can still fail here is TexturePack_AddDiscImageGroup itself failing
- * for a reason the image's own content cannot predict (out of memory, the
- * texture pack's own entry table full). That residual case is accepted
- * uncorrected on purpose: an earlier strip that already installed before a
- * later one hits it is not un-registered, since doing so needs
- * texture_pack.c's install() to support unwinding a run of entries (and
- * the index/generation state install() keeps) rather than only ever
- * adding to it, which is a materially larger change than this allocation-
- * failure case has earned. The caller still refuses pictures[id] in that
- * case (ok false here), so the field is never treated as fully pictured;
- * a sibling strip that happened to install first simply keeps showing. */
+ * them did not (TexturePack_ImageSize/picture_fits in add() already rules
+ * out the likeliest reason, a malformed or wrongly proportioned image, but
+ * TexturePack_AddDiscImageGroup can still fail for one it cannot predict,
+ * such as out of memory). The five are slices of one image, so a field's
+ * picture is all of them or none: a mod's declared picture must never be
+ * treated as present (Fields_Picture, Fields_UnmirrorCentre) when it is
+ * not really there to show -- an unmirrored centre strip would otherwise
+ * remap the UVs of whatever retail art is still showing underneath
+ * instead -- and no strip that did install is left behind replacing part
+ * of the field's board with the rest still retail. */
 static int register_picture(int field, const char *path, unsigned rank)
 {
     unsigned base;
     unsigned group;
+    unsigned mark;
     int i, ok = 1;
     /* A custom field's rule identity is its field-bank id, not its physical
      * board upload.  It borrows a retail upload only because the original
@@ -69,6 +61,7 @@ static int register_picture(int field, const char *path, unsigned rank)
     group = field > FIELDS_RETAIL ? (unsigned)field : 0;
     if (field > FIELDS_RETAIL) field = 1 + (field - FIELDS_RETAIL - 1) % FIELDS_RETAIL;
     base = (unsigned)(DUEL_TERRAIN_PACKAGE_FIRST_SECTOR + field * DUEL_TERRAIN_PACKAGE_SECTOR_COUNT + 203) * 2048;
+    mark = TexturePack_EntryCount();
     for (i = 0; i < (int)(sizeof(floor_parts) / sizeof(*floor_parts)); i++) {
         const int y = floor_parts[i].target_y, rows = floor_parts[i].rows;
         if (!TexturePack_AddDiscImageGroup(group, path, "WA_MRG.MRG", base + (unsigned)y * 128, 64, rows, 4,
@@ -77,6 +70,7 @@ static int register_picture(int field, const char *path, unsigned rank)
             ok = 0;
         }
     }
+    if (!ok) TexturePack_RemoveEntriesFrom(mark);
     return ok;
 }
 

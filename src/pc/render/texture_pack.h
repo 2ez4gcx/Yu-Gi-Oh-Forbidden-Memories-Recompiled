@@ -52,8 +52,19 @@ int TexturePack_AddDiscImageGroup(unsigned group, const char *file, const char *
 /* A PNG's own pixel width and height, without decoding it. 0 when the file
  * cannot be read as a PNG. For validating every crop several
  * TexturePack_AddDiscImageGroup calls on one file will need before making
- * any of them, since a later one failing does not undo an earlier one. */
+ * any of them, catching the likeliest failure (a malformed or wrongly
+ * proportioned image) before any entry installs. */
 int TexturePack_ImageSize(const char *path, int *width, int *height);
+/* How many entries are registered right now, to remember
+ * (TexturePack_RemoveEntriesFrom) before adding several that must all
+ * succeed or leave none of them installed -- TexturePack_ImageSize does
+ * not rule out a later one failing for its own reason (out of memory). */
+unsigned TexturePack_EntryCount(void);
+/* Un-registers every entry added since `mark` (a prior TexturePack_EntryCount).
+ * Safe only while entries stay in the order they were added in, true until
+ * the pack first resolves its disc offsets (TexturePack_Service, "between
+ * frames, on the main thread") -- always after every mod's own loading. */
+void TexturePack_RemoveEntriesFrom(unsigned mark);
 void TexturePack_SelectGroup(unsigned group);
 void TexturePack_Unload(void);
 /* Once a frame, on the main thread: reads what uploads asked for (an

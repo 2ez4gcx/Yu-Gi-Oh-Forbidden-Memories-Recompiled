@@ -1608,6 +1608,31 @@ static int install(void)
     return 1;
 }
 
+/* How many entries are registered, to remember before a caller adds
+ * several that must all succeed or none stay registered
+ * (TexturePack_RemoveEntriesFrom). */
+unsigned TexturePack_EntryCount(void) { return (unsigned)entry_count; }
+
+/* Un-registers every entry added since `mark` (a prior TexturePack_EntryCount),
+ * for a caller like fields.c's register_picture whose several
+ * TexturePack_AddDiscImageGroup calls, on one image, must all succeed or
+ * leave none of them installed. Safe only while entries stay in the order
+ * they were added in -- true until resolve() first sorts them
+ * (TexturePack_Service, "between frames, on the main thread"), which a
+ * mod's own loading always finishes well before. */
+void TexturePack_RemoveEntriesFrom(unsigned mark)
+{
+    int i;
+    if ((int)mark >= entry_count) return;
+    for (i = (int)mark; i < entry_count; i++) {
+        free(entries[i].file);
+        free(entries[i].row_offsets);
+        entry_release(&entries[i]);
+    }
+    entry_count = (int)mark;
+    install();
+}
+
 /* Made entries `first` on joined to the entries, each with its own copy of
  * the file's path (free_entries frees it). 0 out of memory. */
 static int add_made(int first)

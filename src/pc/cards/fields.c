@@ -36,12 +36,25 @@ static const struct { int target_y, source_y, rows, palette; } floor_parts[] = {
 };
 
 /* 1 when every one of the five floor strips registered; 0 when any one of
- * them did not (a malformed PNG, a dimension Fields.h's callers never see,
- * out of memory). The five are slices of one image, so a field's picture
- * is all of them or none: a mod's declared picture must never be treated
- * as present (Fields_Picture, Fields_UnmirrorCentre) when it is not really
+ * them did not. The five are slices of one image, so a field's picture is
+ * all of them or none: a mod's declared picture must never be treated as
+ * present (Fields_Picture, Fields_UnmirrorCentre) when it is not really
  * there to show -- an unmirrored centre strip would otherwise remap the
- * UVs of whatever retail art is still showing underneath instead. */
+ * UVs of whatever retail art is still showing underneath instead.
+ *
+ * add() (below) calls picture_fits first, so every crop these five calls
+ * make is already known to lie inside the image's real size: the only way
+ * one can still fail here is TexturePack_AddDiscImageGroup itself failing
+ * for a reason the image's own content cannot predict (out of memory, the
+ * texture pack's own entry table full). That residual case is accepted
+ * uncorrected on purpose: an earlier strip that already installed before a
+ * later one hits it is not un-registered, since doing so needs
+ * texture_pack.c's install() to support unwinding a run of entries (and
+ * the index/generation state install() keeps) rather than only ever
+ * adding to it, which is a materially larger change than this allocation-
+ * failure case has earned. The caller still refuses pictures[id] in that
+ * case (ok false here), so the field is never treated as fully pictured;
+ * a sibling strip that happened to install first simply keeps showing. */
 static int register_picture(int field, const char *path, unsigned rank)
 {
     unsigned base;

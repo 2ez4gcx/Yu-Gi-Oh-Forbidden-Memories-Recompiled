@@ -31,6 +31,15 @@ const char *Fields_Picture(int field);
 /* The logical mod field and the retail terrain package it borrows for art. */
 void Fields_Activate(int field);
 int Fields_Active(void);
+/* The duel's own setup (func_80024DC8, every entry point) calls this the
+ * moment it resets gDuel_bTerrain for a new duel, so Fields_Active cannot
+ * still report a previous duel's field. */
+void Fields_ResetActive(void);
+/* DuelEffect_ApplyTerrain (func_80024E58.c) calls this each time it commits
+ * a new gDuel_bTerrain, so an ordinary retail field spell played after
+ * Fields_Activate leaves Fields_Active reporting the terrain actually on
+ * screen rather than a stale custom field. */
+void Fields_Observe(void);
 int Fields_Carrier(int field);
 /* The board renderer asks this while it emits a centre-floor polygon.  An
  * added field with a full board picture and `"mirror": false` opts out of

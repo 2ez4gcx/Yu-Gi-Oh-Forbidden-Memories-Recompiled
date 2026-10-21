@@ -742,7 +742,16 @@ int TexturePack_AddDiscImageGroup(unsigned group, const char *file, const char *
     /* Field art must be ready before the very first terrain package upload:
      * unlike a later field-card effect, Normal has no subsequent transfer
      * that could repaint a lazily decoded replacement. */
-    if (!load_pixels(&entries[entry_count - 1])) return 0;
+    if (!load_pixels(&entries[entry_count - 1])) {
+        /* Roll the entry back: left registered, a failed load could still
+         * win preferred_entry's rank/position tiebreak over a valid entry
+         * sharing its offset and geometry, shadowing it with no image. */
+        entry_count--;
+        free(entries[entry_count].file);
+        free(entries[entry_count].row_offsets);
+        entry_release(&entries[entry_count]);
+        return 0;
+    }
     return install();
 }
 

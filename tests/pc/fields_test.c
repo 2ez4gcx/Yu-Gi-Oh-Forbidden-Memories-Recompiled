@@ -49,8 +49,44 @@ int main(void)
     assert(Fields_Value(Json_Member(Json_At(Json_Member(Json_Member(Json_Root(first), "fields"), "fields"), 1), "replace")) == 1);
     Fields_Add("two", Json_Root(second));
     assert(Fields_Find("Sky") == -1 && notes == 2);
+
+    /* A bare numeric id colliding with one already declared (here id 7,
+     * Volcano, from "first") is rejected rather than silently renaming it:
+     * "replace" is the sanctioned way to retarget an id by name. */
+    JsonDocument *third = Json_Parse("{\"fields\":{\"fields\":[{\"id\":7,\"name\":\"Lava\"}]}}", error, sizeof(error));
+    assert(third);
+    Fields_Add("three", Json_Root(third));
+    assert(Fields_Find("Volcano") == 7 && Fields_Find("Lava") == -1 && notes == 3);
+    Json_Free(third);
+
     Json_Free(first);
     Json_Free(second);
+
+    /* change_field's own dispatch: Fields_Activate, then the retail terrain
+     * effect it started lands and confirms it with Fields_Observe. The
+     * field bank must still report the custom field, not fall back to -1
+     * the moment its own carrier's effect resolves. */
+    Fields_Activate(7);
+    assert(Fields_Active() == 7);
+    Fields_Observe();
+    assert(Fields_Active() == 7);
+
+    /* An ordinary retail field spell played after that (or anything else
+     * that resolves DuelEffect_ApplyTerrain without going through
+     * Fields_Activate first) must make the custom field stale rather than
+     * leave the field bank still reporting Volcano. */
+    Fields_Observe();
+    assert(Fields_Active() == -1);
+
+    /* A new duel (func_80024DC8's reset) must clear a field left active at
+     * the end of the previous one, even mid-dispatch (active_pending set). */
+    Fields_Activate(7);
+    assert(Fields_Active() == 7);
+    Fields_ResetActive();
+    assert(Fields_Active() == -1);
+    Fields_Observe();
+    assert(Fields_Active() == -1);
+
     Fields_Clear();
     return 0;
 }

@@ -23,6 +23,7 @@ static char *pictures[FIELDS_MAX + 1];
 static unsigned char declared[FIELDS_MAX + 1];
 static unsigned char mirrors[FIELDS_MAX + 1];
 static int active_field = -1;
+static int active_pending;    /* Fields_Activate ran; its own terrain commit has not landed yet */
 static int built;
 
 /* The floor column of a terrain package: the same five cuts board_art.py
@@ -114,15 +115,44 @@ void Fields_Clear(void)
     }
     built = 0;
     active_field = -1;
+    active_pending = 0;
     TexturePack_SelectGroup(0);
 }
 
 void Fields_Activate(int field)
 {
     active_field = field;
+    active_pending = 1;
     TexturePack_SelectGroup(field > FIELDS_RETAIL ? (unsigned)field : 0);
 }
 int Fields_Active(void) { return active_field; }
+/* func_80024DC8 (a new duel's common setup, every entry point) calls this
+ * the moment it resets gDuel_bTerrain: the field bank otherwise has no
+ * signal that a new duel even started, and active_field would carry a
+ * previous duel's field (even its id, were a later mod to reuse it). */
+void Fields_ResetActive(void)
+{
+    active_field = -1;
+    active_pending = 0;
+}
+/* DuelEffect_ApplyTerrain (func_80024E58.c) calls this every time it
+ * commits a new gDuel_bTerrain, retail field card or Fields_Activate's own
+ * dispatched one alike. The first commit after Fields_Activate is that
+ * activation's own effect landing (change_field dispatches the carrier's
+ * retail card, which resolves through this same routine) and is left
+ * alone; since nothing else can commit a terrain in between in a
+ * single-threaded duel, any later commit is a different field's effect
+ * resolving, which makes whatever custom field Fields_Activate last
+ * remembered stale -- an ordinary retail field spell played after a custom
+ * one otherwise leaves the field bank still reporting the custom one. */
+void Fields_Observe(void)
+{
+    if (active_pending) {
+        active_pending = 0;
+        return;
+    }
+    active_field = -1;
+}
 int Fields_Carrier(int field) { return field <= FIELDS_RETAIL ? field : 1 + (field - FIELDS_RETAIL - 1) % FIELDS_RETAIL; }
 int Fields_UnmirrorCentre(void)
 {
@@ -240,16 +270,29 @@ static void add(const char *mod, const char *directory, const JsonValue *manifes
         const char *picture = Json_String(Json_Member(entry, "image"), Json_String(Json_Member(entry, "picture"), NULL));
         const JsonValue *mirror_value = Json_Member(entry, "mirror");
         long raw_id = Json_Number(id_value, -1);
+        int explicit_id = !replace && id_value && Json_TypeOf(id_value) == JSON_NUMBER;
         int id;
         if (Json_TypeOf(entry) != JSON_OBJECT) {
             Mods_Note(mod, "fields: fields[%d]: an object with \"name\" and optional \"image\" or \"replace\"", index);
             continue;
         }
-        id = replace ? Fields_Find(replace) : id_value && Json_TypeOf(id_value) == JSON_NUMBER ? (int)raw_id : next_id();
+        /* Checked before the cast: a raw_id outside int's own range would
+         * truncate to an implementation-defined value, which could by
+         * chance land inside 1-255 and so pass the range check below. */
+        id = replace ? Fields_Find(replace)
+            : explicit_id ? (raw_id >= FIELD_NORMAL && raw_id <= FIELDS_MAX ? (int)raw_id : -1) : next_id();
         if (replace && (id < FIELD_NORMAL || id > FIELDS_RETAIL)) {
             Mods_Note(mod, "fields: fields[%d]: \"replace\" must name a retail field", index);
         } else if (id < FIELD_NORMAL || id > FIELDS_MAX) {
             Mods_Note(mod, "fields: fields[%d]: a field id is 1-255", index);
+        } else if (explicit_id && Fields_Declared(id)) {
+            /* "replace" is the sanctioned way to retarget an id a mod (this
+             * one or an earlier one) already declared; a bare numeric id
+             * colliding with one is a mistake, not an override -- silently
+             * taking the later entry would leave the first one's picture,
+             * if it had one, orphaned in the texture pack. */
+            Mods_Note(mod, "fields: fields[%d]: id %d is already a field; use \"replace\" to retarget it by name",
+                      index, id);
         } else if ((!name && !replace) || (name && (!*name || !name_has_letters(name)))) {
             Mods_Note(mod, "fields: fields[%d]: \"name\" is a non-empty string with a letter or number", index);
         } else if (name && name_taken(name, id)) {

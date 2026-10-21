@@ -2,6 +2,7 @@
  * with the field declaration, rather than folded into terrain_bonus: a board
  * renderer can select it independently of the rules it gives monsters. */
 #include "fields.h"
+#include "pc/compat/fs.h"
 #include "pc/mods/json.h"
 #include "pc/mods/mods.h"
 #include "pc/platform/paths.h"

@@ -27,7 +27,8 @@ MANIFEST_KEYS = ("id", "name", "version", "author", "description", "library", "e
                  "font",
                  "chest_overflow", "terrain_bonus", "trap_thresholds", "equip_bonus_default", "passwords",
                  "starter", "starter_pools", "limits", "guardian_stars", "packs", "pack_shop", "card_text_colors", "card_layout",
-                 "palette_ramps", "title", "menu", "ui", "tower", "card_types", "attributes", "fields")
+                 "palette_ramps", "title", "menu", "ui", "tower", "card_types", "attributes", "fields",
+                 "models")
 
 
 @dataclass

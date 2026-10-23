@@ -21,6 +21,14 @@ void Log_Printf(LogChannel channel, const char *format, ...)
 /* Card text: letters stand for themselves here, so the codes show. */
 uint32_t Glyphs_NextCharacter(const char **text) { return (unsigned char)*(*text)++; }
 int Glyphs_Code(uint32_t character) { return character >= 'A' && character <= 'z' ? (int)character : -1; }
+/* No mod adds a battle model here (mods.c's "models"). */
+int Mods_ModelCount(void) { return 0; }
+int Mods_Model(int i, const char **name, const struct JsonValue **base, int *mod)
+{
+    (void)i; (void)name; (void)base; (void)mod;
+    return -1;
+}
+
 void Mods_Note(const char *id, const char *format, ...)
 {
     (void)id;

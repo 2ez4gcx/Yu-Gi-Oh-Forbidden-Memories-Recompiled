@@ -8,6 +8,9 @@
 #include "file_transfer_steps.h"
 #define MODEL_SLOT_SETUP_EXPLICIT_TRANSFER_ARGS
 #include "model_slot_setup.h"
+#ifdef MEMORIES_PC
+#include "pc/cards/cards.h"
+#endif
 
 /* Starts the asynchronous transfer that fills one model slot with a monster
  * merge record, and records the slot's display properties while the request is
@@ -65,6 +68,22 @@ s32 Model_LoadMonsterMerge(s32 slot, s32 model, s32 p2, s32 p3, s32 p4,
             D_800F2C40[slot].field_E14 = 0;
             return 0;
         }
+#ifdef MEMORIES_PC
+        /* A mod's model: its record follows the disc's in MODEL.MRG
+           (src/pc/mods/mods.c serves it from the mod). */
+        if (model >= CARDS_MODEL_MOD_FIRST) {
+            if (Cards_ModelRecord(model) < 0) {
+                result++;
+                goto done;
+            }
+            transfer = File_TryRequestAsyncTransfer(
+                2, gFile_szModelMrgPath,
+                Cards_ModelRecord(model) * MODEL_MRG_SECTOR_COUNT,
+                MODEL_MRG_SECTOR_COUNT, func_80056D7C, 0, 0
+            );
+            goto requested;
+        }
+#endif
         if (model < 0 || model >= MODEL_MRG_ID_END
             || (model >= MODEL_MRG_FIRST_GAP_START
                 && model < MODEL_MRG_FIRST_GAP_END)
@@ -87,6 +106,9 @@ s32 Model_LoadMonsterMerge(s32 slot, s32 model, s32 p2, s32 p3, s32 p4,
                 MODEL_MRG_SECTOR_COUNT, func_80056D7C,
                 0, 0
             );
+#ifdef MEMORIES_PC
+        requested:
+#endif
             if (p2 >= 0) {
                 D_800F2C40[slot].field_DFA = p2;
             }

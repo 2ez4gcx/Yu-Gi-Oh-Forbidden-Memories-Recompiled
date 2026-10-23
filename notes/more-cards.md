@@ -117,7 +117,9 @@ and a copy may become one the same way. An equip whose `effect` is a disc equip 
 the monsters that one fits, with its bonus (Megamorph's +1000 too), and
 `equips` in the [gameplay tables](gameplay-tables.md) may change that. `model`
 and `effect` work the same on a card that stays on its side, and a copy's
-`model` and `effect` may name the card as a replace's do.
+`model` and `effect` may name the card as a replace's do. `model` may also
+name a battle model a mod adds ([Battle models](modding.md#battle-models-monsters-the-disc-does-not-have),
+API 21).
 
 The CPU plays a magic card as the disc's card its `effect` names, when that is
 a magic card too: its scripts look cards up by the disc's numbers, so a mod

@@ -1,6 +1,6 @@
 #ifndef MEMORIES_MOD_TYPES_H
 #define MEMORIES_MOD_TYPES_H
-#define MEMORIES_MOD_API 20
+#define MEMORIES_MOD_API 21
 /* API 15: card_types names the existing type ids and declares monster ids
  * 24-255, with optional per-custom-type icons. It has no host entry: cards
  * and gameplay tables resolve its names. */
@@ -17,7 +17,8 @@
  * (card_layout's default_styles, a frame style's hand, images, library_icon
  * and own parts, atk_label/dfd_label/type_label, a part's hide or color, and
  * a card's frame_style). API 20 adds the named field registry ("fields")
- * and its optional field pictures. */
+ * and its optional field pictures. API 21 adds battle models a mod brings
+ * ("models", appended to MODEL.MRG) and a card's "model" naming one. */
 /* API 3: before hooks may alter arguments/result, or set handled to replace
  * the operation (including cancellation). Highest priority runs first;
  * equal priorities follow registration/load order. After hooks observe the

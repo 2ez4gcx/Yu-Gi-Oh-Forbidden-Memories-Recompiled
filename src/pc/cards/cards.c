@@ -155,7 +155,47 @@ int Cards_TrapThreshold(int id, int fallback)
                ? (int)trap_thresholds[id] - 1 : fallback;
 }
 static int retail_monster(int id);
-int Cards_HasModel(int id) { return Cards_Valid(id) && retail_monster(Cards_ModelId(id)); }
+/* A model a mod adds, by its model id or its name ("models", Mods_Model):
+ * its place in Mods_Model's list, or -1. A later mod's name wins. */
+static int mod_model(int model)
+{
+    int i;
+    if (model < CARDS_MODEL_MOD_FIRST) return -1;
+    for (i = 0; i < Mods_ModelCount(); i++)
+        if (Mods_Model(i, NULL, NULL, NULL) == model - CARDS_MODEL_MOD_FIRST) return i;
+    return -1;
+}
+static int mod_model_named(const JsonValue *value)
+{
+    const char *text = Json_String(value, NULL), *name;
+    int i, found = -1;
+    for (i = 0; text && i < Mods_ModelCount(); i++) {
+        int record = Mods_Model(i, &name, NULL, NULL);
+        if (name && !strcmp(name, text)) found = CARDS_MODEL_MOD_FIRST + record;
+    }
+    return found;
+}
+int Cards_ModelRecord(int model) { return mod_model(model) >= 0 ? model - CARDS_MODEL_MOD_FIRST : -1; }
+/* A mod model's "base": a monster of the disc, or 0. */
+static int model_base(int model)
+{
+    const JsonValue *base = NULL;
+    int i = mod_model(model), id;
+    if (i < 0) return 0;
+    Mods_Model(i, NULL, &base, NULL);
+    id = Cards_Reference(base);
+    return retail_monster(id) ? id : 0;
+}
+int Cards_ModelStatsIndex(int model)
+{
+    if (model < CARDS_MODEL_MOD_FIRST) return model;
+    model = model_base(model);
+    return model ? model - 1 : 0;
+}
+int Cards_HasModel(int id)
+{
+    return Cards_Valid(id) && (retail_monster(Cards_ModelId(id)) || mod_model(Cards_ModelId(id) - 1) >= 0);
+}
 int Cards_FrameOverride(int id)
 {
     return Cards_Valid(id) && frames[id] && frames[id] != FRAME_TYPE ? frames[id] - 1 : -1;
@@ -1274,9 +1314,11 @@ static int retail_monster(int id)
  * (stars.h). */
 static void default_stars(int id, unsigned *stats, int was_monster, int stars_given)
 {
+    int model = Cards_ModelId(id);
+    if (model > CARDS_MODEL_MOD_FIRST) model = model_base(model - 1); /* a mod model's base */
     if (Cards_IsMonsterType((int)((*stats >> 26) & 0x1F)) && !was_monster && !stars_given && !(*stats & (0xFFu << 18))) {
-        *stats |= retail_monster(Cards_ModelId(id))
-                      ? ((const unsigned *)(uintptr_t)RETAIL_STATS)[Cards_ModelId(id) - 1] & (0xFFu << 18)
+        *stats |= retail_monster(model)
+                      ? ((const unsigned *)(uintptr_t)RETAIL_STATS)[model - 1] & (0xFFu << 18)
                       : (8u << 22) | (9u << 18);
     }
 }
@@ -1293,11 +1335,13 @@ static void replace_model_effect(const char *mod, int index, const JsonValue *en
     const JsonValue *model = Json_Member(entry, "model"), *effect = Json_Member(entry, "effect");
     int value;
     if (model) {
-        value = Cards_Reference(model);
-        if (retail_monster(value)) {
+        value = mod_model_named(model);
+        if (value < 0) value = Cards_Reference(model);
+        else value++;
+        if (retail_monster(value) || value > CARDS_MODEL_MOD_FIRST) {
             model_ids[id] = (unsigned short)value;
         } else {
-            Mods_Note(mod, "cards[%d]: \"model\" must name a monster of the disc", index);
+            Mods_Note(mod, "cards[%d]: \"model\" must name a monster of the disc or a mod's model", index);
         }
     }
     default_stars(id, stats, was_monster, stars_given);
@@ -1761,13 +1805,19 @@ static void add_entry(const char *mod, const char *directory, int index, const J
         definitions[id] = entry;
         /* A replaced base lends the model and effect it was given. "model"
          * is a number or, as a replace's, a monster's name. */
-        value = Cards_Reference(Json_Member(entry, "model"));
-        if (value < 0 || (Json_Member(entry, "model") && Json_TypeOf(Json_Member(entry, "model")) == JSON_STRING &&
-                          !retail_monster(value))) {
-            if (n == 1) Mods_Note(mod, "cards[%d]: \"model\" must name a monster of the disc", index);
-            value = 0;
+        value = mod_model_named(Json_Member(entry, "model"));
+        if (value >= 0) {
+            value++;   /* a mod's model, ahead of a card of that name */
+        } else {
+            value = Cards_Reference(Json_Member(entry, "model"));
+            if (value < 0 || (Json_Member(entry, "model") && Json_TypeOf(Json_Member(entry, "model")) == JSON_STRING &&
+                              !retail_monster(value))) {
+                if (n == 1) Mods_Note(mod, "cards[%d]: \"model\" must name a monster of the disc or a mod's model", index);
+                value = 0;
+            }
         }
-        model_ids[id] = (unsigned short)(value >= 1 && value <= CARD_COUNT ? value : Cards_ModelId(base));
+        model_ids[id] = (unsigned short)((value >= 1 && value <= CARD_COUNT) || value > CARDS_MODEL_MOD_FIRST
+                                             ? value : Cards_ModelId(base));
         default_stars(id, &stats, was_monster, stars_given);
         /* A number or a card's name, as a replace's (Cards_Reference); 0,
          * as before names could be given, is the base's effect. */

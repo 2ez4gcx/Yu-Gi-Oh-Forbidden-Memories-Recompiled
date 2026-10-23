@@ -61,8 +61,12 @@
 #define PATH_MAX_ 1024
 #define STATUS_MAX 512
 #define SECTOR 2048
-#define REGIONS_MAX 64
+#define MODELS_MAX 1024      /* battle models mods add, one region each */
+#define REGIONS_MAX (64 + MODELS_MAX)
 #define PATCHES_MAX 1024
+/* One MODEL.MRG record (Model_LoadMonsterMerge, src/game/model.h). */
+#define MODEL_RECORD_SECTORS 0x114
+#define MODEL_FILE "\\DATA\\MODEL.MRG;1"
 
 #define OBJECT_MAX (64u << 20)   /* object_loader.c's own limit */
 
@@ -92,6 +96,7 @@ typedef struct {
     JsonDocument *manifest;
     const JsonValue *data;       /* the "data" array, applied when enabled */
     const JsonValue *cards;      /* the "cards" array: cards the mod adds (src/pc/cards) */
+    const JsonValue *models;     /* the "models" array: battle models appended to MODEL.MRG */
     char textures[PATH_MAX_];    /* a texture pack directory inside the mod, or empty */
     const JsonValue *assets;     /* named image replacements from mod.json, or NULL */
     char asset_dir[PATH_MAX_];   /* "assets": a directory whose PNGs are named by their path */
@@ -105,6 +110,7 @@ typedef struct {
  * `overrides_live` is set. */
 typedef struct {
     int mod, lba, sectors, file;
+    int start;               /* a named file's part from this sector on, or -1: all of it */
     unsigned char *image;    /* the replacement file, mapped read-only */
     size_t image_size, mapped;
     unsigned hash;
@@ -133,6 +139,15 @@ static int shut_down;   /* Mods_Shutdown has run: no mod code is called again */
 
 static Region regions[REGIONS_MAX];
 static int region_count;
+/* The models mods add: each one's record follows the disc's in MODEL.MRG
+ * (and the ones added before it), and cards name it (src/pc/cards/models.c). */
+typedef struct {
+    int mod, record;
+    const char *name;
+    const JsonValue *base;
+} ModModel;
+static ModModel models[MODELS_MAX];
+static int model_count, model_records;
 static Patch patches[PATCHES_MAX];
 static int patch_count;
 static int published_regions, published_patches;
@@ -605,13 +620,19 @@ static int layout_disc_files(void)
     int order[REGIONS_MAX], next = -1;
     for (int i = 0; i < disc_file_count; i++) {
         DiscFile *file = &disc_files[i];
-        int maximum = file->retail_sectors, sectors;
+        int maximum = file->retail_sectors, sectors, end = 0;
         unsigned size = file->retail_size; /* readers never see a partial value */
         for (int j = 0; j < region_count; j++) if (regions[j].file == i) {
+            if (regions[j].start >= 0) {   /* a part: the file reaches at least its end */
+                if (regions[j].start + regions[j].sectors > end) end = regions[j].start + regions[j].sectors;
+                continue;
+            }
             sectors = (int)((regions[j].image_size + SECTOR - 1) / SECTOR);
             if (sectors > maximum) maximum = sectors;
             size = (unsigned)regions[j].image_size;
         }
+        if (end > maximum) maximum = end;
+        if ((size_t)end * SECTOR > size) size = (unsigned)((size_t)end * SECTOR);
         sectors = (int)(((size_t)size + SECTOR - 1) / SECTOR);
         file->size = size;
         file->sectors = sectors < file->retail_sectors ? file->retail_sectors : sectors;
@@ -636,6 +657,16 @@ static int layout_disc_files(void)
         next += file->reserved + 1;
     }
     return 1;
+}
+
+int Mods_ModelCount(void) { return model_count; }
+int Mods_Model(int i, const char **name, const JsonValue **base, int *mod)
+{
+    if (i < 0 || i >= model_count) return -1;
+    if (name) *name = models[i].name;
+    if (base) *base = models[i].base;
+    if (mod) *mod = models[i].mod;
+    return models[i].record;
 }
 
 int Mods_DiscFileInfo(int retail_lba, int *lba, unsigned *size)
@@ -784,6 +815,8 @@ static void drop_overrides(int mod)
         if (regions[i].image) unmap_file(regions[i].image, regions[i].mapped);
     }
     region_count = kept;
+    for (i = 0, kept = 0; i < model_count; i++) if (models[i].mod != mod) models[kept++] = models[i];
+    model_count = kept;
     for (i = 0, kept = 0; i < patch_count; i++) {
         if (patches[i].mod != mod) { patches[kept++] = patches[i]; continue; }
         free(patches[i].bytes);
@@ -881,7 +914,7 @@ static int add_patch(Mod *mod, int index, int file, int lba, int offset, const u
     return 1;
 }
 
-static int add_region(Mod *mod, int index, int named, int lba, int sectors, const char *replacement)
+static int add_region(Mod *mod, int index, int named, int lba, int sectors, int start, const char *replacement)
 {
     char path[PATH_MAX_];
     struct stat info;
@@ -907,10 +940,10 @@ static int add_region(Mod *mod, int index, int named, int lba, int sectors, cons
         return 0;
     }
     if ((uint64_t)info.st_size > (uint64_t)MEMORIES_DISC_MAX_LBA * SECTOR ||
-        (named < 0 && (uint64_t)info.st_size > (uint64_t)sectors * SECTOR)) {
+        ((named < 0 || start >= 0) && (uint64_t)info.st_size > (uint64_t)sectors * SECTOR)) {
         close(file);
         note(mod, "%s exceeds %s capacity; replacement rejected", replacement,
-             named < 0 ? "the raw sector region" : "the virtual disc address");
+             start >= 0 ? "a model record's" : named < 0 ? "the raw sector region" : "the virtual disc address");
         return 0;
     }
     image = map_file(file, (size_t)info.st_size);
@@ -923,13 +956,14 @@ static int add_region(Mod *mod, int index, int named, int lba, int sectors, cons
     regions[region_count].file = named;
     regions[region_count].lba = lba;
     regions[region_count].sectors = sectors;
+    regions[region_count].start = start;
     regions[region_count].image = image;
     regions[region_count].image_size = (size_t)info.st_size;
     regions[region_count].mapped = (size_t)info.st_size;
     regions[region_count].hash = hash_bytes(2166136261u, image, (size_t)info.st_size);
     for (int i = 0; i < region_count; i++) {
         const Region *other = &regions[i];
-        if (named >= 0 ? other->file == named
+        if (named >= 0 ? other->file == named && other->start == start
                        : other->file < 0 && other->mod != index && other->lba < lba + sectors &&
                              lba < other->lba + other->sectors) {
             warn(mod, 0, "%s replaces the same %s as %s; later replacement wins", replacement,
@@ -985,7 +1019,7 @@ static int apply_overrides(Mod *mod, int index)
                 goto failed;
             } else if (!file && (stream = streamed_file(NULL, lba, sectors)) != NULL) {
                 goto streamed;
-            } else if (!add_region(mod, index, named, lba, sectors, Json_String(replace, NULL))) {
+            } else if (!add_region(mod, index, named, lba, sectors, -1, Json_String(replace, NULL))) {
                 goto failed;
             }
         }
@@ -1029,6 +1063,32 @@ static int apply_overrides(Mod *mod, int index)
                 free(bytes);
             }
         }
+    }
+    /* "models": each file is one more MODEL.MRG record, after the disc's
+     * and the ones added before it; the drive serves it from the mod. */
+    for (i = 0; i < Json_Count(mod->models); i++) {
+        const JsonValue *entry = Json_At(mod->models, i);
+        const char *name = Json_String(Json_Member(entry, "name"), NULL);
+        const char *path = Json_String(Json_Member(entry, "file"), NULL);
+        int lba = -1, named, record;
+        unsigned size = 0;
+        if (!name || !*name || !path) {
+            note(mod, "models[%d] needs a \"name\" and a \"file\"", i);
+            goto failed;
+        }
+        if (model_count == MODELS_MAX) {
+            note(mod, "more than %d models", MODELS_MAX);
+            goto failed;
+        }
+        if (Memories_DiscOriginalFileInfo(MODEL_FILE, &lba, &size) || lba < 0 || (named = disc_file(lba, size)) < 0) {
+            note(mod, "models[%d]: MODEL.MRG is not on the disc", i);
+            goto failed;
+        }
+        record = (int)(size / (MODEL_RECORD_SECTORS * SECTOR)) + model_records;
+        if (!add_region(mod, index, named, lba, MODEL_RECORD_SECTORS, record * MODEL_RECORD_SECTORS, path))
+            goto failed;
+        model_records++;
+        models[model_count++] = (ModModel){index, record, name, Json_Member(entry, "base")};
     }
     publish_overrides();
     if (region_count || patch_count) {
@@ -1080,8 +1140,11 @@ int Mods_DiscSector(int lba, void *user_data)
     for (i = 0; i < published_regions; i++) {
         const Region *region = &regions[i];
         size_t at, have;
-        if (named >= 0 && region->file == named) at = (size_t)relative * SECTOR;
-        else {
+        if (named >= 0 && region->file == named) {
+            if (region->start >= 0 && (relative < region->start || relative - region->start >= region->sectors))
+                continue;
+            at = (size_t)(relative - (region->start >= 0 ? region->start : 0)) * SECTOR;
+        } else {
             if (physical < region->lba || physical - region->lba >= region->sectors) continue;
             at = (size_t)(physical - region->lba) * SECTOR;
         }
@@ -1292,7 +1355,7 @@ static const char *const manifest_keys[] = {
     "settings", "fusions", "equips", "rituals", "drops", "decks", "duelists", "text", "font",
     "chest_overflow", "terrain_bonus", "trap_thresholds", "equip_bonus_default", "passwords", "starter",
     "starter_pools", "title", "menu", "limits", "guardian_stars", "attributes", "packs", "pack_shop",
-    "card_text_colors", "card_layout", "palette_ramps", "ui", "tower", "card_types", "fields",
+    "card_text_colors", "card_layout", "palette_ramps", "ui", "tower", "card_types", "fields", "models",
 };
 
 /* How many letters to add, remove or change to turn one word into the
@@ -1466,6 +1529,11 @@ static int read_manifest(Mod *mod, const char *directory, const char *origin)
         mod->broken = 1;
         note(mod, "\"cards\" is not an array");
     }
+    mod->models = Json_Member(root, "models");
+    if (mod->models && Json_TypeOf(mod->models) != JSON_ARRAY) {
+        mod->broken = 1;
+        note(mod, "\"models\" is not an array");
+    }
     /* Data overrides change what the game loaded on its way up, so they are
      * only whole while the game starts with them in place; the cards a mod
      * adds are counted once, when the game starts. */
@@ -1474,7 +1542,7 @@ static int read_manifest(Mod *mod, const char *directory, const char *origin)
         const JsonValue *entry = Json_At(mod->data, i);
         if (Json_Member(entry, "file") && Json_Member(entry, "replace")) mod->restart = 1;
     }
-    if (Json_Count(mod->cards)) mod->restart = 1;
+    if (Json_Count(mod->cards) || Json_Count(mod->models)) mod->restart = 1;
     {   /* So are the rule tables (src/pc/cards/tables.c), the starter decks
          * (src/pc/cards/starter.c) and a translation (src/pc/text): all are
          * read once, at startup. */

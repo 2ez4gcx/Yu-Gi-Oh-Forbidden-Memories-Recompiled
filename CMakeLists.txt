@@ -485,6 +485,7 @@ if(BUILD_TESTING)
     add_test(NAME pc_disc COMMAND memories_disc_test)
     add_test(NAME pc_disc_capacity COMMAND memories_disc_test capacity)
     add_test(NAME pc_disc_failed_code COMMAND memories_disc_test failed-code)
+    add_test(NAME pc_disc_models COMMAND memories_disc_test models)
     # The test includes cards.c and relies on --gc-sections to drop the parts
     # that need the game and renderer. ELF linkers resolve symbols after GC;
     # the PE linker reports them before it, so this test is ELF-only.

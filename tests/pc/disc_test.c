@@ -14,6 +14,8 @@
 
 static char image_path[1024];
 static int delivered_lba, callback_count, expected_lba, audio_blocks;
+static int model_file;   /* the models case: the directory has a MODEL.MRG of two records */
+#define RECORD (0x114 * 2048)
 static unsigned char callback_data[5 * 2048];
 const char *GameFiles_Disc(char *why, size_t size) { (void)why; (void)size; return image_path; }
 void Crash_ReportFatal(const char *kind, const char *detail) { fprintf(stderr, "%s: %s\n", kind, detail); abort(); }
@@ -73,7 +75,8 @@ static void fixture(int sectors)
         if (lba == 18) {
             int at = record(raw + 24, "CARD.MRG;1", 20, 5000);
             at += record(raw + 24 + at, "NEXT.DAT;1", 23, 2048);
-            record(raw + 24 + at, "SECOND.MRG;1", 24, 2048);
+            at += record(raw + 24 + at, "SECOND.MRG;1", 24, 2048);
+            if (model_file) record(raw + 24 + at, "MODEL.MRG;1", 20, 2 * RECORD);
         }
         if (lba >= 20) memset(raw + 24, lba, 2048);
         if (lba == 30) { memset(raw + 24, 0, 2048); raw[18] = raw[22] = 0x64; }
@@ -109,6 +112,44 @@ static int inspect_startup(const char *directory, unsigned rank, int (*part)(con
     return 1;
 }
 static void unload_pack(void) {}
+
+/* "models": two records appended to MODEL.MRG after the disc's two, served
+ * from the mod while the disc's still come from the disc; a file larger
+ * than a record is refused. */
+static int models_case(void)
+{
+    static unsigned char one[RECORD], two[RECORD / 2], big[RECORD + 1], got[2048];
+    const char *name;
+    char path[1024];
+    int lba, mod;
+    unsigned bytes;
+    memset(one, 0x11, sizeof(one));
+    for (size_t i = 0; i < sizeof(two); i++) two[i] = (unsigned char)(i / 2048 + 1);
+    manifest("m-models", "{\"enabled\":true,\"models\":[{\"name\":\"one\",\"file\":\"one.bin\"},"
+                         "{\"name\":\"two\",\"file\":\"two.bin\",\"base\":\"Mystical Elf\"}]}");
+    write_file("mods/m-models/one.bin", one, sizeof(one));
+    write_file("mods/m-models/two.bin", two, sizeof(two));
+    manifest("n-big", "{\"enabled\":true,\"models\":[{\"name\":\"big\",\"file\":\"big.bin\"}]}");
+    write_file("mods/n-big/big.bin", big, sizeof(big));   /* one byte past a record */
+    snprintf(path, sizeof(path), "%s/mods", root); assert(!setenv("MEMORIES_MODS_DIR", path, 1));
+    assert(!setenv("MEMORIES_USER_DIR", root, 1));
+    snprintf(path, sizeof(path), "%s/settings", root); assert(!setenv("MEMORIES_SETTINGS", path, 1));
+    Settings_Load(); Mods_Load();
+    assert(Mods_Active(find("m-models")) && Mods_RequiresRestart(find("m-models")));
+    assert(!Mods_Active(find("n-big")) && strstr(Mods_Status(find("n-big")), "model record"));
+    assert(Mods_ModelCount() == 2);
+    assert(Mods_Model(0, &name, NULL, &mod) == 2 && !strcmp(name, "one") && mod == find("m-models"));
+    assert(Mods_Model(1, &name, NULL, NULL) == 3 && !strcmp(name, "two"));
+    assert(Mods_Model(2, NULL, NULL, NULL) == -1);
+    assert(!Memories_DiscFileInfo("\\DATA\\MODEL.MRG;1", &lba, &bytes) && bytes == 4 * RECORD && lba >= 600);
+    assert(Memories_DiscReadSectors(lba, 1, got) == 1 && got[0] == 20 && got[2047] == 20);   /* the disc's */
+    assert(Memories_DiscReadSectors(lba + 2 * 0x114, 1, got) == 1 && got[0] == 0x11);        /* one */
+    assert(Memories_DiscReadSectors(lba + 3 * 0x114 + 5, 1, got) == 1 && got[0] == 6);       /* two */
+    assert(Memories_DiscReadSectors(lba + 3 * 0x114 + 0x113, 1, got) == 1 && got[0] == 0);   /* past its file */
+    Mods_Shutdown();
+    return 0;
+}
+
 int main(int argc, char **argv)
 {
     unsigned char replacement[9000], lower[12000], got[5 * 2048], alias[2048];
@@ -119,6 +160,11 @@ int main(int argc, char **argv)
     DslFILE file;
     DslLOC loc;
     assert(scratch_dir(root, sizeof(root), "memories-disc")); make_dir("mods");
+    if (argc > 1 && !strcmp(argv[1], "models")) {
+        model_file = 1;
+        fixture(600);
+        return models_case();
+    }
     fixture(capacity ? MEMORIES_DISC_MAX_LBA - 2 : 40);
     for (size_t i = 0; i < sizeof(replacement); i++) replacement[i] = (unsigned char)(i * 13 + 7);
     memset(lower, 0xCC, sizeof(lower));

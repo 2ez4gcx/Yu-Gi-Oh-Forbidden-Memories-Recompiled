@@ -234,13 +234,30 @@ static int removal_type(int effect)
     }
 }
 
-/* Returns utility and an own-field target (equips only). Unknown effects are
- * left set, never speculatively activated. The live game resolves all effects. */
+/* What the opponent's next turn threatens: each monster's loss in its safer
+ * stance, or a direct attack on an empty field. */
+static int guarded(const HmBoard *b)
+{
+    int i, loss = 0, open = 1, hit = 0;
+    if (b->enemy_pinned) return 0;
+    for (i = 0; i < 5; i++) if (monster(b->own[i])) {
+        open = 0;
+        loss += min(safety(b, b->own[i], 0), safety(b, b->own[i], 1));
+    }
+    if (open) for (i = 0; i < 5; i++) if (b->enemy[i].id)
+        hit = max(hit, b->enemy[i].id < 0 ? HM_UNSEEN : b->enemy[i].attack);
+    return loss + hit;
+}
+
+/* Returns utility and an own-field target (equips only); *first is set when
+ * the value is a better attack sequence, so the card goes before the
+ * attacks. Unknown effects are left set, never speculatively activated. The
+ * live game resolves all effects. */
 static int spell(const HmBoard *b, const HmOptions *o, const HmRules *r,
-                 HmCard c, int *target)
+                 HmCard c, int *target, int *first)
 {
     int i, score = 0, id = c.effect, amount, type = removal_type(id);
-    *target = 0;
+    *target = 0; *first = 0;
     if (id >= 343 && id <= 347) {
         static const int burn[] = {50, 100, 200, 500, 1000};
         amount = burn[id - 343];
@@ -256,12 +273,7 @@ static int spell(const HmBoard *b, const HmOptions *o, const HmRules *r,
     }
     if (id == 672) return occupied(b->enemy_back) * 1600;
     if (id >= 330 && id <= 335) return max(0, terrain_delta(b, r, id - 329) * 2);
-    if (id == 348) {
-        if (b->enemy_pinned) return 0;
-        for (i = 0; i < 5; i++) if (b->enemy[i].id)
-            score += b->enemy[i].id < 0 ? 600 : b->enemy[i].attack / 2;
-        return score;
-    }
+    if (id == 348) return guarded(b); /* nothing threatened, nothing to stop */
     if (id == 350) {
         for (i = 0; i < 5; i++) if (b->enemy[i].id < 0) score += 500;
         return score;
@@ -285,9 +297,18 @@ static int spell(const HmBoard *b, const HmOptions *o, const HmRules *r,
         }
         return max(0, score);
     }
-    if (id == 349 || id == 669) {
-        for (i = 0; i < 5; i++) if (b->enemy[i].id) score += 700;
-        return score;
+    if (id == 349 || id == 669) { /* every visible enemy one level, or two, down */
+        HmBoard next = *b;
+        HmOptions cheap = *o;
+        int cut = id == 669 ? 1000 : 500, before, after;
+        cheap.budget = min(128, o->budget);
+        for (i = 0; i < 5; i++) if (next.enemy[i].id > 0) {
+            next.enemy[i].attack = clamp(next.enemy[i].attack - cut);
+            next.enemy[i].defense = clamp(next.enemy[i].defense - cut);
+        }
+        before = attacks(b, &cheap).score; after = attacks(&next, &cheap).score;
+        *first = after > before;
+        return max(0, after - before) + guarded(b) - guarded(&next);
     }
     if (id == 320) { /* Stop Defense: only use when it improves our attack sequence. */
         HmBoard next = *b;
@@ -296,6 +317,7 @@ static int spell(const HmBoard *b, const HmOptions *o, const HmRules *r,
         cheap.budget = min(128, o->budget);
         for (i = 0; i < 5; i++) next.enemy[i].flags &= ~HM_DEFENSE;
         before = attacks(b, &cheap); after = attacks(&next, &cheap);
+        *first = after.score > before.score;
         return max(0, after.score - before.score);
     }
     if (c.type == 23) {
@@ -309,6 +331,7 @@ static int spell(const HmBoard *b, const HmOptions *o, const HmRules *r,
             gain = bonus + max(0, attacks(&next, &cheap).score - attacks(b, &cheap).score);
             if (gain > score) { score = gain; *target = i + 1; }
         }
+        *first = score > 0; /* the bonus helps any attack it comes before */
         return score;
     }
     if (c.type == 22 && r->ritual(c.id)) return 2000;
@@ -319,7 +342,7 @@ HmDecision Hm_PlanField(const HmBoard *b, const HmOptions *o, const HmRules *r,
                         const HmDecision *retail)
 {
     HmDecision best = {{0}, 0, 0, 0}, a;
-    int i, target, score;
+    int i, target, score, first, lead;
     if (retail && !o->attacks && !o->defense && !o->spells) return *retail;
     if (retail && retail->result == 2) {
         int slot = retail->selection[9];
@@ -332,8 +355,13 @@ HmDecision Hm_PlanField(const HmBoard *b, const HmOptions *o, const HmRules *r,
             best.result = 2; best.selection[9] = i + 1; best.selection[11] = 1; return best;
         }
     if (o->attacks) best = attacks(b, o);
+    lead = o->attacks ? best.score : 0;
     if (o->spells) for (i = 0; i < 5; i++) if (b->back[i].id && !(b->back[i].flags & HM_USED)) {
-        score = spell(b, o, r, b->back[i], &target);
+        score = spell(b, o, r, b->back[i], &target, &first);
+        /* A card that makes the attacks better is worth those attacks and
+           more: it is played before them, not after (an equip on a monster
+           that has already attacked adds no damage). */
+        if (first && lead > 0) score += lead;
         if (score > best.score) {
             a = (HmDecision){{0}, 2, score, best.nodes};
             a.selection[9] = i + 6;
@@ -447,7 +475,7 @@ static void fusion_search(HandSearch *s, HmCard card, unsigned used, int count, 
 HmDecision Hm_PlanHand(const HmBoard *b, const HmOptions *o, const HmRules *r)
 {
     HandSearch s = {b, o, r, {{0}, 0, 0, 0}, 0, {0}};
-    int i, j, slot, target, score, immediate;
+    int i, j, slot, target, score, immediate, first;
     /* Score every single-card option before spending the bounded fusion budget. */
     for (i = 0; i < b->hand_count; i++) {
         HmCard c = b->hand[i];
@@ -464,7 +492,7 @@ HmDecision Hm_PlanHand(const HmBoard *b, const HmOptions *o, const HmRules *r)
             for (j = 0; j < 5; j++) if (!b->back[j].id) { slot = j + 6; break; }
             if (c.type == 22 && slot < 0) continue;
             target = 0;
-            score = o->spells ? spell(b, o, r, c, &target) : 0;
+            score = o->spells ? spell(b, o, r, c, &target, &first) : 0;
             /* Traps are reactive even when ai_effect gives them a useful
              * tactical analogue: set them for the duel's trigger logic,
              * never try to cast them as a Magic card. */

@@ -154,6 +154,26 @@ static void spell_cases(void)
     b = empty(); b.own[0] = monster(10,1000,1000); b.own[1] = monster(11,2000,1000);
     b.enemy[0] = monster(12,2500,2000); b.back[0] = magic(657,23);
     d = Hm_PlanField(&b,&o,&rules,0); assert(d.selection[9] == 6 && d.selection[10] == 2);
+    /* An equip goes before the attack it improves, even a direct one. */
+    b = empty(); b.own[0] = monster(1,3000,2500); b.back[0] = magic(657,23);
+    d = Hm_PlanField(&b,&o,&rules,0); assert(d.selection[9] == 6 && d.selection[10] == 1);
+    /* Stop Defense goes before the attacks it opens up. */
+    b = empty(); b.own[0] = monster(10,2000,1000); b.own[1] = monster(11,2000,1000);
+    b.enemy[0] = monster(12,1500,2500); b.enemy[0].flags = HM_DEFENSE; b.enemy[1] = monster(13,1000,500);
+    b.back[0] = magic(320,20);
+    d = Hm_PlanField(&b,&o,&rules,0); assert(d.selection[9] == 6);
+    /* Shadow Spell only when it changes a fight or a threat. */
+    b = empty(); b.own[0] = monster(1,3000,2500); b.own[0].flags = HM_USED;
+    b.enemy[0] = monster(12,1000,800); b.enemy[0].flags = HM_DEFENSE; b.back[0] = magic(669,20);
+    d = Hm_PlanField(&b,&o,&rules,0); assert(d.selection[9] != 6);
+    b.own[0] = monster(10,1800,1000); b.enemy[0] = monster(12,2200,2000);
+    d = Hm_PlanField(&b,&o,&rules,0); assert(d.selection[9] == 6);
+    /* Swords only against a threat. */
+    b = empty(); b.own[0] = monster(1,3000,2500); b.own[0].flags = HM_USED;
+    b.enemy[0] = monster(12,1000,800); b.back[0] = magic(348,20);
+    d = Hm_PlanField(&b,&o,&rules,0); assert(d.selection[9] != 6);
+    b.own[0] = monster(10,1000,800); b.own[0].flags = HM_USED; b.enemy[0] = monster(12,2500,2000);
+    d = Hm_PlanField(&b,&o,&rules,0); assert(d.selection[9] == 6);
     b = empty(); b.back[0] = magic(999,20);
     d = Hm_PlanField(&b,&o,&rules,0); assert(d.result == 3);
 }

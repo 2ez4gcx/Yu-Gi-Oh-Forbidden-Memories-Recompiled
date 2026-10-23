@@ -4,7 +4,7 @@ static int max(int a, int b) { return a > b ? a : b; }
 static int min(int a, int b) { return a < b ? a : b; }
 static int clamp(int n) { return max(0, min(9999, n)); }
 static int monster(HmCard c) { return c.id && c.type < 20; }
-static int value(HmCard c) { return max(c.attack, c.defense); }
+static int value(HmCard c) { return max(c.attack, c.defense) + c.worth; }
 static int occupied(const HmCard *row)
 {
     int n = 0, i;
@@ -235,18 +235,27 @@ static int removal_type(int effect)
 }
 
 /* What the opponent's next turn threatens: each monster's loss in its safer
- * stance, or a direct attack on an empty field. */
+ * stance (or the one it is held in after attacking), and, when every one
+ * falls, the direct attacks of the enemies left over after one each; past
+ * the AI's LP that is the duel. */
 static int guarded(const HmBoard *b)
 {
-    int i, loss = 0, open = 1, hit = 0;
+    int i, j, loss = 0, mine = 0, falls = 1, n = 0, hit = 0, power[5];
     if (b->enemy_pinned) return 0;
     for (i = 0; i < 5; i++) if (monster(b->own[i])) {
-        open = 0;
-        loss += min(safety(b, b->own[i], 0), safety(b, b->own[i], 1));
+        HmCard c = b->own[i];
+        int up = safety(b, c, 0), down = safety(b, c, 1);
+        int held = (c.flags & HM_USED) ? ((c.flags & HM_DEFENSE) ? down : up) : min(up, down);
+        loss += held; mine++;
+        if (!held) falls = 0;
     }
-    if (open) for (i = 0; i < 5; i++) if (b->enemy[i].id)
-        hit = max(hit, b->enemy[i].id < 0 ? HM_UNSEEN : b->enemy[i].attack);
-    return loss + hit;
+    for (i = 0; i < 5; i++) if (b->enemy[i].id) {
+        int p = b->enemy[i].id < 0 ? HM_UNSEEN : b->enemy[i].attack;
+        for (j = n++; j && power[j-1] < p; j--) power[j] = power[j-1];
+        power[j] = p;
+    }
+    if (falls) for (i = mine; i < n; i++) hit += power[i];
+    return loss + hit + (hit >= b->lp ? HM_WIN / 2 : 0);
 }
 
 /* Returns utility and an own-field target (equips only); *first is set when
@@ -300,11 +309,13 @@ static int spell(const HmBoard *b, const HmOptions *o, const HmRules *r,
     if (id == 349 || id == 669) { /* every visible enemy one level, or two, down */
         HmBoard next = *b;
         HmOptions cheap = *o;
-        int cut = id == 669 ? 1000 : 500, before, after;
+        int cut = id == 669 ? b->shadow_spell : b->spellbinding, before, after;
         cheap.budget = min(128, o->budget);
         for (i = 0; i < 5; i++) if (next.enemy[i].id > 0) {
+            int was = value(next.enemy[i]);
             next.enemy[i].attack = clamp(next.enemy[i].attack - cut);
             next.enemy[i].defense = clamp(next.enemy[i].defense - cut);
+            next.enemy[i].worth += was - value(next.enemy[i]);
         }
         before = attacks(b, &cheap).score; after = attacks(&next, &cheap).score;
         *first = after > before;
@@ -361,7 +372,7 @@ HmDecision Hm_PlanField(const HmBoard *b, const HmOptions *o, const HmRules *r,
         /* A card that makes the attacks better is worth those attacks and
            more: it is played before them, not after (an equip on a monster
            that has already attacked adds no damage). */
-        if (first && lead > 0) score += lead;
+        if (first && lead > 0 && lead < HM_WIN) score += lead;
         if (score > best.score) {
             a = (HmDecision){{0}, 2, score, best.nodes};
             a.selection[9] = i + 6;

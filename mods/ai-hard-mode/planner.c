@@ -41,19 +41,25 @@ int Hm_KeepValue(HmCard c)
     return 800;
 }
 
-/* Hidden cards arrive redacted (id=-1), with no secret identity or stats. */
-static int safety(const HmBoard *b, HmCard c, int defense)
+/* Hidden cards arrive redacted (id=-1), with no secret identity or stats,
+ * and are taken as 1800 ATK; so is a monster the opponent may still play
+ * (`unknown`). Enemies in `dead` are gone by then. */
+#define HM_UNSEEN 1800
+static int threat(const HmBoard *b, HmCard c, int defense, unsigned dead, int unknown)
 {
-    int loss = 0, i;
+    int loss = 0, i, diff;
     if (b->enemy_pinned) return 0;
-    for (i = 0; i < 5; i++) if (b->enemy[i].id) {
+    for (i = 0; i < 5; i++) if (b->enemy[i].id && !(dead & (1u << i))) {
         HmCard e = b->enemy[i];
-        int power = e.id < 0 ? 1800 : e.attack + Hm_StarBonus(e.star, c.star);
-        int diff = power - (defense ? c.defense : c.attack);
+        int power = e.id < 0 ? HM_UNSEEN : e.attack + Hm_StarBonus(e.star, c.star);
+        diff = power - (defense ? c.defense : c.attack);
         if (diff > 0) loss = max(loss, (defense ? 0 : diff) + value(c) / 2);
     }
+    diff = HM_UNSEEN - (defense ? c.defense : c.attack);
+    if (unknown && diff > 0) loss = max(loss, (defense ? 0 : diff) + value(c) / 2);
     return loss;
 }
+static int safety(const HmBoard *b, HmCard c, int defense) { return threat(b, c, defense, 0, 0); }
 
 int Hm_ChooseStar(const HmBoard *b, HmCard c, int pinned)
 {
@@ -84,6 +90,30 @@ typedef struct {
     int nodes;
 } AttackSearch;
 
+/* An attacker stays in attack position through the opponent's turn: what
+ * that costs over the safer stance it could otherwise take. */
+static int exposed(const HmBoard *b, HmCard a, unsigned dead)
+{
+    return max(0, threat(b, a, 0, dead, 1) - threat(b, a, 1, dead, 1));
+}
+/* A trade that takes the last monster, one that would otherwise hold
+ * (in defense against no more ATK than its DEF, or in attack against less
+ * than its ATK), leaves the field open to a direct attack from what the
+ * opponent still has, or may play. */
+static int emptied(const HmBoard *b, int attacker, unsigned dead, unsigned target)
+{
+    int i, hit = HM_UNSEEN, top = 0;
+    HmCard a = b->own[attacker];
+    if (b->enemy_pinned) return 0;
+    for (i = 0; i < 5; i++) if (i != attacker && monster(b->own[i])) return 0;
+    for (i = 0; i < 5; i++) if (b->enemy[i].id && !(dead & (1u << i)))
+        top = max(top, b->enemy[i].id < 0 ? HM_UNSEEN : b->enemy[i].attack + Hm_StarBonus(b->enemy[i].star, a.star));
+    if (top > a.defense && top >= a.attack) return 0;
+    dead |= target;
+    for (i = 0; i < 5; i++) if (b->enemy[i].id > 0 && !(dead & (1u << i))) hit = max(hit, b->enemy[i].attack);
+    return hit;
+}
+
 static int attack_options(AttackSearch *s, unsigned used, unsigned dead, Attack *out)
 {
     int i, j, n = 0, targets = 0;
@@ -92,7 +122,9 @@ static int attack_options(AttackSearch *s, unsigned used, unsigned dead, Attack 
         HmCard a = s->b->own[i];
         if (!monster(a) || (a.flags & HM_USED) || (used & (1u << i))) continue;
         if (!targets) {
-            out[n++] = (Attack){i, -1, a.attack, 0, 0, a.attack * 4, 0};
+            /* A 0 ATK attack changes nothing and would tie any sequence. */
+            if (a.attack > 0)
+                out[n++] = (Attack){i, -1, a.attack, 0, 0, a.attack * 4 - exposed(s->b, a, dead), 0};
             continue;
         }
         for (j = 0; j < 5; j++) {
@@ -104,14 +136,15 @@ static int attack_options(AttackSearch *s, unsigned used, unsigned dead, Attack 
                 /* A declared risk policy, never a peek at the hidden card. */
                 if (!s->o->blind_risk || a.attack < 3000 - s->o->blind_risk * 20) continue;
                 move.uncertain = 1;
-                move.gain = 100 + s->o->blind_risk * 3;
+                move.gain = 100 + s->o->blind_risk * 3 - exposed(s->b, a, dead);
             } else {
                 diff = a.attack + Hm_StarBonus(a.star, e.star) -
                     ((e.flags & HM_DEFENSE) ? e.defense : e.attack);
                 if (diff < 0 || (diff == 0 && ((e.flags & HM_DEFENSE) || !s->o->trades))) continue;
                 move.damage = (e.flags & HM_DEFENSE) ? 0 : diff;
                 move.removed = value(e) + 400;
-                move.lost = diff == 0 ? value(a) + 400 : 0;
+                move.lost = diff == 0 ? value(a) + 400 + emptied(s->b, i, dead, 1u << j) :
+                    exposed(s->b, a, dead | (1u << j));
                 move.gain = move.damage * 4 + move.removed - move.lost;
             }
             out[n++] = move;

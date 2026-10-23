@@ -96,6 +96,19 @@ static void tactical_cases(void)
     o.trades = 0;
     d = Hm_PlanField(&b,&o,&rules,0); assert(d.selection[10] == 0);
 
+    /* A 0 ATK wall does not lead an attack it adds nothing to. */
+    b = empty(); o = opts(); b.own[0] = monster(2,0,3000); b.own[1] = monster(3,3000,2500);
+    d = Hm_PlanField(&b,&o,&rules,0); assert(d.selection[9] == 2 && d.selection[10] == 58);
+    /* A 500/3500 wall keeps its defense rather than hit for 500. */
+    b.own[1] = (HmCard){0}; b.own[0] = monster(2,500,3500);
+    d = Hm_PlanField(&b,&o,&rules,0); assert(d.selection[9] == 1 && d.selection[10] == 0);
+    /* An equal trade with the last monster, which would hold in defense,
+       opens the field to whatever the opponent plays next. */
+    b = empty(); b.own[0] = monster(3,1500,2000); b.enemy[0] = monster(4,1500,2100);
+    d = Hm_PlanField(&b,&o,&rules,0); assert(d.selection[9] == 1 && d.selection[10] == 0);
+    b.own[1] = monster(6,1000,2500); b.own[1].flags = HM_USED;
+    d = Hm_PlanField(&b,&o,&rules,0); assert(d.selection[9] == 1 && d.selection[10] == 56);
+
     b = empty(); o = opts(); b.own[0] = monster(1,3000,2500);
     b.enemy[0] = (HmCard){-1,0,0,0,0,0,0,HM_DOWN}; o.blind_risk = 0;
     d = Hm_PlanField(&b,&o,&rules,0); assert(d.selection[10] == 0);

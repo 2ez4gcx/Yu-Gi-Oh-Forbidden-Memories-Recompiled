@@ -15,11 +15,11 @@ Mods window and apply to subsequent decisions.
 | Plan hand plays | Score single cards, field upgrades, fusion chains and useful spell plays. Off uses the original hand script. |
 | Search fusion chains | Include fusion and equip chains in planned hand plays. Requires Plan hand plays. |
 | Choose guardian stars | Compare both stars for new monster plays, including when using the original hand script. |
-| Plan attack sequences | Search attack orders, preserving stronger attackers when an economical attacker suffices. Check winning sequences before fixed wall-card defense. |
+| Plan attack sequences | Search attack orders, preserving stronger attackers when an economical attacker suffices. An attack costs what the attacker risks left in attack position through the opponent's turn (against what it can see and one more 1800 ATK monster), so a wall does not trade its defense for a few points; a direct attack for 0 is never made. Check winning sequences before fixed wall-card defense. |
 | Situational defense | Compare the predicted damage and loss in attack versus defense; when they are equal (nothing visible can hurt it, or Swords of Revealing Light holds the opponent through its next turn) a monster with more DEF than ATK takes defense. Off retains the original wall/position policy. |
 | Smarter spell timing | Evaluate burn, healing, removal, equips, terrain, Swords, reveal, Stop Defense and available rituals. Unknown effects stay set. |
 | Use effective stats | Use current field modifiers and project terrain onto candidate monsters. Off scores field cards using their printed stats. |
-| Allow equal-power trades | Include equal-ATK trades when the sequence is valuable. |
+| Allow equal-power trades | Include equal-ATK trades when the sequence is valuable. A trade that takes the last monster, when it could have held, also counts the direct attack it opens the field to. |
 | Preserve valuable hand cards | When using upcoming deck cards, exchange the least valuable unselected held card instead of the first slot. |
 | Deck access | Original opponent limits, five-card hand only, or a custom window of 5–20 cards. The window includes the actual hand. |
 | Hidden-card knowledge | Original opponent knowledge, no hidden stats, or knowledge of hidden stats for every opponent. |

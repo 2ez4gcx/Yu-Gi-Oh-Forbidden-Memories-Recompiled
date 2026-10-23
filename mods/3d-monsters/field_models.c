@@ -2839,8 +2839,8 @@ static void draw_frame(void)
                 *(const s16 *)&card->pad_08[2] + BOARD_CARD_FEET > BOARD_PANEL_TOP) {
                 continue; /* its card has gone under the panel */
             }
-            /* A card a card mod added stands as the retail card it is a
-             * copy of: MODEL.MRG has the disc's monsters only. */
+            /* A card a card mod added stands as the model it names, else
+             * as the retail card it is a copy of. */
             if (!tunable("test", 0)) {
                 id = Cards_ModelId(id);
             }

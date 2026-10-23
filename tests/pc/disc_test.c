@@ -131,6 +131,11 @@ static int models_case(void)
     write_file("mods/m-models/two.bin", two, sizeof(two));
     manifest("n-big", "{\"enabled\":true,\"models\":[{\"name\":\"big\",\"file\":\"big.bin\"}]}");
     write_file("mods/n-big/big.bin", big, sizeof(big));   /* one byte past a record */
+    /* Loaded after them, MODEL.MRG replaced whole by one sector: the added
+       records stay theirs. */
+    manifest("o-whole", "{\"enabled\":true,\"data\":[{\"file\":\"\\\\DATA\\\\MODEL.MRG;1\",\"replace\":\"model.bin\"}]}");
+    memset(got, 0x77, sizeof(got));
+    write_file("mods/o-whole/model.bin", got, sizeof(got));
     snprintf(path, sizeof(path), "%s/mods", root); assert(!setenv("MEMORIES_MODS_DIR", path, 1));
     assert(!setenv("MEMORIES_USER_DIR", root, 1));
     snprintf(path, sizeof(path), "%s/settings", root); assert(!setenv("MEMORIES_SETTINGS", path, 1));
@@ -142,7 +147,11 @@ static int models_case(void)
     assert(Mods_Model(1, &name, NULL, NULL) == 3 && !strcmp(name, "two"));
     assert(Mods_Model(2, NULL, NULL, NULL) == -1);
     assert(!Memories_DiscFileInfo("\\DATA\\MODEL.MRG;1", &lba, &bytes) && bytes == 4 * RECORD && lba >= 600);
-    assert(Memories_DiscReadSectors(lba, 1, got) == 1 && got[0] == 20 && got[2047] == 20);   /* the disc's */
+    assert(Memories_DiscReadSectors(lba, 1, got) == 1 && got[0] == 0x77);                    /* o-whole's */
+    assert(Memories_DiscReadSectors(lba + 1, 1, got) == 1 && got[0] == 0);                   /* past it */
+    /* At the file's disc place the whole replacement, as for CARD.MRG, and
+       never an added record. */
+    assert(Memories_DiscReadSectors(20, 1, got) == 1 && got[0] == 0x77);
     assert(Memories_DiscReadSectors(lba + 2 * 0x114, 1, got) == 1 && got[0] == 0x11);        /* one */
     assert(Memories_DiscReadSectors(lba + 3 * 0x114 + 5, 1, got) == 1 && got[0] == 6);       /* two */
     assert(Memories_DiscReadSectors(lba + 3 * 0x114 + 0x113, 1, got) == 1 && got[0] == 0);   /* past its file */

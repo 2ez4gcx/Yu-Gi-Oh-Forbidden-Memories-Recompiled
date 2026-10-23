@@ -127,7 +127,8 @@ def run(binary: Path, disc: Path, out: Path, kind: str, record: bytes) -> dict:
             for _ in range(150):
                 game.step(4)
                 for slot in (0, 1):
-                    if wanted is not None and "slot" not in result and                             game.u16(SLOTS, slot * SLOT_SIZE + SLOT_MODEL) == wanted:
+                    if wanted is not None and "slot" not in result and \
+                            game.u16(SLOTS, slot * SLOT_SIZE + SLOT_MODEL) == wanted:
                         game.step(60)
                         result["slot"], result["data"] = slot, game.peek(SLOT_DATA[slot], MODEL_DATA)
                         game.step(60)

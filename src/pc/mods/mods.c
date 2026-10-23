@@ -140,7 +140,7 @@ static int shut_down;   /* Mods_Shutdown has run: no mod code is called again */
 static Region regions[REGIONS_MAX];
 static int region_count;
 /* The models mods add: each one's record follows the disc's in MODEL.MRG
- * (and the ones added before it), and cards name it (src/pc/cards/models.c). */
+ * (and the ones added before it), and cards name it (src/pc/cards/cards.c). */
 typedef struct {
     int mod, record;
     const char *name;
@@ -726,6 +726,7 @@ unsigned Mods_DiscSignature(void)
         hash = hash_bytes(hash, &regions[i].hash, sizeof(regions[i].hash));
         hash = hash_bytes(hash, &regions[i].lba, sizeof(regions[i].lba));
         hash = hash_bytes(hash, &regions[i].sectors, sizeof(regions[i].sectors));
+        hash = hash_bytes(hash, &regions[i].start, sizeof(regions[i].start));
     }
     for (int i = 0; i < patch_count; i++) {
         hash = hash_bytes(hash, &patches[i].lba, sizeof(patches[i].lba));
@@ -1137,14 +1138,18 @@ int Mods_DiscSector(int lba, void *user_data)
         relative = lba - disc_files[named].lba;
         physical = relative < disc_files[named].retail_sectors ? disc_files[named].retail_lba + relative : -1;
     }
-    for (i = 0; i < published_regions; i++) {
+    /* Whole replacements first, then the parts a mod adds to a file (its
+     * "models"), which a whole replacement in any order leaves in place. */
+    for (int pass = 0; pass < 2; pass++) for (i = 0; i < published_regions; i++) {
         const Region *region = &regions[i];
         size_t at, have;
+        if ((region->start >= 0) != pass) continue;
         if (named >= 0 && region->file == named) {
             if (region->start >= 0 && (relative < region->start || relative - region->start >= region->sectors))
                 continue;
             at = (size_t)(relative - (region->start >= 0 ? region->start : 0)) * SECTOR;
         } else {
+            if (region->start >= 0) continue;   /* a part is only ever its file's */
             if (physical < region->lba || physical - region->lba >= region->sectors) continue;
             at = (size_t)(physical - region->lba) * SECTOR;
         }

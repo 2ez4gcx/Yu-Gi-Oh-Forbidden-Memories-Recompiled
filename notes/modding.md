@@ -663,6 +663,12 @@ replaced card of the disc may take one too (`"replace": 1, "model":
   without `stars` takes the base's guardian stars (the Sun and the Moon
   without one).
 
+With the US disc there is room for about 200 added models in all: adding
+any moves the whole of `MODEL.MRG` past the disc's end, and the drive's
+addresses stop at 99:59:74. A mod past that is refused whole. A mod that
+replaces `MODEL.MRG` whole (`data`) still has the added records after the
+disc's 621: they are read from their mods whatever the order.
+
 Like data overrides, a mod with models needs a restart. Its records are
 added after the disc's in the order the mods load, so a model's place is
 not fixed from one set of mods to the next: cards name models, never their
@@ -689,9 +695,9 @@ The control modules are MIPS code built for their slot's addresses
 (`0x8013A000`/`0x8013B000`, `0x8017A000`/`0x8017B000`), which the port runs in
 its interpreter (`src/pc/guest/mips.c`), as it runs the disc's. A disc record
 is a starting point. Card C's (a monster: cards 301-350, 651-700 and 721 have
-none) is record C - 1, less 50 when C - 1 is 350 or more, 50 more when it is
-700 or more and 1 more when it is 721 or more; it is the 276 sectors from
-`MODEL.MRG`'s start plus 276 times that.
+none) is record number C - 1, from which take 50 when C - 1 is 350 or more,
+another 50 when it is 700 or more and another 1 when it is 721 or more; the
+record is the 276 sectors from `MODEL.MRG`'s start plus 276 times that number.
 
 A model is as big as the disc's are: 192 KiB of model data, the texture
 column of one slot, eight palettes. The disc's models use nearly all of the

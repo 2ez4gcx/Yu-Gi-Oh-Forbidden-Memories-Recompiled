@@ -71,6 +71,7 @@ editors write, is fine):
 | `limits` | the numbers the game caps (ATK and DEF, life points, starchips, the chest, the records) and the cards a won duel deals (`card_drops`), below |
 | `guardian_stars` | the stars' names and icons, stars 11 to 15, and what each star gets against each other, below |
 | `attributes` | the six retail attribute names, and new monster attributes from the port's attribute bank, below |
+| `fields` | the six retail field names, and new named fields with an optional board picture, below |
 | `card_text_colors` | the color a card's name, description and guardian star are written in on its details, below |
 | `palette_ramps` | the game's eight text color ramps, and ramps of the mod's own for its code to draw with, below |
 | `starter` | the forty cards a new game begins with, one deck or a list of them, below |
@@ -122,6 +123,7 @@ checked as well, when it starts.
 | 16 | the release after v0.3.0 | mod-defined card attributes (`attributes`) |
 | 17 | the release after v0.3.0 | a duelist's `bust` or `replace_bust`; a tower story's `"expression"` by name ([More duelists](more-duelists.md#bust--the-large-character)) |
 | 18 | the release after v0.3.0 | the card frames' keys ([Frame styles](#frame-styles-and-the-rules-that-pick-them)): a card's `frame_style`; `card_layout`'s `default_styles`, `atk_label`, `dfd_label` and `type_label`; in a `frame_styles` entry `hand`, `hand_image`, `field_image`, `field_back_image`, `back_image`, `library_icon`, `full_bleed`, `atk_label`, `dfd_label`, `type_label`, `digits`, or a part of its own (`title`, `stars`, `attribute`, `spell`, `art`, `atk`, `def`); a `hide`, `hidden`, `show` or `color` on a card part; `digits`' own `atk` and `def` |
+| 20 | the release after v0.3.0 | `fields`: renamed retail fields, new fields and their pictures; a monster effect's `"do": "change_field"` |
 
 The FM Editor writes `min_api` on save as the lowest one of these that has
 everything the mod uses, never lowering one written higher, and its Mod
@@ -1437,6 +1439,7 @@ copies with no limit of three (`{"fixed": true, "Kuriboh": 4, ...}`).
 the chest and makes each card past them worth 3 starchips instead of lost.
 `"terrain_bonus": {"Forest": {"Beast": 300, "Fairy": -200}}` sets, in points,
 what a terrain gives a monster type.
+New fields can be named here as well; see [Fields](#fields-names-pictures-and-bonuses).
 A ritual takes one to five tributes, from the field (as on the disc), the
 hand (`"tributes_from": "hand"`) or both (`"both"`).
 An equip entry's `"bonus": 800` and `"bonus_if": {"Dragon": 1000, "Light": 700}`
@@ -1552,6 +1555,54 @@ attribute icons always use the PNG's palette and scale through the texture
 pack at the game's internal resolution. Give it a numeric id in hand-written
 mods when sharing with older tools that do not yet know its name.
 Use `attributes` and set `"min_api": 16`.
+
+## Fields: names, pictures and bonuses
+
+`fields` is the duel-field registry. The board's initial `Normal` field,
+and the retail fields `Forest`,
+`Wasteland`, `Mountain`, `Sogen`/`Meadow`, `Umi`/`Sea` and `Yami`/`Dark`.
+Each new entry receives the next free field id (7 through 255); `replace`
+names `Normal` or one of the retail fields when the entry changes its board.
+`Normal` is an image-only replacement, not a field spell or a terrain-bonus
+target. A field name can
+then be used wherever a field is accepted, including a tower floor and
+`terrain_bonus`. `image` is one PNG relative to the mod folder. The engine
+cuts its 256x254 board layout into the five floor strips, exactly as the FM
+Editor does, so no texture-pack manifest is needed.
+
+Added fields live in the field bank: their 7--255 rule ids are independent
+of the six retail board uploads. This means any number of custom fields may
+reuse the renderer's retail slots without one mod's picture replacing another
+one. When a card changes to a custom field, its own banked picture is selected
+immediately; disabling every such mod leaves the retail renderer and models
+unchanged.
+
+The centre band is 46 pixels high. By default the board uses the retail
+repeated/mirrored centre half: the same picture is drawn in full on each half,
+flipped left-right on the half nearest the camera, so it folds at the seam
+between them. Set `"mirror": false` on an added field to read its one centre
+picture once across the whole strip instead: the picture's top half stretches
+over the far half of the strip and its bottom half over the near half,
+right way round, continuing past the seam rather than folding there. No
+second image or manifest entry is needed.
+
+A monster effect with `"do": "change_field"` uses the same animated
+field-spell sequence as a retail Field Spell. The field-bank image is selected
+first, then the game's swirl, sound and delayed board swap run normally.
+
+```json
+"fields": {
+    "fields": [
+        {"replace": "Forest", "name": "Grove", "image": "fields/grove.png"},
+        {"name": "Volcano", "image": "fields/volcano.png", "mirror": false}
+    ]
+},
+"terrain_bonus": {"Volcano": {"Dragon": 500, "Aqua": -300}}
+```
+
+Later active mods may replace a field's name and image; the original retail
+names remain aliases after a rename. Names compare without case or
+punctuation and must be unique. Use `fields` and set `"min_api": 20`.
 
 ## Guardian Stars: names, icons, new stars and matchups
 

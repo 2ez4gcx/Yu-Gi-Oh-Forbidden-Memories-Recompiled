@@ -13,6 +13,7 @@
 #include "card_layout_art.h"
 #include "card_notes.h"
 #include "monster_effects.h"
+#include "fields.h"
 #include "tables.h"
 #include "starter.h"
 #include "stars.h"
@@ -1900,6 +1901,7 @@ void Cards_Build(void)
     if (built) return;
     built = 1;
     Attributes_Build();
+    Fields_Build();
     build_monster_types();
     memset(extended_types, 0xFF, sizeof(extended_types));
     gCard_nCount = CARD_COUNT;

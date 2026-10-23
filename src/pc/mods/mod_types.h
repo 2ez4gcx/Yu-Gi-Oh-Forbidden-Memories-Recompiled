@@ -1,6 +1,6 @@
 #ifndef MEMORIES_MOD_TYPES_H
 #define MEMORIES_MOD_TYPES_H
-#define MEMORIES_MOD_API 19
+#define MEMORIES_MOD_API 20
 /* API 15: card_types names the existing type ids and declares monster ids
  * 24-255, with optional per-custom-type icons. It has no host entry: cards
  * and gameplay tables resolve its names. */
@@ -16,7 +16,7 @@
  * tower story's "expression" by name; API 18 for the card frames' keys
  * (card_layout's default_styles, a frame style's hand, images, library_icon
  * and own parts, atk_label/dfd_label/type_label, a part's hide or color, and
- * a card's frame_style). API 19 adds the named field registry ("fields")
+ * a card's frame_style). API 20 adds the named field registry ("fields")
  * and its optional field pictures. */
 /* API 3: before hooks may alter arguments/result, or set handled to replace
  * the operation (including cancellation). Highest priority runs first;

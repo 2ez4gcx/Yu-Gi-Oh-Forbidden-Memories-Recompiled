@@ -121,3 +121,9 @@ accept v0.3.0 record MonsterEffect widened attribute and each_attribute into the
 # ControlProtocol_Parse for the channel MEMORIES_CONTROL opens (src/pc/debug);
 # no mod parses control lines or receives one.
 accept v0.3.0 record ControlCommand grew by symbol and offset at its end
+
+# PR #394 (mod-defined fields): MonsterEffect_DoNames gained "change_field"
+# after the five it had. The array only grew at its end: a v0.3.0 mod reads
+# entries 0-4 (its own MONSTER_DO_COUNT) at the same places with the same
+# names, and never writes the const table.
+accept v0.3.0 variable MonsterEffect_DoNames grew by change_field at its end

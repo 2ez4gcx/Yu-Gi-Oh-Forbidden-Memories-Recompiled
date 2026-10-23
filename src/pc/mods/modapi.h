@@ -56,7 +56,9 @@
  *      event change
  *  18  the card frames' card_layout keys and a card's frame_style
  *      (notes/modding.md) only; no host layout or event change
- *  19  "fields" (manifest only); no host layout or event change
+ *  19  (held for the extended monster effects, PR #391)
+ *  20  "fields" and the "change_field" monster effect (manifest only); no
+ *      host layout or event change
  * A data mod declares its required version with min_api in mod.json. */
 #include "mod_types.h"
 

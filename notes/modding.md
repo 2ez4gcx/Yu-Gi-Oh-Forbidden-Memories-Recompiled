@@ -123,7 +123,7 @@ checked as well, when it starts.
 | 16 | the release after v0.3.0 | mod-defined card attributes (`attributes`) |
 | 17 | the release after v0.3.0 | a duelist's `bust` or `replace_bust`; a tower story's `"expression"` by name ([More duelists](more-duelists.md#bust--the-large-character)) |
 | 18 | the release after v0.3.0 | the card frames' keys ([Frame styles](#frame-styles-and-the-rules-that-pick-them)): a card's `frame_style`; `card_layout`'s `default_styles`, `atk_label`, `dfd_label` and `type_label`; in a `frame_styles` entry `hand`, `hand_image`, `field_image`, `field_back_image`, `back_image`, `library_icon`, `full_bleed`, `atk_label`, `dfd_label`, `type_label`, `digits`, or a part of its own (`title`, `stars`, `attribute`, `spell`, `art`, `atk`, `def`); a `hide`, `hidden`, `show` or `color` on a card part; `digits`' own `atk` and `def` |
-| 19 | the release after v0.3.0 | `fields`: renamed retail fields, new fields and their pictures |
+| 20 | the release after v0.3.0 | `fields`: renamed retail fields, new fields and their pictures; a monster effect's `"do": "change_field"` |
 
 The FM Editor writes `min_api` on save as the lowest one of these that has
 everything the mod uses, never lowering one written higher, and its Mod
@@ -1602,7 +1602,7 @@ first, then the game's swirl, sound and delayed board swap run normally.
 
 Later active mods may replace a field's name and image; the original retail
 names remain aliases after a rename. Names compare without case or
-punctuation and must be unique. Use `fields` and set `"min_api": 19`.
+punctuation and must be unique. Use `fields` and set `"min_api": 20`.
 
 ## Guardian Stars: names, icons, new stars and matchups
 

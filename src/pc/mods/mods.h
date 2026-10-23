@@ -130,6 +130,12 @@ int Mods_DiscFileInfo(int retail_lba, int *lba, unsigned *size);
 int Mods_DiscSource(int lba, int *physical_lba);
 int Mods_DiscOrigin(int lba);
 unsigned Mods_DiscSignature(void);
+/* The battle models mods add ("models"), in load order: model i's
+ * MODEL.MRG record (after the disc's), or -1 past the last; its name, its
+ * "base" (a monster of the disc it stands in for where the game looks a
+ * model up as a card, or NULL) and its mod. src/pc/cards/cards.c names them. */
+int Mods_ModelCount(void);
+int Mods_Model(int i, const char **name, const struct JsonValue **base, int *mod);
 
 /* Manager metadata and configuration. Borrowed strings live until exit. */
 const struct JsonValue *Mods_Manifest(int mod);

@@ -124,6 +124,7 @@ checked as well, when it starts.
 | 17 | the release after v0.3.0 | a duelist's `bust` or `replace_bust`; a tower story's `"expression"` by name ([More duelists](more-duelists.md#bust--the-large-character)) |
 | 18 | the release after v0.3.0 | the card frames' keys ([Frame styles](#frame-styles-and-the-rules-that-pick-them)): a card's `frame_style`; `card_layout`'s `default_styles`, `atk_label`, `dfd_label` and `type_label`; in a `frame_styles` entry `hand`, `hand_image`, `field_image`, `field_back_image`, `back_image`, `library_icon`, `full_bleed`, `atk_label`, `dfd_label`, `type_label`, `digits`, or a part of its own (`title`, `stars`, `attribute`, `spell`, `art`, `atk`, `def`); a `hide`, `hidden`, `show` or `color` on a card part; `digits`' own `atk` and `def` |
 | 20 | the release after v0.3.0 | `fields`: renamed retail fields, new fields and their pictures; a monster effect's `"do": "change_field"` |
+| 21 | the release after v0.3.0 | `models`: battle models the mod adds ([Battle models](#battle-models-monsters-the-disc-does-not-have)), and a card's `model` naming one |
 
 The FM Editor writes `min_api` on save as the lowest one of these that has
 everything the mod uses, never lowering one written higher, and its Mod
@@ -627,6 +628,80 @@ up, a magic card's effect, a boost, healing or damage, which `for_each`
 makes once per face-up monster counted ("+300 for each Dragon on your
 field") ([Monster effects](more-cards.md#monster-effects)). A `description` may
 hold icons and colors ([Card text codes](more-cards.md#card-text-codes)).
+
+## Battle models: monsters the disc does not have
+
+The disc has one battle model for each of its 621 monsters: a record of
+`MODEL.MRG` that holds the model, its textures, its attack choreography and
+its voice. A mod may add more with `models`, without giving up any of the
+disc's, and a card names one with `model`:
+
+```json
+"min_api": 21,
+"models": [
+    { "name": "pikachu", "file": "models/pikachu.mrg", "base": "Mystical Elf" }
+],
+"cards": [
+    { "copy": "Kuriboh", "name": "Pikachu", "model": "pikachu" }
+]
+```
+
+The card then fights as that model in the battle presentation, stands as it
+on the field with 3D Monsters on, and turns in the Library's model view. A
+replaced card of the disc may take one too (`"replace": 1, "model":
+"pikachu"`).
+
+* `name` is what a card's `model` says. A model's name comes before a card's
+  of the same name; two mods with a model of one name: the later one in the
+  load order wins.
+* `file` is one record, in the disc's own layout (below): at most 276
+  sectors, 565,248 bytes. A shorter file reads as zeros to the end of the
+  record; a longer one is refused, and the mod with it.
+* `base` (optional) is a monster of the disc the model stands in for where
+  the game looks a model up as a card: the battle's opening and the attack's
+  sound treat a Spellcaster base differently, and a card made a monster
+  without `stars` takes the base's guardian stars (the Sun and the Moon
+  without one).
+
+With the US disc there is room for about 200 added models in all: adding
+any moves the whole of `MODEL.MRG` past the disc's end, and the drive's
+addresses stop at 99:59:74. A mod past that is refused whole. A mod that
+replaces `MODEL.MRG` whole (`data`) still has the added records after the
+disc's 621: they are read from their mods whatever the order.
+
+Like data overrides, a mod with models needs a restart. Its records are
+added after the disc's in the order the mods load, so a model's place is
+not fixed from one set of mods to the next: cards name models, never their
+places.
+
+### The record
+
+A record is read in seventeen stages (`func_80056D7C`,
+[high-memory load addresses](high-memory-load-addresses.md#model-record-phase-map)):
+
+| sectors | what |
+|---:|---|
+| 96 | the model and its animations, loaded where the slot's model data goes |
+| 48 | texture pixels, 64x16 a sector, into the slot's 256-pixel-wide VRAM column |
+| 2 + 1 | the palettes (256x8) and one more VRAM row |
+| 16 | stance 0's own texture pixels; then 1 sector and 16 for stance 1 |
+| 10 x 4 | the variant control module for slot 0 and slot 1, stance 0 and stance 1 |
+| 2 x 2 | the primary control module for slot 0 and slot 1 |
+| 1 | the slot's sound sequence bank |
+| 50 | the voice: ADPCM samples |
+| 1 | metadata |
+
+The control modules are MIPS code built for their slot's addresses
+(`0x8013A000`/`0x8013B000`, `0x8017A000`/`0x8017B000`), which the port runs in
+its interpreter (`src/pc/guest/mips.c`), as it runs the disc's. A disc record
+is a starting point. Card C's (a monster: cards 301-350, 651-700 and 721 have
+none) is record number C - 1, from which take 50 when C - 1 is 350 or more,
+another 50 when it is 700 or more and another 1 when it is 721 or more; the
+record is the 276 sectors from `MODEL.MRG`'s start plus 276 times that number.
+
+A model is as big as the disc's are: 192 KiB of model data, the texture
+column of one slot, eight palettes. The disc's models use nearly all of the
+model data already.
 
 ## Audio: songs, voices and sounds from files
 

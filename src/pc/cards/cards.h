@@ -45,6 +45,16 @@ void Cards_Build(void);
 const char *Cards_Identity(int id);
 int Cards_FindIdentity(const char *identity);
 int Cards_ModelId(int id);
+/* Battle models go by model id, a card id less one on the disc (one
+ * MODEL.MRG record per monster, src/game/model_load_monster_merge.c). A
+ * model a mod adds ("models", notes/modding.md) is CARDS_MODEL_MOD_FIRST plus
+ * its record, above every card id, so a table indexed by card id is never
+ * indexed by one. Cards_ModelRecord gives a mod model's record (-1 for any
+ * other id), and Cards_ModelStatsIndex the gDuel_adwCardStats index the game
+ * reads for a model: its own card's, or a mod model's "base" (0 without). */
+#define CARDS_MODEL_MOD_FIRST 0x8000
+int Cards_ModelRecord(int model);
+int Cards_ModelStatsIndex(int model);
 int Cards_EffectId(int id);
 /* Data-defined effects for a Magic or Trap card.  "card_effects" either
  * supplements its retail/aliased effect or replaces it entirely. */

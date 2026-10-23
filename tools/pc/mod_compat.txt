@@ -127,3 +127,12 @@ accept v0.3.0 record ControlCommand grew by symbol and offset at its end
 # entries 0-4 (its own MONSTER_DO_COUNT) at the same places with the same
 # names, and never writes the const table.
 accept v0.3.0 variable MonsterEffect_DoNames grew by change_field at its end
+
+# PR #398 (battle models a mod adds): AnimatedBattleModelProperties's
+# model_id is u16 where it was s16, as a mod's model is 0x8000 and up
+# (CARDS_MODEL_MOD_FIRST, pc/cards/cards.h). Same size and offset; every
+# model of the disc (1-722) reads the same either way, and a mod built
+# against the s16 sees a mod's model as negative, a model id no card has.
+accept v0.1.2 record AnimatedBattleModelProperties reads model_id unsigned, for a mod's models from 0x8000
+accept v0.2.0 record AnimatedBattleModelProperties reads model_id unsigned, for a mod's models from 0x8000
+accept v0.3.0 record AnimatedBattleModelProperties reads model_id unsigned, for a mod's models from 0x8000

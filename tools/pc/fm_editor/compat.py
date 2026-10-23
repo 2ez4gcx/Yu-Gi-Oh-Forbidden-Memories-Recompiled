@@ -19,7 +19,7 @@ from pathlib import Path
 from .gamedata import FRAME_COLOR_NAMES, TYPE_MAGIC
 from .model import type_named
 
-HOST_API = 20
+HOST_API = 21
 
 # The release each mod API first shipped in, for the hints. An API past the
 # last listed is newer than every release.
@@ -241,6 +241,9 @@ def features(manifest: dict, project=None) -> list:
         for effect in _entries(entry.get("monster_effects")):
             if isinstance(effect, dict) and effect.get("do") == "change_field":
                 add(20, "a monster effect that changes the field (\"change_field\")")
+    # --- API 21 -------------------------------------------------------------
+    if manifest.get("models"):
+        add(21, "battle models the mod adds (\"models\")")
     return out
 
 

@@ -283,9 +283,13 @@ static u32 isqrt(u64 value)
 }
 
 /* Model_LoadMonsterMerge's own arithmetic: the three id ranges with no record
- * are rejected and every id above one is biased down. */
+ * are rejected and every id above one is biased down. A mod's model has its
+ * record after the disc's (pc/cards/cards.h). */
 static int mrg_record(int model)
 {
+    if (model >= CARDS_MODEL_MOD_FIRST) {
+        return Cards_ModelRecord(model);
+    }
     if (model < 0 || model >= MODEL_MRG_ID_END ||
         (model >= MODEL_MRG_FIRST_GAP_START && model < MODEL_MRG_FIRST_GAP_END) ||
         (model >= MODEL_MRG_SECOND_GAP_START && model < MODEL_MRG_SECOND_GAP_END) ||
@@ -2835,8 +2839,8 @@ static void draw_frame(void)
                 *(const s16 *)&card->pad_08[2] + BOARD_CARD_FEET > BOARD_PANEL_TOP) {
                 continue; /* its card has gone under the panel */
             }
-            /* A card a card mod added stands as the retail card it is a
-             * copy of: MODEL.MRG has the disc's monsters only. */
+            /* A card a card mod added stands as the model it names, else
+             * as the retail card it is a copy of. */
             if (!tunable("test", 0)) {
                 id = Cards_ModelId(id);
             }

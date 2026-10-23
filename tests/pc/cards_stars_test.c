@@ -40,6 +40,20 @@ unsigned char gDuel_abCardLevelAttr[CARD_TABLE_ID_END];
 static int notes[8];     /* per mod, "a" to "h" (h: not counting a slot replaced twice) */
 static int effect_notes; /* of them, about "monster_effects" */
 
+/* The models mods add ("models"): mod_models() fills these. */
+static const char *model_names[2];
+static JsonDocument *model_bases[2];
+static int model_count_here;
+int Mods_ModelCount(void) { return model_count_here; }
+int Mods_Model(int i, const char **name, const struct JsonValue **base, int *mod)
+{
+    if (i < 0 || i >= model_count_here) return -1;
+    if (name) *name = model_names[i];
+    if (base) *base = model_bases[i] ? Json_At(Json_Root(model_bases[i]), 0) : NULL;
+    if (mod) *mod = 0;
+    return 621 + i;
+}
+
 void Mods_Note(const char *id, const char *format, ...)
 {
     char note[512];
@@ -438,6 +452,50 @@ static void monster_effect_type_overflow(void)
 /* Cards_Reference reads Json_Number's long before Cards_Valid's int: a
  * reference far past int range must not wrap into a valid card id (card 1,
  * from 2^32 + 1 narrowed to 1 on a typical 64-bit build). */
+/* "model" naming a mod's model (API 21): a replace's and a copy's, its
+ * record, its base's stats for the game and its stars for a monster made
+ * from a magic card; an unknown name is refused, a disc monster still taken. */
+static void mod_models(void)
+{
+    BuildContext context = {0};
+    char error[256];
+    const JsonValue *entry;
+    int i, copy;
+    JsonDocument *doc;
+    model_names[0] = "pikachu";
+    test_stats[39] = STATS(1, MARS, SUN);    /* card 40, the base: a Spellcaster */
+    test_stats[349] = STATS(CARD_TYPE_MAGIC, 0, 0);   /* card 350, a magic card */
+    gDuel_adwCardStats[349] = (int)test_stats[349];
+    model_bases[0] = Json_Parse("[40]", error, sizeof(error));
+    model_names[1] = "bulbasaur";
+    model_bases[1] = NULL;
+    model_count_here = 2;
+    assert(Cards_ModelRecord(CARDS_MODEL_MOD_FIRST + 621) == 621);
+    assert(Cards_ModelRecord(CARDS_MODEL_MOD_FIRST + 623) == -1);
+    assert(Cards_ModelRecord(0) == -1 && Cards_ModelRecord(CARD_COUNT) == -1);
+    assert(Cards_ModelStatsIndex(CARDS_MODEL_MOD_FIRST + 621) == 39);
+    assert(Cards_ModelStatsIndex(CARDS_MODEL_MOD_FIRST + 622) == 0);  /* no base */
+    assert(Cards_ModelStatsIndex(5) == 5);
+    doc = Json_Parse("[{\"replace\":20,\"model\":\"pikachu\"},"
+                     "{\"replace\":350,\"type\":\"Dragon\",\"model\":\"pikachu\"},"
+                     "{\"copy\":21,\"id\":\"bulba\",\"model\":\"bulbasaur\"},"
+                     "{\"replace\":22,\"model\":\"charmander\"},"
+                     "{\"replace\":23,\"model\":40}]", error, sizeof(error));
+    assert(doc);
+    copy = gCard_nCount + 1;
+    for (i = 0, entry = Json_At(Json_Root(doc), 0); entry; i++, entry = Json_Next(entry))
+        add_entry("m", ".", i, entry, &context);
+    assert(Cards_ModelId(20) == CARDS_MODEL_MOD_FIRST + 621 + 1 && Cards_HasModel(20));
+    assert(Cards_ModelId(350) == CARDS_MODEL_MOD_FIRST + 621 + 1 && Cards_HasModel(350));
+    expect(350, MARS, SUN);                    /* the base's stars */
+    assert(Cards_ModelId(copy) == CARDS_MODEL_MOD_FIRST + 622 + 1 && Cards_HasModel(copy));
+    assert(Cards_ModelId(22) == 22);           /* "charmander": no such model, its own kept */
+    assert(Cards_ModelId(23) == 40);
+    model_count_here = 0;
+    assert(!Cards_HasModel(20));               /* a model no longer there has no record */
+    Json_Free(model_bases[0]);
+}
+
 static void reference_overflow(void)
 {
     char error[128];
@@ -708,6 +766,7 @@ int main(void)
 
     magic_conversions();
     trap_conversions();
+    mod_models();
     monster_effect_entries();
     monster_effect_for_each();
     if (LONG_MAX > INT_MAX) monster_effect_type_overflow();

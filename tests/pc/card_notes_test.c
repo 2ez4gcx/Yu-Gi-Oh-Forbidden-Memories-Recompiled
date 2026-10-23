@@ -17,6 +17,14 @@ void Log_Printf(LogChannel channel, const char *format, ...)
     (void)channel;
     (void)format;
 }
+/* No mod adds a battle model here (mods.c's "models"). */
+int Mods_ModelCount(void) { return 0; }
+int Mods_Model(int i, const char **name, const struct JsonValue **base, int *mod)
+{
+    (void)i; (void)name; (void)base; (void)mod;
+    return -1;
+}
+
 void Mods_Note(const char *id, const char *format, ...)
 {
     (void)id;

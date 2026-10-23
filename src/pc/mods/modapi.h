@@ -59,6 +59,8 @@
  *  19  (held for the extended monster effects, PR #391)
  *  20  "fields" and the "change_field" monster effect (manifest only); no
  *      host layout or event change
+ *  21  "models": battle models a mod adds, and a card's "model" naming one
+ *      (manifest only); no host layout or event change
  * A data mod declares its required version with min_api in mod.json. */
 #include "mod_types.h"
 

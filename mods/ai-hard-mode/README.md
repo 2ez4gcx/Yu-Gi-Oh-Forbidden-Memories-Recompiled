@@ -16,7 +16,7 @@ Mods window and apply to subsequent decisions.
 | Search fusion chains | Include fusion and equip chains in planned hand plays. Requires Plan hand plays. |
 | Choose guardian stars | Compare both stars for new monster plays, including when using the original hand script. |
 | Plan attack sequences | Search attack orders, preserving stronger attackers when an economical attacker suffices. Check winning sequences before fixed wall-card defense. |
-| Situational defense | Compare the predicted damage and loss in attack versus defense; when they are equal (nothing visible can attack, or Swords of Revealing Light holds the opponent through its next turn) a monster with more DEF than ATK takes defense. Off retains the original wall/position policy. |
+| Situational defense | Compare the predicted damage and loss in attack versus defense; when they are equal (nothing visible can hurt it, or Swords of Revealing Light holds the opponent through its next turn) a monster with more DEF than ATK takes defense. Off retains the original wall/position policy. |
 | Smarter spell timing | Evaluate burn, healing, removal, equips, terrain, Swords, reveal, Stop Defense and available rituals. Unknown effects stay set. |
 | Use effective stats | Use current field modifiers and project terrain onto candidate monsters. Off scores field cards using their printed stats. |
 | Allow equal-power trades | Include equal-ATK trades when the sequence is valuable. |

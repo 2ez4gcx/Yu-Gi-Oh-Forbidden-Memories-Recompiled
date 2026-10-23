@@ -39,6 +39,7 @@ typedef struct Entry {
     int source_x, source_y, source_w, source_h;
     int source_grid_w, source_grid_h; /* source coordinates' reference grid, or 0 for literal pixels */
     unsigned group; /* 0 global, otherwise the selected logical field bank */
+    int kept;       /* a disc image a data mod declared, back after every reload (kept) */
     struct Decode *decode; /* the read whose image and texels these are (admit); NULL: its own */
 } Entry;
 static void entry_release(Entry *entry);
@@ -96,6 +97,11 @@ typedef struct Block {
 } Block;
 static Entry *made;
 static int made_count;
+/* Disc images a data mod declared (TexturePack_AddDiscImageGroup: a field's
+ * board picture), kept the same way: a reload of the packs (a texture-pack
+ * mod toggled, an HD pack setting changed) gets them back. */
+static Entry *kept;
+static int kept_count;
 static Block *blocks;
 static int block_count;
 static uint32_t made_next = TEXTURE_MADE_BASE;
@@ -726,6 +732,48 @@ int TexturePack_ImageSize(const char *path, int *width, int *height)
     return 1;
 }
 
+/* A copy of `entry`, before its pixels load, in `kept`. 0 out of memory. */
+static int keep_disc_image(const Entry *entry)
+{
+    Entry *more = realloc(kept, (size_t)(kept_count + 1) * sizeof(*kept));
+    if (!more) return 0;
+    kept = more;
+    kept[kept_count] = *entry;
+    kept[kept_count].file = strdup(entry->file);
+    if (!kept[kept_count].file) return 0;
+    kept[kept_count].kept = 1;
+    kept_count++;
+    entries[entry_count - 1].kept = 1;
+    return 1;
+}
+
+/* The kept disc images joined to the entries again, each read now, as
+ * TexturePack_AddDiscImageGroup reads them (a board upload may come before
+ * any lazy read could). 0 out of memory. */
+static int add_kept(void)
+{
+    Entry *more;
+    int i;
+    if (!kept_count) return 1;
+    more = realloc(entries, (size_t)(entry_count + kept_count) * sizeof(*entries));
+    if (!more) return 0;
+    entries = more;
+    for (i = 0; i < kept_count; i++) {
+        Entry *entry = &entries[entry_count];
+        *entry = kept[i];
+        entry->position = entry_count;
+        entry->file = strdup(kept[i].file);
+        if (!entry->file) return 0;
+        entry_count++;
+        if (!load_pixels(entry)) {
+            entry_count--;
+            free(entry->file);
+            entry_release(entry);
+        }
+    }
+    return 1;
+}
+
 int TexturePack_AddDiscImageGroup(unsigned group, const char *file, const char *archive, unsigned offset, int words,
                                   int rows, int bpp, unsigned clut_offset, int clut_entries, int stride,
                                   int crop_left, int crop_width, int source_x, int source_y, int source_w,
@@ -766,6 +814,11 @@ int TexturePack_AddDiscImageGroup(unsigned group, const char *file, const char *
     if (!more) { free(entry.file); return 0; }
     entries = more;
     entries[entry_count++] = entry;
+    if (!keep_disc_image(&entry)) {
+        entry_count--;
+        free(entry.file);
+        return 0;
+    }
     /* Field art must be ready before the very first terrain package upload:
      * unlike a later field-card effect, Normal has no subsequent transfer
      * that could repaint a lazily decoded replacement. */
@@ -777,6 +830,7 @@ int TexturePack_AddDiscImageGroup(unsigned group, const char *file, const char *
         free(entries[entry_count].file);
         free(entries[entry_count].row_offsets);
         entry_release(&entries[entry_count]);
+        free(kept[--kept_count].file);
         return 0;
     }
     return install();
@@ -1625,6 +1679,8 @@ void TexturePack_RemoveEntriesFrom(unsigned mark)
     int i;
     if ((int)mark >= entry_count) return;
     for (i = (int)mark; i < entry_count; i++) {
+        /* Added last, so their kept copies are the last ones too. */
+        if (entries[i].kept && kept_count) free(kept[--kept_count].file);
         free(entries[i].file);
         free(entries[i].row_offsets);
         entry_release(&entries[i]);
@@ -2663,8 +2719,9 @@ void TexturePack_Unload(void)
     waiting_count = 0;
     generation++;
     map_generation++;
-    /* The images the port made stay: they are no pack's. */
-    if (made_count && (!add_made(0) || !install())) free_entries();
+    /* The images the port made stay: they are no pack's. So do the disc
+     * images a data mod declared (a field's board picture). */
+    if ((made_count || kept_count) && (!add_made(0) || !add_kept() || !install())) free_entries();
 }
 
 int TexturePack_EntryFor(int page_x, int page_y, int depth, int clut_x, int clut_y, int u, int v)

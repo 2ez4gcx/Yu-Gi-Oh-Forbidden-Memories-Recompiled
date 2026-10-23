@@ -255,7 +255,7 @@ static int guarded(const HmBoard *b)
         power[j] = p;
     }
     if (falls) for (i = mine; i < n; i++) hit += power[i];
-    return loss + hit + (hit >= b->lp ? HM_WIN / 2 : 0);
+    return loss + hit + (hit > 0 && hit >= b->lp ? HM_WIN / 2 : 0);
 }
 
 /* Returns utility and an own-field target (equips only); *first is set when

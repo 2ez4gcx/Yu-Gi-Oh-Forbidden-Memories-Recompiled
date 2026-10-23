@@ -166,7 +166,10 @@ static HmBoard board(const HmOptions *o)
     b.max_lp = D_800E9FF0[side].max_life_points;
     b.enemy_lp = D_800E9FF0[side ^ 1].life_points.unsigned_value;
     b.pinned = D_800E9FF0[side].swords_turns_remaining != 0;
-    b.enemy_pinned = D_800E9FF0[side ^ 1].swords_turns_remaining != 0;
+    /* The opponent's count drops at the start of its own turn
+       (DuelScene_UpdateDrawPhase), so at 1 it attacks again on its next
+       turn. */
+    b.enemy_pinned = D_800E9FF0[side ^ 1].swords_turns_remaining > 1;
     for (i = 0; i < 5; i++) {
         b.own[i] = snapshot(1 + i, o->effective, 0);
         b.enemy[i] = snapshot(56 + i, o->effective, 1);
@@ -253,9 +256,10 @@ static s32 run(void)
     if (!d.result) return ((s32 (*)(void))original_run)();
     memcpy(D_800EAE88, d.selection, 12);
     if (setting("trace", 0, 0, 1))
-        host->log(host, "opponent=%d phase=%s result=%d card=%d target=%d score=%d nodes=%d",
+        host->log(host, "opponent=%d phase=%s result=%d card=%d target=%d defense=%d score=%d nodes=%d",
                   gDuel_bOpponentID, hand ? "hand" : "field", d.result,
-                  hand ? d.selection[0] : d.selection[9], hand ? d.selection[6] : d.selection[10], d.score, d.nodes);
+                  hand ? d.selection[0] : d.selection[9], hand ? d.selection[6] : d.selection[10],
+                  hand ? 0 : d.selection[11], d.score, d.nodes);
     return d.result;
 }
 

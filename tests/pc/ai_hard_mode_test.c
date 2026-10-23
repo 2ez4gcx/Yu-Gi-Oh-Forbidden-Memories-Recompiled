@@ -59,6 +59,15 @@ static void tactical_cases(void)
     d = Hm_PlanField(&b,&o,&rules,0); assert(d.selection[11] == 1);
     b.own[0].flags |= HM_USED;
     d = Hm_PlanField(&b,&o,&rules,0); assert(d.result == 3);
+    /* Equally safe stances (an empty or pinned opponent): a wall takes
+       defense, an attacker keeps attack. */
+    b = empty(); b.own[0] = monster(2, 0, 3000);
+    d = Hm_PlanField(&b,&o,&rules,0); assert(d.selection[9] == 1 && d.selection[11] == 1);
+    b.own[0] = monster(2, 1800, 1000); b.pinned = 1;
+    d = Hm_PlanField(&b,&o,&rules,0); assert(d.selection[9] == 1 && d.selection[11] == 0);
+    b.pinned = 0;
+    b.own[0] = monster(2, 500, 3500); b.enemy[0] = monster(20,2600,1000); b.enemy_pinned = 1;
+    d = Hm_PlanField(&b,&o,&rules,0); assert(d.selection[9] == 1 && d.selection[11] == 1);
 
     b = empty(); b.enemy[0] = monster(20,2100,1000); b.enemy[0].star = 3;
     assert(Hm_ChooseStar(&b,monster(10,1800,1000),0) == 1);

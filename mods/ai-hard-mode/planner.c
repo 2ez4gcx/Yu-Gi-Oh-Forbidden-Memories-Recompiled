@@ -311,10 +311,15 @@ HmDecision Hm_PlanField(const HmBoard *b, const HmOptions *o, const HmRules *r,
     if (best.result) return best;
     if (retail && !o->defense) { best.result = 3; return best; }
     for (i = 0; i < 5; i++) if (b->own[i].id && !(b->own[i].flags & HM_USED)) {
+        HmCard c = b->own[i];
+        int down = safety(b, c, 1), up = safety(b, c, 0);
         best.result = 2;
         best.selection[9] = i + 1;
+        /* Equally safe (nothing visible can attack): the stronger stance,
+           since what comes down next turn is unknown and a monster in
+           defense still attacks (the game turns it first). */
         best.selection[11] = o->defense ?
-            safety(b, b->own[i], 1) < safety(b, b->own[i], 0) : !stays(b->own[i].effect);
+            down < up || (down == up && c.defense > c.attack) : !stays(c.effect);
         return best;
     }
     best.result = 3;

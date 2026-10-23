@@ -159,6 +159,11 @@ int main(void)
     hidden_mode = 2; b = board(&o); assert(b.enemy[0].id == 999 && b.enemy[0].attack == 9999);
     assert(hidden_lookups == 1);
     D_800E9FF0[1].swords_turns_remaining = 2; b = board(&o); assert(b.pinned && !b.enemy_pinned);
+    /* The opponent's last locked turn is behind it at 1: its count drops
+       before it plays. */
+    D_800E9FF0[0].swords_turns_remaining = 2; b = board(&o); assert(b.enemy_pinned);
+    D_800E9FF0[0].swords_turns_remaining = 1; b = board(&o); assert(!b.enemy_pinned);
+    D_800E9FF0[0].swords_turns_remaining = 0;
     hidden_mode = 1;
     for (i = 0; i < 5; i++) D_801A8000[i] = i;
     gAiScript_aMemory[2] = 123;

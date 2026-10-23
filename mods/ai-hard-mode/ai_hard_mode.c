@@ -162,6 +162,8 @@ static HmBoard board(const HmOptions *o)
     HmBoard b = {0};
     int i, side = D_8009B1D5;
     b.hand_count = window(); b.terrain = gDuel_bTerrain;
+    b.spellbinding = (int)Tables_Value(TABLES_VALUE_SPELLBINDING, 500);
+    b.shadow_spell = (int)Tables_Value(TABLES_VALUE_SHADOW_SPELL, 1000);
     b.lp = D_800E9FF0[side].life_points.unsigned_value;
     b.max_lp = D_800E9FF0[side].max_life_points;
     b.enemy_lp = D_800E9FF0[side ^ 1].life_points.unsigned_value;

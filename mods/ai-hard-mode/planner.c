@@ -136,7 +136,7 @@ static int attack_options(AttackSearch *s, unsigned used, unsigned dead, Attack 
                 /* A declared risk policy, never a peek at the hidden card. */
                 if (!s->o->blind_risk || a.attack < 3000 - s->o->blind_risk * 20) continue;
                 move.uncertain = 1;
-                move.gain = 100 + s->o->blind_risk * 3 - exposed(s->b, a, dead);
+                move.gain = 100 + s->o->blind_risk * 3;
             } else {
                 diff = a.attack + Hm_StarBonus(a.star, e.star) -
                     ((e.flags & HM_DEFENSE) ? e.defense : e.attack);

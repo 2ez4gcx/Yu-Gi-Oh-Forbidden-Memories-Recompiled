@@ -25,7 +25,7 @@ Mods window and apply to subsequent decisions.
 | Hidden-card knowledge | Original opponent knowledge, no hidden stats, or knowledge of hidden stats for every opponent. |
 | Maximum hand materials | 2–5 hand cards in a planned combination, optionally with an existing field monster. |
 | Search budget | Caps fusion probes and attack-search nodes. Default 6,000; maximum 20,000. Small spell comparisons use separately bounded searches of at most 128 nodes each. |
-| Face-down attack risk | A heuristic willingness setting, not a random-roll percentage. Zero avoids blind attacks; higher values lower the attack-strength threshold. |
+| Face-down attack risk | A heuristic willingness setting, not a random-roll percentage. Zero avoids blind attacks; higher values lower the attack-strength threshold. An attack on a face-down card is weighed by this setting alone, without the cost of leaving the attacker in attack position. |
 | Material preservation | Penalty per hand card spent; higher values prefer shorter combinations. |
 | Log AI decisions | Logs opponent, phase, selection, utility score and main search-node count on the `mods` channel. |
 

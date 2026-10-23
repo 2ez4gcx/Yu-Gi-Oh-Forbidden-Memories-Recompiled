@@ -166,6 +166,14 @@ void Fields_Activate(int field)
     TexturePack_SelectGroup(field > FIELDS_RETAIL ? (unsigned)field : 0);
 }
 int Fields_Active(void) { return active_field; }
+/* A duel that starts on `field` (a tower floor's): active at once, with no
+ * terrain effect of its own to wait for, so the first field spell played
+ * makes it stale (Fields_Observe). */
+void Fields_Start(int field)
+{
+    Fields_Activate(field);
+    active_pending = 0;
+}
 /* func_80024DC8 (a new duel's common setup, every entry point) calls this
  * the moment it resets gDuel_bTerrain: the field bank otherwise has no
  * signal that a new duel even started, and active_field would carry a

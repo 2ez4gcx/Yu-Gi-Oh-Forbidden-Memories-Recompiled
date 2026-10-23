@@ -120,6 +120,11 @@ s32 Duel_GetTerrainBoost(s32 cardType)
     if (Tables_TerrainBonus(Fields_Active() >= 0 ? Fields_Active() : gDuel_bTerrain[0], cardType, &bonus)) {
         return bonus;
     }
+    /* An added field only borrows its carrier's board: its bonuses are the
+       mod's terrain_bonus alone, never the carrier's disc row. */
+    if (Fields_Active() > FIELDS_RETAIL) {
+        return 0;
+    }
 #endif
 
     if (gDuel_bTerrain[0] == 0 || cardType >= CARD_TYPE_MAGIC) {

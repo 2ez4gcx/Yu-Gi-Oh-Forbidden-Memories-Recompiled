@@ -31,6 +31,9 @@ const char *Fields_Picture(int field);
 /* The logical mod field and the retail terrain package it borrows for art. */
 void Fields_Activate(int field);
 int Fields_Active(void);
+/* A duel begun on `field`, as a tower floor names it: active with no field
+ * spell's effect pending. */
+void Fields_Start(int field);
 /* The duel's own setup (func_80024DC8, every entry point) calls this the
  * moment it resets gDuel_bTerrain for a new duel, so Fields_Active cannot
  * still report a previous duel's field. */

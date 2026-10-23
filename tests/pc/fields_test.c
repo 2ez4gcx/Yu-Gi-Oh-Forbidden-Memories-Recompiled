@@ -178,6 +178,13 @@ int main(void)
     Fields_Observe();
     assert(Fields_Active() == -1 && selected_group == 0);
 
+    /* A tower floor's added field: active from the start, and the first
+       field spell played makes it stale, not confirms it. */
+    Fields_Start(7);
+    assert(Fields_Active() == 7 && selected_group == 7 && Fields_Carrier(7) == 1);
+    Fields_Observe();
+    assert(Fields_Active() == -1 && selected_group == 0);
+
     Fields_Clear();
     return 0;
 }

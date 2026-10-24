@@ -353,17 +353,17 @@ R2, R1 and START down the top right, each a frame 1.6 buttons wide; the
 D-pad in the bottom left corner, its arrows in a ring 3.2 buttons across,
 and the four face buttons in the bottom right; the picture's middle is
 left clear, and on a phone the corners fall in the black bars beside the
-4:3 picture. It is drawn see-through (`touch_pad_art.c`): dark frames and
-rings with a light edge, laid over the picture at **View > Touch controls
-> Opacity** (`touch_opacity`, `MEMORIES_TOUCH_OPACITY`: 25% by default,
-50% or 75%, any 10-100 in the file); a button held is twice as solid and
-lighter. Each part is drawn whole into a layer first, so its edge, fill and
-word fade together. In them are the game's own pictures, cut off the disc
-from the boot package the game keeps in VRAM (`cards/disc_art.h`): the
-round Cross, Circle, Triangle and Square and the boxed arrows (Left is
-Right's, turned round), drawn as shapes where a disc does not have them;
-L1/L2/R1/R2, SELECT and START are words in the game text's font
-(`overlay_text.h`). Automatic shows it once
+4:3 picture. It is drawn see-through (`touch_pad_art.c`), in one grey
+scale, laid over the picture at **View > Touch controls > Opacity**
+(`touch_opacity`, `MEMORIES_TOUCH_OPACITY`: 25% by default, 50% or 75%,
+any 10-100 in the file); a button held is twice as solid and lighter.
+Frames and the face buttons' discs are dark with a light edge; the
+D-pad's arrows are solid triangles in dark discs inside a light ring; the
+face buttons' marks are outlines (triangle, circle, cross, square), with
+none of the PlayStation's colours. Everything is drawn (no picture of the
+game's), and each part is drawn whole into a layer first, so its edge,
+fill and mark fade together. L1/L2/R1/R2, SELECT and START are words in
+the game text's font (`overlay_text.h`). Automatic shows it once
 the screen is touched (that touch presses nothing) and hides it when a key or
 a controller button is pressed. Several fingers work at once; a finger that
 lands on the pad stays the pad's while it slides (the D-pad goes by the angle

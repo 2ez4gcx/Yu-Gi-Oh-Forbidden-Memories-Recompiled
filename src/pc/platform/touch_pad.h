@@ -7,7 +7,7 @@
  * three in the middle of the top edge: MENU (the menu bar's Game menu),
  * STATES (its File menu: save and load a state, the state slot) and SPEED
  * (Game speed, one step of x1 to x4 a tap). It is drawn see-through, in
- * frames with the game's own button pictures in them (touch_pad_art.c). It
+ * grey frames and discs with plain marks in them (touch_pad_art.c). It
  * feeds the first controller's bits beside the keyboard and the pads, as
  * the button it shows (Cross is Cross, whatever View > Japanese buttons
  * says), and a press shorter than a frame still counts once, as a key's does

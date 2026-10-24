@@ -11,5 +11,7 @@
 /* Draws the pad where touch_pad.c has laid it out (nothing while hidden),
  * and gives the bounds it covered (all 0 when nothing). */
 void TouchPadArt_Draw(MenuCanvas *canvas, int *x, int *y, int *w, int *h);
+/* Frees the layer the pad is drawn in; the next draw makes it again. */
+void TouchPadArt_Reset(void);
 
 #endif

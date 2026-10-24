@@ -23,11 +23,17 @@ static const char *const labels[TOUCH_BUTTONS] = {
 #define INK 0xE6E7EBu
 
 /* The layer each part is drawn into before it is laid over the canvas, the
- * window's size; it lives as long as the game. */
+ * window's size. */
 static struct {
     uint32_t *pixels;
     int width, height;
 } layer;
+
+void TouchPadArt_Reset(void)
+{
+    free(layer.pixels);
+    memset(&layer, 0, sizeof(layer));
+}
 
 /* Shapes, by their distance from each pixel's middle (negative inside), with
  * a pixel of soft edge. */

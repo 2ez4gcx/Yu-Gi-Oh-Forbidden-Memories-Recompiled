@@ -303,9 +303,12 @@ static Menu submenus[SUB_COUNT] = {
     {"Touch controls", {{"Automatic (after a touch)", 0, ITEM_RADIO, 0, SET_TOUCH_PAD, 0},
                         {"Show", 0, ITEM_RADIO, 0, SET_TOUCH_PAD, 1},
                         {"Hide", 0, ITEM_RADIO, 0, SET_TOUCH_PAD, 2},
-                        {"Opacity 25%", 0, ITEM_RADIO, 0, SET_TOUCH_OPACITY, 25, ITEM_GROUP_BREAK},
+                        {"Style: Game", 0, ITEM_RADIO, 0, SET_TOUCH_STYLE, 0, ITEM_GROUP_BREAK},
+                        {"Style: Simple", 0, ITEM_RADIO, 0, SET_TOUCH_STYLE, 1},
+                        {"Opacity: style's own", 0, ITEM_RADIO, 0, SET_TOUCH_OPACITY, 0, ITEM_GROUP_BREAK},
+                        {"Opacity 25%", 0, ITEM_RADIO, 0, SET_TOUCH_OPACITY, 25},
                         {"Opacity 50%", 0, ITEM_RADIO, 0, SET_TOUCH_OPACITY, 50},
-                        {"Opacity 75%", 0, ITEM_RADIO, 0, SET_TOUCH_OPACITY, 75}}, 6},
+                        {"Opacity 75%", 0, ITEM_RADIO, 0, SET_TOUCH_OPACITY, 75}}, 9},
     /* Android (android.c, Android_ApplyScreenRotation): turned over with the
      * phone by its sensor, or only as the system's auto-rotate allows. */
     {"Screen rotation", {{"Turn with the phone", 0, ITEM_RADIO, 0, SET_SCREEN_ROTATION, 0},

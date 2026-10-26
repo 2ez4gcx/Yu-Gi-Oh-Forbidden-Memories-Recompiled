@@ -2162,16 +2162,19 @@ static void pump(void)
     if (mods_window && mods_dirty) draw_mods();
     mods_dirty = 0;
     if (TouchPad_SetMode(Settings_Get(SET_TOUCH_PAD))) menu_dirty = 1;
+    if (TouchPad_SetStyle(Settings_Get(SET_TOUCH_STYLE))) menu_dirty = 1;
     /* Once per pump, after every event of it: SDL delivers a tap as finger
      * events and mouse events made of them, and the pad yielding or coming
      * back between the two would hand one half to the menu and the other to
-     * the pad. MENU opens the Game menu and STATES the File menu (save and
-     * load a state, its slot); SPEED steps Game speed through x1 to x4, back
-     * to x1 after x4 or from any other speed, and saves it as the menu does.
-     * While a menu, a notice or the bar drawn over the picture is up, the
-     * pad steps aside (touch_pad.h). */
+     * the pad. MENU opens the first menu (Game's style) or the Game menu
+     * (Simple's), and STATES the File menu (save and load a state, its
+     * slot); SPEED steps Game speed through x1 to x4, back to x1 after x4 or
+     * from any other speed, and saves it as the menu does. While a menu, a
+     * notice or the bar drawn over the picture is up, the pad steps aside
+     * (touch_pad.h). */
     if (TouchPad_TakeMenu()) {
-        Menu_OpenAt(MENU_BAR_GAME);
+        if (TouchPad_Style() == TOUCH_STYLE_SIMPLE) Menu_OpenAt(MENU_BAR_GAME);
+        else Menu_Open();
         menu_dirty = 1;
     }
     if (TouchPad_TakeStates()) {

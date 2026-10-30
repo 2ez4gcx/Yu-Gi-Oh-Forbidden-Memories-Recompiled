@@ -380,7 +380,8 @@ two styles, **View > Touch controls > Style** (`touch_style`,
   the game text's font (`overlay_text.h`). A column's frames take a touch
   between them by the nearer middle. **The top row**, three frames in the
   middle of the top edge, presses no pad button; each takes its tap as the
-  finger lifts on it (so one brushing SPEED changes nothing), in the event
+  finger lifts on it (so one brushing SPEED changes nothing, and a touch
+  the system cancels, `TOUCH_FINGER_CANCEL`, taps nothing), in the event
   pump (`TouchPad_TakeMenu`, `TouchPad_TakeStates`, `TouchPad_TakeSpeed`):
   **MENU** (a cog) opens the menu bar's Game menu and **STATES** (a
   triangle pointing down) its File menu, Save state, Load state and the

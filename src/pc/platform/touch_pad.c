@@ -429,9 +429,10 @@ int TouchPad_Finger(int kind, uint64_t id, int x, int y)
         finger->bits = press_at(finger, x, y);
     } else {
         /* Simple's top row takes a tap as the finger lifts on the button it
-         * landed on, so one brushing SPEED changes nothing. */
-        if (style == TOUCH_STYLE_SIMPLE && finger->zone == ZONE_BUTTON && TOP_ROW(finger->button) &&
-            in_button(finger->button, x, y))
+         * landed on, so one brushing SPEED changes nothing; a touch the
+         * system cancelled taps nothing. */
+        if (kind == TOUCH_FINGER_UP && style == TOUCH_STYLE_SIMPLE && finger->zone == ZONE_BUTTON &&
+            TOP_ROW(finger->button) && in_button(finger->button, x, y))
             row_taps[finger->button]++;
         memset(finger, 0, sizeof(*finger));
     }

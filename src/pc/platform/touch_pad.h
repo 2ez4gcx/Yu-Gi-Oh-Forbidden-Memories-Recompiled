@@ -40,7 +40,7 @@ typedef enum {
     TOUCH_MENU, TOUCH_STATES, TOUCH_SPEED,
     TOUCH_BUTTONS
 } TouchButton;
-enum { TOUCH_FINGER_DOWN, TOUCH_FINGER_MOVE, TOUCH_FINGER_UP };
+enum { TOUCH_FINGER_DOWN, TOUCH_FINGER_MOVE, TOUCH_FINGER_UP, TOUCH_FINGER_CANCEL };
 
 /* The mode (TOUCH_PAD_*, the setting). 1 when what is shown changed. */
 int TouchPad_SetMode(int mode);
@@ -72,8 +72,10 @@ int TouchPad_FreeSpan(int *left, int *right);
 int TouchPad_TopRowBottom(void);
 /* A finger in window coordinates. A finger that lands on the pad stays the
  * pad's until it lifts (sliding changes the direction or the button); one
- * that lands elsewhere is not the pad's at all. 1 when the pad's look
- * changed (shown, or a button pressed or let go). */
+ * that lands elsewhere is not the pad's at all. A cancelled one (the system
+ * took the touch: a notification shade pulled down, a gesture) lets go as
+ * a lift does but taps nothing. 1 when the pad's look changed (shown, or a
+ * button pressed or let go). */
 int TouchPad_Finger(int kind, uint64_t finger, int x, int y);
 /* A key or a controller button was pressed: Automatic hides the pad. 1 when
  * that changed what is shown. */

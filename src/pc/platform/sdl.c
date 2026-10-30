@@ -1959,14 +1959,16 @@ static void pump(void)
             event.type == SDL_EVENT_FINGER_UP || event.type == SDL_EVENT_FINGER_CANCELED) {
             int kind = event.type == SDL_EVENT_FINGER_DOWN     ? TOUCH_FINGER_DOWN
                        : event.type == SDL_EVENT_FINGER_MOTION ? TOUCH_FINGER_MOVE
-                                                               : TOUCH_FINGER_UP;
+                       : event.type == SDL_EVENT_FINGER_UP     ? TOUCH_FINGER_UP
+                                                               : TOUCH_FINGER_CANCEL;
             int fx = (int)(event.tfinger.x * (float)layout.win_w), fy = (int)(event.tfinger.y * (float)layout.win_h);
             if (SDL_GetWindowFromEvent(&event) == window &&
                 TouchPad_Finger(kind, (uint64_t)event.tfinger.fingerID, fx, fy))
                 menu_dirty = 1;
             if (kind != TOUCH_FINGER_MOVE)
                 LOG(LOG_INPUT, "finger %d %s at %d,%d: touch pad %s", (int)event.tfinger.fingerID,
-                    kind == TOUCH_FINGER_DOWN ? "down" : "up", fx, fy, TouchPad_Shown() ? "shown" : "hidden");
+                    kind == TOUCH_FINGER_DOWN ? "down" : kind == TOUCH_FINGER_UP ? "up" : "cancelled", fx, fy,
+                    TouchPad_Shown() ? "shown" : "hidden");
             continue;
         }
         /* The mouse events SDL makes of a touch: on the pad they are the

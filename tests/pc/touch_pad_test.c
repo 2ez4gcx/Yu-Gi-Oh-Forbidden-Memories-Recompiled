@@ -96,6 +96,10 @@ int main(void)
     TouchPad_Finger(TOUCH_FINGER_DOWN, 3, x, y);
     TouchPad_Finger(TOUCH_FINGER_UP, 3, x, y);
     assert(TouchPad_Update() == TouchPad_Bit(TOUCH_CROSS) && TouchPad_Update() == 0);
+    /* A touch the system cancels lets go, as a lift does. */
+    TouchPad_Finger(TOUCH_FINGER_DOWN, 3, x, y);
+    assert(TouchPad_Update() == TouchPad_Bit(TOUCH_CROSS));
+    assert(TouchPad_Finger(TOUCH_FINGER_CANCEL, 3, x, y) && TouchPad_Update() == 0);
 
     /* Two fingers: the D-pad and a face button together; a face finger
      * slides to the nearest button. */
@@ -213,7 +217,8 @@ int main(void)
                    TouchPad_TakeSpeed() == (k == 2));
             assert(!TouchPad_TakeMenu() && !TouchPad_TakeStates() && !TouchPad_TakeSpeed());
             /* Brushed: lifted off the button, or slid onto it from the
-             * picture (a finger that is not the pad's), it does nothing. */
+             * picture (a finger that is not the pad's), it does nothing;
+             * nor does a touch on it the system cancels. */
             TouchPad_Finger(TOUCH_FINGER_DOWN, 13, x, y);
             TouchPad_Finger(TOUCH_FINGER_MOVE, 13, 1140, 540);
             assert(!TouchPad_Held(row[k]));
@@ -221,6 +226,9 @@ int main(void)
             assert(!TouchPad_Finger(TOUCH_FINGER_DOWN, 14, 1140, 540));
             TouchPad_Finger(TOUCH_FINGER_MOVE, 14, x, y);
             TouchPad_Finger(TOUCH_FINGER_UP, 14, x, y);
+            assert(TouchPad_Finger(TOUCH_FINGER_DOWN, 15, x, y) && TouchPad_Held(row[k]));
+            assert(TouchPad_Finger(TOUCH_FINGER_CANCEL, 15, x, y) && !TouchPad_Held(row[k]));
+            assert(!TouchPad_Finger(TOUCH_FINGER_UP, 15, x, y)); /* gone: a later lift is no one's */
             assert(!TouchPad_TakeMenu() && !TouchPad_TakeStates() && !TouchPad_TakeSpeed());
             TouchPad_Rect(row[k], &mx, &my, &mw, &mh);
             TouchPad_Rect(TOUCH_L2, &lx, &ly, &lw, &lh);
